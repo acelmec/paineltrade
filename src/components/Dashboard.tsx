@@ -444,8 +444,9 @@ export const Dashboard: React.FC = () => {
         </div>
 
         {/* Coluna 4: IA Decision Card & Delta Gauge - Largura 4/12 */}
-        <div className="col-span-12 lg:col-span-4">
-          <div className={`relative glass p-3 rounded-lg border-2 ${!aiEnabled ? 'border-yellow-500/40' : aiResult ? getSignalBorderClass(aiResult.sinal) : 'border-slate-800'} h-full flex flex-col justify-between`}>
+        <div className="col-span-12 lg:col-span-4 flex flex-col gap-3">
+          {/* Card Decisão IA */}
+          <div className={`relative flex-1 glass p-3 rounded-lg border-2 ${!aiEnabled ? 'border-yellow-500/40' : aiResult ? getSignalBorderClass(aiResult.sinal) : 'border-slate-800'} flex flex-col justify-between min-h-[180px]`}>
             {/* Overlay de IA Desativada */}
             {!aiEnabled && (
               <div className="absolute inset-0 bg-slate-950/85 border border-yellow-500/40 rounded-lg flex flex-col items-center justify-center z-20">
@@ -469,37 +470,39 @@ export const Dashboard: React.FC = () => {
               <button
                 onClick={runManualAIAnalysis}
                 disabled={isAnalyzing || !aiEnabled}
-                className="mt-3 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded text-xs font-bold w-full transition"
+                className="mt-2.5 px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded text-xs font-bold w-full transition"
               >
                 {isAnalyzing ? 'Executando...' : '🔍 Analisar Agora'}
               </button>
 
-              <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
-                <div className="bg-slate-900 border border-slate-800 p-2 rounded">
+              <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
+                <div className="bg-slate-900 border border-slate-800 p-1.5 rounded">
                   <div className="text-[10px] text-slate-500">🎯 Alvo</div>
                   <div className="text-green-400 font-mono font-bold">{aiResult?.alvo || '--'}</div>
                 </div>
-                <div className="bg-slate-900 border border-slate-800 p-2 rounded">
+                <div className="bg-slate-900 border border-slate-800 p-1.5 rounded">
                   <div className="text-[10px] text-slate-500">🛑 Stop</div>
                   <div className="text-red-400 font-mono font-bold">{aiResult?.stop || '--'}</div>
                 </div>
               </div>
 
               {aiResult?.resumo && (
-                <div className="mt-2 text-[10px] text-slate-300 text-left bg-slate-900/50 p-2 rounded border border-slate-850 max-h-20 overflow-y-auto leading-relaxed">
+                <div className="mt-2 text-[10px] text-slate-300 text-left bg-slate-900/50 p-2 rounded border border-slate-850 max-h-16 overflow-y-auto leading-relaxed">
                   {aiResult.resumo}
                 </div>
               )}
             </div>
+          </div>
 
-            {/* Delta Gauge */}
-            <div className="delta-gauge-wrap border-t border-slate-800 pt-2 mt-2">
+          {/* Delta Gauge (Sempre Visível) */}
+          <div className="glass p-3 rounded-lg border border-slate-800 flex flex-col justify-between">
+            <div className="delta-gauge-wrap !border-t-0 !pt-0 !mt-0">
               <div className="delta-gauge-labels text-[9px] flex justify-between font-bold text-slate-400">
                 <span className="text-red-400 font-bold">VENDA</span>
                 <span>DELTA</span>
                 <span className="text-green-400 font-bold">COMPRA</span>
               </div>
-              <div className="delta-gauge-bar mt-1 h-2 bg-slate-850 rounded-full relative overflow-hidden">
+              <div className="delta-gauge-bar mt-1 h-2.5 bg-slate-850 rounded-full relative overflow-hidden">
                 <div
                   className="delta-gauge-marker absolute top-0 bottom-0 w-1 bg-white shadow-md transition-all duration-350"
                   style={{ left: `${getDeltaLeft()}%` }}
@@ -510,6 +513,17 @@ export const Dashboard: React.FC = () => {
                 <span>Ratio: <strong className="text-slate-300">{marketData?.deltaRatio?.toFixed(2) || '1.00'}</strong></span>
                 <span>P/s: <strong className="text-slate-300">{marketData?.printsPerSecond || 0}</strong></span>
               </div>
+            </div>
+
+            {/* Seletor de Janelas Temporais */}
+            <div className="flex gap-1 mt-2.5 justify-center">
+              <button className="window-btn active text-[9px] px-2 py-0.5">Acumulado</button>
+              <button className="window-btn text-[9px] px-2 py-0.5">1m</button>
+              <button className="window-btn text-[9px] px-2 py-0.5">5m</button>
+              <button className="window-btn text-[9px] px-2 py-0.5">15m</button>
+            </div>
+            <div className="text-[8px] text-center text-slate-500 mt-1">
+              Janela ativa: <span className="text-blue-400 font-bold">Acumulado</span>
             </div>
           </div>
         </div>

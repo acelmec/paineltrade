@@ -8,6 +8,7 @@
     color: #e2e8f0;
     font-family: 'Segoe UI', sans-serif;
     overflow-x: hidden;
+    font-size: 110%; /* Aumenta a escala base de fontes do painel */
   }
 }
 

@@ -155,6 +155,12 @@ async function callGroqAPI(apiKey: string, model: string, prompt: string, base64
   
   const messages: any[] = [];
   
+  // Groq exige que a palavra 'json' apareça em algum lugar na lista de mensagens (geralmente nas instruções do sistema ou prompt do usuário) para usar response_format: { type: 'json_object' }
+  messages.push({
+    role: 'system',
+    content: 'Você é um analisador técnico que responde estritamente no formato JSON.'
+  });
+
   if (base64Image) {
     messages.push({
       role: 'user',
