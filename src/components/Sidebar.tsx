@@ -1,14 +1,15 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useApp } from '../context/AppContext';
 
 interface SidebarProps {
   currentPage: string;
   setCurrentPage: (page: string) => void;
+  collapsed: boolean;
+  setCollapsed: (collapsed: boolean) => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentPage, setCurrentPage }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ currentPage, setCurrentPage, collapsed, setCollapsed }) => {
   const { logout, aiEnabled, setAiEnabled, isAnalyzing, marketData } = useApp();
-  const [collapsed, setCollapsed] = useState<boolean>(false);
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', sublabel: 'Painel principal', icon: '📊' },

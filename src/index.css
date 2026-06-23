@@ -193,3 +193,41 @@ input:checked + .toggle-slider:before { transform: translateX(18px); }
 .login-error.show { display: block; }
 .login-info { margin-top: 20px; padding: 12px; background: rgba(59, 130, 246, 0.05); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 8px; font-size: 11px; color: #94a3b8; line-height: 1.5; }
 .login-info strong { color: #60a5fa; }
+
+/* Ajustes responsivos para celular (menu off-canvas deslizante) */
+@media (max-width: 768px) {
+  .side-menu {
+    left: -220px;
+    width: 220px !important;
+    transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 9998;
+  }
+  /* Quando o menu NÃO está colapsado (ou seja, está aberto no celular) */
+  .side-menu:not(.collapsed) {
+    left: 0;
+    box-shadow: 5px 0 25px rgba(0, 0, 0, 0.8);
+  }
+  /* Quando está colapsado, esconde fora da tela */
+  .side-menu.collapsed {
+    left: -220px;
+  }
+  
+  /* Ajustar o acelerômetro */
+  .gauge-container-compact {
+    width: 80px;
+    height: 40px;
+  }
+  .gauge-bg-compact {
+    width: 80px;
+    height: 40px;
+    border-radius: 40px 40px 0 0;
+  }
+  .gauge-mask-compact {
+    width: 64px;
+    height: 32px;
+    border-radius: 32px 32px 0 0;
+  }
+  .gauge-needle-compact {
+    height: 34px;
+  }
+}
