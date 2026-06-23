@@ -1,0 +1,2383 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title> Vortex AI — Gamma Scalpe v10.5</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+body { background: #0a0e1a; color: #e2e8f0; font-family: 'Segoe UI', sans-serif; overflow-x: hidden; }
+.glass { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(100, 116, 139, 0.3); }
+.side-menu { position: fixed; left: 0; top: 0; bottom: 0; width: 220px; background: rgba(15, 23, 42, 0.98); border-right: 1px solid rgba(100, 116, 139, 0.3); z-index: 1000; display: flex; flex-direction: column; transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
+.side-menu.collapsed { width: 60px; }
+.menu-text { transition: opacity 0.2s; white-space: nowrap; }
+.side-menu.collapsed .menu-text { opacity: 0; pointer-events: none; }
+.menu-item { padding: 10px 16px; cursor: pointer; transition: all 0.2s; border-left: 3px solid transparent; display: flex; align-items: center; gap: 10px; }
+.menu-item:hover { background: rgba(100, 116, 139, 0.2); border-left-color: #3b82f6; }
+.menu-item.active { background: rgba(59, 130, 246, 0.2); border-left-color: #3b82f6; }
+.menu-icon { font-size: 16px; min-width: 20px; text-align: center; }
+.menu-label { font-size: 13px; font-weight: 600; }
+.menu-sublabel { font-size: 11px; color: #94a3b8; }
+.menu-toggle { padding: 10px 16px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid rgba(100, 116, 139, 0.2); }
+.menu-toggle:hover { background: rgba(100, 116, 139, 0.15); }
+.menu-toggle-icon { font-size: 18px; min-width: 20px; text-align: center; }
+.menu-footer { margin-top: auto; padding: 12px 16px; border-top: 1px solid rgba(100, 116, 139, 0.2); }
+.btn-ia-parar { width: 100%; padding: 10px; border-radius: 6px; font-size: 12px; font-weight: bold; cursor: pointer; transition: all 0.2s; border: 1px solid #f97316; background: rgba(249, 115, 22, 0.15); color: #f97316; margin-top: 4px; display: flex; align-items: center; justify-content: center; gap: 5px; }
+.btn-ia-parar:hover { background: #f97316; color: white; }
+.btn-ia-iniciar { width: 100%; padding: 10px; border-radius: 6px; font-size: 12px; font-weight: bold; cursor: pointer; transition: all 0.2s; border: 1px solid #22c55e; background: rgba(34, 197, 94, 0.15); color: #22c55e; margin-top: 4px; display: flex; align-items: center; justify-content: center; gap: 5px; }
+.btn-ia-iniciar:hover { background: #22c55e; color: white; }
+.side-menu.collapsed .btn-ia-parar, .side-menu.collapsed .btn-ia-iniciar { padding: 10px 4px; font-size: 0; }
+.side-menu.collapsed .btn-ia-parar .btn-icon, .side-menu.collapsed .btn-ia-iniciar .btn-icon { font-size: 18px; }
+.side-menu.collapsed #cicloStatus { display: none; }
+.side-menu.collapsed #statusIndicator { display: none; }
+.main-content { margin-left: 220px; padding: 12px; transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+.main-content.expanded { margin-left: 60px; }
+.mapa-track { position: relative; height: 60px; background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%); border-radius: 8px; overflow: hidden; }
+.nivel-linha { position: absolute; top: 0; bottom: 0; width: 2px; opacity: 0.85; }
+.nivel-linha.hvl { background: #a855f7; } .nivel-linha.call { background: #ef4444; } .nivel-linha.put { background: #22c55e; }
+.nivel-linha.max1d { background: #06b6d4; } .nivel-linha.min1d { background: #eab308; } .nivel-linha.prev { background: #f97316; }
+.nivel-linha.prevH { background: #f87171; } .nivel-linha.prevL { background: #4ade80; } .nivel-linha.bl { background: #3b82f6; }
+.nivel-linha.gex { background: #a855f7; opacity: 0.4; } .nivel-linha.hvl0 { background: #c084fc; opacity: 0.7; }
+.nivel-linha.call0 { background: #fca5a5; opacity: 0.7; } .nivel-linha.put0 { background: #86efac; opacity: 0.7; }
+.nivel-linha.gwall { background: #fbbf24; opacity: 0.7; }
+.nivel-label { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 9px; font-weight: bold; padding: 1px 4px; border-radius: 3px; white-space: nowrap; z-index: 2; }
+.preco-marker { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 12px; height: 12px; background: #3b82f6; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 8px rgba(59, 130, 246, 0.8); z-index: 10; transition: left 0.5s ease; }
+.card-nivel { padding: 6px 8px; border-radius: 5px; border-left: 3px solid; cursor: pointer; user-select: none; transition: opacity 0.2s, filter 0.2s; }
+.card-nivel:hover { filter: brightness(1.2); } .card-nivel.nivel-off { opacity: 0.3; filter: grayscale(0.8); }
+.card-hvl { background: rgba(168, 85, 247, 0.15); border-color: #a855f7; } .card-call { background: rgba(239, 68, 68, 0.15); border-color: #ef4444; }
+.card-put { background: rgba(34, 197, 94, 0.15); border-color: #22c55e; } .card-max { background: rgba(6, 182, 212, 0.15); border-color: #06b6d4; }
+.card-min { background: rgba(234, 179, 8, 0.15); border-color: #eab308; } .card-ajuste { background: rgba(249, 115, 22, 0.15); border-color: #f97316; }
+.card-hvl0 { background: rgba(192, 132, 252, 0.12); border-color: #c084fc; } .card-call0 { background: rgba(252, 165, 165, 0.12); border-color: #fca5a5; }
+.card-put0 { background: rgba(134, 239, 172, 0.12); border-color: #86efac; } .card-gwall { background: rgba(251, 191, 36, 0.12); border-color: #fbbf24; }
+.card-gex { background: rgba(168, 85, 247, 0.10); border-color: #a855f7; } .card-bl { background: rgba(59, 130, 246, 0.10); border-color: #3b82f6; }
+.card-gex, .card-bl { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 6px 8px; }
+.forca-item { display: flex; align-items: center; gap: 5px; margin-bottom: 3px; padding: 4px 6px; border-radius: 4px; cursor: pointer; transition: all 0.2s; }
+.forca-item:hover { background: rgba(255, 255, 255, 0.05); } .forca-item.ativo { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); }
+.forca-item.inativo { opacity: 0.4; }
+.forca-toggle { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #64748b; display: flex; align-items: center; justify-content: center; font-size: 10px; flex-shrink: 0; }
+.forca-item.ativo .forca-toggle { background: #22c55e; border-color: #22c55e; }
+.forca-nome { font-size: 10px; font-weight: bold; width: 55px; color: #e2e8f0; flex-shrink: 0; }
+.forca-barra-container { flex: 1; height: 10px; background: #1e293b; border-radius: 5px; overflow: hidden; position: relative; display: flex; }
+.forca-barra-compra { height: 100%; background: linear-gradient(90deg, #22c55e, #16a34a); transition: width 0.5s ease; border-radius: 0 2px 2px 0; }
+.forca-barra-venda { height: 100%; background: linear-gradient(90deg, #dc2626, #ef4444); transition: width 0.5s ease; border-radius: 2px 0 0 2px; margin-left: auto; }
+.forca-percentual-compra { font-size: 10px; font-weight: bold; width: 26px; text-align: right; color: #22c55e; flex-shrink: 0; }
+.forca-percentual-venda { font-size: 10px; font-weight: bold; width: 26px; text-align: right; color: #ef4444; flex-shrink: 0; }
+#apiErrorBanner { display: none; background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.5); border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; font-size: 12px; color: #fca5a5; word-break: break-word; }
+#apiErrorBanner.show { display: block; }
+@keyframes pulseBuy { 0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); } 50% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); } }
+@keyframes pulseSell { 0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 50% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } }
+.pulse-buy { animation: pulseBuy 1.5s infinite; border-color: #22c55e !important; }
+.pulse-sell { animation: pulseSell 1.5s infinite; border-color: #ef4444 !important; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.page-section { display: none; }
+.page-section.active { display: block; }
+.preset-btn { padding: 8px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.2s; border: 1px solid; display: flex; align-items: center; gap: 8px; }
+.preset-conservador { background: rgba(168, 85, 247, 0.1); border-color: #a855f7; color: #a855f7; } .preset-conservador:hover { background: #a855f7; color: white; }
+.preset-scalper { background: rgba(34, 197, 94, 0.1); border-color: #22c55e; color: #22c55e; } .preset-scalper:hover { background: #22c55e; color: white; }
+.preset-pullback { background: rgba(6, 182, 212, 0.1); border-color: #06b6d4; color: #06b6d4; } .preset-pullback:hover { background: #06b6d4; color: white; }
+.preset-reversal { background: rgba(234, 179, 8, 0.1); border-color: #eab308; color: #eab308; } .preset-reversal:hover { background: #eab308; color: white; }
+.toggle-switch { position: relative; display: inline-block; width: 36px; height: 18px; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #475569; transition: .3s; border-radius: 18px; }
+.toggle-slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 2px; bottom: 2px; background-color: white; transition: .3s; border-radius: 50%; }
+input:checked + .toggle-slider { background-color: #22c55e; }
+input:checked + .toggle-slider:before { transform: translateX(18px); }
+.ia-disabled-overlay { display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.4); border-radius: 8px; padding: 4px 8px; text-align: center; pointer-events: none; z-index: 20; }
+.ia-disabled-badge { font-size: 11px; font-weight: bold; color: #eab308; letter-spacing: 0.05em; text-transform: uppercase; }
+#aiDecisionCard { position: relative; }
+#aiDecisionCard.ia-off { border-color: rgba(234,179,8,0.4) !important; }
+#cicloStatus { font-size: 11px; text-align: center; padding: 4px 8px; border-radius: 4px; margin-bottom: 4px; background: rgba(15,23,42,0.6); border: 1px solid rgba(100,116,139,0.2); }
+.template-badge { font-size: 10px; color: #60a5fa; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); padding: 3px 8px; border-radius: 4px; display: inline-block; margin-top: 4px; }
+.template-name { font-weight: 600; color: #93c5fd; }
+.gauge-container-compact { position: relative; width: 100%; height: 50px; margin: 0 auto; overflow: hidden; }
+.gauge-bg-compact { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 100px; height: 50px; border-radius: 50px 50px 0 0; background: linear-gradient(to right, #ef4444 0%, #f59e0b 50%, #22c55e 100%); overflow: hidden; }
+.gauge-mask-compact { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 80px; height: 40px; border-radius: 40px 40px 0 0; background: #0f172a; }
+.gauge-needle-compact { position: absolute; bottom: 0; left: 50%; width: 2px; height: 42px; background: #fff; transform-origin: bottom center; transform: rotate(-90deg); transition: transform 0.8s cubic-bezier(0.34, 1.56, 0.64, 1); border-radius: 2px; box-shadow: 0 0 4px rgba(255,255,255,0.5); }
+.gauge-center-compact { position: absolute; bottom: -3px; left: 50%; transform: translateX(-50%); width: 10px; height: 10px; background: #fff; border-radius: 50%; box-shadow: 0 0 6px rgba(255,255,255,0.8); }
+.gauge-value-compact { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); text-align: center; z-index: 5; }
+.gauge-value-number-compact { font-size: 16px; font-weight: bold; font-family: monospace; line-height: 1; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
+.gauge-labels-compact { display: flex; justify-content: space-between; font-size: 9px; margin-top: 2px; padding: 0 2px; }
+.window-btn { padding: 3px 10px; font-size: 11px; border-radius: 4px; border: 1px solid #475569; background: #1e293b; color: #94a3b8; cursor: pointer; transition: all 0.2s; }
+.window-btn:hover { background: #334155; color: #e2e8f0; }
+.window-btn.active { background: #3b82f6; border-color: #3b82f6; color: white; font-weight: bold; }
+.delta-gauge-wrap { margin-top: 12px; padding-top: 12px; border-top: 1px solid #334155; }
+.delta-gauge-bar { height: 8px; background: linear-gradient(90deg, #dc2626 0%, #f59e0b 40%, #ffffff 50%, #22c55e 60%, #16a34a 100%); border-radius: 4px; position: relative; box-shadow: inset 0 1px 3px rgba(0,0,0,0.5); }
+.delta-gauge-marker { position: absolute; top: -2px; bottom: -2px; width: 4px; background: #fff; border-radius: 2px; box-shadow: 0 0 8px rgba(255,255,255,0.8); transition: left 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.delta-gauge-labels { display: flex; justify-content: space-between; font-size: 10px; margin-top: 6px; font-weight: 600; }
+.alert-tab-btn { padding: 6px 12px; font-size: 11px; border-radius: 6px; background: #1e293b; border: 1px solid #334155; color: #94a3b8; cursor: pointer; transition: all 0.2s; }
+.alert-tab-btn.active { background: #3b82f6; border-color: #3b82f6; color: white; }
+.alert-config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 12px; }
+.alert-card { background: #1e293b; padding: 12px; border-radius: 8px; border: 1px solid #334155; }
+.alert-card label { display: block; font-size: 10px; color: #94a3b8; margin-bottom: 4px; }
+.alert-card input, .alert-card select { width: 100%; padding: 6px; background: #0f172a; border: 1px solid #475569; color: #e2e8f0; border-radius: 4px; font-size: 12px; }
+.alert-card .checkbox-group { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.alert-card .checkbox-item { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #cbd5e1; }
+.alert-card .checkbox-item input[type="checkbox"] { width: auto; }
+#alertPopup { display: none; position: fixed; bottom: 20px; right: 20px; width: 380px; background: #1e293b; border: 2px solid #ef4444; border-radius: 12px; padding: 18px; z-index: 9999; box-shadow: 0 8px 32px rgba(0,0,0,0.7); animation: slideIn 0.3s ease; }
+@keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+#alertPopup.active { display: block; }
+#alertPopup .alert-title { font-size: 14px; font-weight: bold; color: #ef4444; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+#alertPopup .alert-msg { font-size: 12px; color: #cbd5e1; margin-bottom: 10px; line-height: 1.5; }
+#alertPopup .alert-detail { font-size: 11px; color: #94a3b8; margin-bottom: 12px; padding: 8px; background: rgba(15,23,42,0.6); border-radius: 6px; border-left: 3px solid #3b82f6; max-height: 150px; overflow-y: auto; }
+#alertPopup .alert-btns { display: flex; gap: 8px; justify-content: flex-end; }
+#alertPopup button { padding: 8px 16px; border-radius: 6px; font-size: 11px; font-weight: bold; cursor: pointer; border: none; transition: all 0.2s; }
+.btn-disarm { background: #f59e0b; color: #1e293b; }
+.btn-disarm:hover { background: #d97706; }
+#imageModal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.95); z-index: 99999; justify-content: center; align-items: center; flex-direction: column; }
+#imageModal.active { display: flex; }
+#imageModal button { position: absolute; top: 20px; right: 20px; background: #ff3333; color: white; border: none; padding: 12px 24px; font-size: 16px; font-weight: bold; cursor: pointer; border-radius: 6px; z-index: 100000; transition: all 0.2s; }
+#imageModal button:hover { background: #cc0000; transform: scale(1.05); }
+#modalImagem { max-width: 95%; max-height: 90%; border: 2px solid #fff; border-radius: 8px; box-shadow: 0 0 30px rgba(0,0,0,0.8); }
+.logic-mode-toggle { display: flex; gap: 0; border-radius: 8px; overflow: hidden; border: 1px solid #475569; }
+.logic-mode-btn { padding: 8px 20px; font-size: 12px; font-weight: bold; cursor: pointer; border: none; transition: all 0.2s; background: #1e293b; color: #94a3b8; }
+.logic-mode-btn.active { background: #3b82f6; color: white; }
+.logic-mode-btn:hover:not(.active) { background: #334155; }
+.logic-status { padding: 10px 14px; border-radius: 8px; margin-top: 12px; font-size: 12px; }
+.logic-status.pending { background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.4); color: #fbbf24; }
+.logic-status.ready { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.4); color: #22c55e; }
+.logic-status.inactive { background: rgba(100, 116, 139, 0.1); border: 1px solid rgba(100, 116, 139, 0.3); color: #94a3b8; }
+.logic-condition { display: flex; align-items: center; gap: 8px; padding: 6px 10px; margin: 4px 0; border-radius: 6px; font-size: 11px; }
+.logic-condition.met { background: rgba(34, 197, 94, 0.15); border: 1px solid rgba(34, 197, 94, 0.3); color: #22c55e; }
+.logic-condition.unmet { background: rgba(100, 116, 139, 0.1); border: 1px solid rgba(100, 116, 139, 0.2); color: #64748b; }
+.logic-condition .check { font-size: 14px; }
+.log-tab-btn { padding: 5px 12px; font-size: 10px; border-radius: 5px; background: #0f172a; border: 1px solid #334155; color: #94a3b8; cursor: pointer; transition: all 0.2s; font-weight: 600; }
+.log-tab-btn.active { background: #3b82f6; border-color: #3b82f6; color: white; }
+.log-entry { padding: 4px 6px; border-radius: 4px; font-size: 10px; line-height: 1.3; border-left: 3px solid; margin-bottom: 2px; }
+.log-entry-sistema { background: rgba(100, 116, 139, 0.1); border-color: #64748b; color: #94a3b8; }
+.log-entry-alerta { background: rgba(234, 179, 8, 0.1); border-color: #eab308; color: #fbbf24; }
+.log-entry-ia { background: rgba(59, 130, 246, 0.1); border-color: #3b82f6; color: #93c5fd; }
+.log-entry-erro { background: rgba(239, 68, 68, 0.1); border-color: #ef4444; color: #fca5a5; }
+.log-entry-noticia { background: rgba(168, 85, 247, 0.1); border-color: #a855f7; color: #c084fc; }
+.log-entry .log-time { font-size: 9px; color: #64748b; margin-right: 4px; }
+.log-entry .log-prefix { font-weight: bold; margin-right: 3px; }
+.news-item { padding: 6px 8px; border-radius: 5px; margin-bottom: 4px; border-left: 3px solid; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; gap: 2px 8px; font-size: 10px; transition: all 0.2s; overflow: hidden; }
+.news-item:hover { filter: brightness(1.2); }
+.news-high { background: rgba(239, 68, 68, 0.1); border-color: #ef4444; }
+.news-medium { background: rgba(234, 179, 8, 0.1); border-color: #eab308; }
+.news-low { background: rgba(34, 197, 94, 0.1); border-color: #22c55e; }
+.news-header { grid-column: 1 / 2; grid-row: 1 / 2; display: flex; align-items: center; gap: 4px; font-weight: bold; }
+.news-countdown { grid-column: 2 / 3; grid-row: 1 / 3; font-size: 9px; font-weight: bold; padding: 2px 4px; border-radius: 3px; align-self: flex-start; white-space: nowrap; }
+.news-countdown.imminent { background: rgba(239, 68, 68, 0.3); color: #fca5a5; animation: pulse 1s infinite; }
+.news-countdown.soon { background: rgba(234, 179, 8, 0.3); color: #fbbf24; }
+.news-countdown.distant { background: rgba(100, 116, 139, 0.2); color: #94a3b8; }
+.news-countdown.passed { background: rgba(34, 197, 94, 0.2); color: #86efac; }
+.news-title { grid-column: 1 / 2; grid-row: 2 / 3; color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.news-forecast { grid-column: 1 / 2; grid-row: 2 / 3; justify-self: end; color: #94a3b8; font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+.news-country { font-size: 9px; padding: 1px 4px; border-radius: 3px; background: rgba(59, 130, 246, 0.2); color: #60a5fa; font-weight: bold; }
+.news-impact { font-size: 9px; font-weight: bold; text-transform: uppercase; }
+.news-filter-bar { display: flex; gap: 4px; flex-wrap: nowrap; margin-bottom: 6px; }
+.news-filter-btn { padding: 3px 8px; font-size: 10px; border-radius: 4px; background: #1e293b; border: 1px solid #334155; color: #94a3b8; cursor: pointer; transition: all 0.2s; }
+.news-filter-btn.active { background: #3b82f6; border-color: #3b82f6; color: white; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+.login-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, #0a0e1a 0%, #1a1f3a 100%); z-index: 99999; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(10px); }
+.login-overlay.hidden { display: none; }
+.login-card { background: rgba(15, 23, 42, 0.95); border: 2px solid rgba(59, 130, 246, 0.3); border-radius: 16px; padding: 40px; width: 90%; max-width: 420px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); }
+.login-header { text-align: center; margin-bottom: 30px; }
+.login-logo { font-size: 48px; margin-bottom: 10px; }
+.login-title { font-size: 24px; font-weight: bold; color: #60a5fa; margin-bottom: 5px; }
+.login-subtitle { font-size: 12px; color: #94a3b8; }
+.login-field { margin-bottom: 20px; }
+.login-label { display: block; font-size: 11px; font-weight: bold; color: #94a3b8; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px; }
+.login-input { width: 100%; padding: 12px 16px; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: #e2e8f0; font-size: 14px; font-family: 'Courier New', monospace; transition: all 0.2s; }
+.login-input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+.login-btn { width: 100%; padding: 14px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border: none; border-radius: 8px; color: white; font-size: 14px; font-weight: bold; cursor: pointer; transition: all 0.2s; text-transform: uppercase; letter-spacing: 1px; }
+.login-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(59, 130, 246, 0.3); }
+.login-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+.login-error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 20px; color: #fca5a5; font-size: 12px; display: none; }
+.login-error.show { display: block; }
+.login-info { margin-top: 20px; padding: 12px; background: rgba(59, 130, 246, 0.05); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 8px; font-size: 11px; color: #94a3b8; line-height: 1.5; }
+.login-info strong { color: #60a5fa; }
+</style>
+<base target="_blank">
+</head>
+<body>
+<!-- TELA DE LOGIN -->
+<div id="loginOverlay" class="login-overlay">
+<div class="login-card">
+<div class="login-header">
+<div class="login-logo"></div>
+<div class="login-title">Vortex AI</div>
+<div class="login-subtitle">Gamma Scalpe v10.5 — Acesso Restrito</div>
+</div>
+<div id="loginError" class="login-error"></div>
+<div class="login-field">
+<label class="login-label">🔑 Número da Assinatura</label>
+<input type="text" id="loginAssinatura" class="login-input" placeholder="Ex: 12345" autocomplete="off">
+</div>
+<div class="login-field">
+<label class="login-label">🖥️ Machine ID (Automático)</label>
+<input type="text" id="loginMachineId" class="login-input" placeholder="Carregando..." readonly style="background: #1e293b; color: #64748b;">
+</div>
+<button id="loginBtn" class="login-btn" onclick="fazerLogin()"> Validar e Acessar</button>
+<div class="login-info">
+<strong>️ Como funciona:</strong><br>
+• O Machine ID é detectado automaticamente pelo NinjaTrader<br>
+• Digite apenas o número da sua assinatura<br>
+• A licença será validada no servidor WooCommerce
+</div>
+</div>
+</div>
+<!-- MENU LATERAL -->
+<div class="side-menu" id="sideMenu">
+<div class="menu-toggle" onclick="toggleMenu()" title="Recolher/Expandir menu">
+<div class="menu-toggle-icon">☰</div>
+<div class="menu-text">
+<div class="menu-label">Menu</div>
+<div class="menu-sublabel">Recolher/Expandir</div>
+</div>
+</div>
+<div class="flex-1 py-2">
+<div class="menu-item active" onclick="showPage('dashboard', this)">
+<div class="menu-icon">📊</div>
+<div class="menu-text"><div class="menu-label">Dashboard</div><div class="menu-sublabel">Painel principal</div></div>
+</div>
+<div class="menu-item" onclick="showPage('configuracoes', this)">
+<div class="menu-icon">⚙️</div>
+<div class="menu-text"><div class="menu-label">Configurações</div><div class="menu-sublabel">APIs e intervalos</div></div>
+</div>
+<div class="menu-item" onclick="showPage('prompts', this)">
+<div class="menu-icon">📝</div>
+<div class="menu-text"><div class="menu-label">Prompts IA</div><div class="menu-sublabel">Análise principal</div></div>
+</div>
+<div class="menu-item" onclick="showPage('alertas', this)">
+<div class="menu-icon">🔔</div>
+<div class="menu-text"><div class="menu-label">Alertas</div><div class="menu-sublabel">Configurações de alarme</div></div>
+</div>
+</div>
+<div class="menu-footer">
+<div id="cicloStatus" class="text-slate-500">⬜ Aguardando...</div>
+<div id="statusIndicator" class="text-[12px] text-center mb-2 text-slate-400">● DADOS PARADOS</div>
+<button onclick="fazerLogout()" class="w-full px-3 py-2 mb-2 text-xs font-bold text-red-400 bg-red-900/20 hover:bg-red-900/40 border border-red-800/50 rounded transition-all flex items-center justify-center gap-2">
+<span></span>
+<span class="menu-text">SAIR</span>
+</button>
+<button id="btnIAIniciar" onclick="toggleIA()" class="btn-ia-iniciar"><span class="btn-icon">🧠</span><span class="btn-label menu-text">ATIVAR IA</span></button>
+<button id="btnIAParar" onclick="toggleIA()" class="btn-ia-parar" style="display:none;"><span class="btn-icon">⏸</span><span class="btn-label menu-text">PAUSAR IA</span></button>
+</div>
+</div>
+<!-- CONTEÚDO PRINCIPAL -->
+<div class="main-content" id="mainContent">
+<!-- ==================== PÁGINA: DASHBOARD ==================== -->
+<div id="dashboard" class="page-section active">
+<div id="apiErrorBanner">⚠️ <strong>Erro na API Groq:</strong> <span id="apiErrorMsg"></span></div>
+<div class="grid grid-cols-12 gap-3 mb-3">
+<div class="col-span-2 space-y-2">
+<div class="glass p-3 rounded-lg">
+<div class="flex justify-between items-center mb-1">
+<div class="text-[13px] font-bold text-blue-300 font-mono tracking-wider" id="mSymbol">--</div>
+<div class="text-xs text-slate-500 text-right" id="mTs">--:--:--</div>
+</div>
+<div class="text-3xl font-mono font-bold text-white" id="mPrice">--</div>
+</div>
+<div class="glass p-3 rounded-lg">
+<div class="text-xs font-bold text-yellow-400 uppercase mb-2">⚡ Acelerômetro</div>
+<div class="mb-2">
+<div class="flex justify-between text-xs mb-1"><span class="text-slate-400">Z-Score</span><span class="font-mono font-bold" id="mZscore">0.00</span></div>
+<div class="h-2 bg-slate-800 rounded-full overflow-hidden"><div id="barZscore" class="h-full bg-gradient-to-r from-red-500 via-yellow-500 to-green-500" style="width: 50%; transition: width 0.3s;"></div></div>
+</div>
+<div>
+<div class="flex justify-between text-xs mb-1"><span class="text-slate-400">ATR Ratio</span><span class="font-mono font-bold" id="mAtr">0.00</span></div>
+<div class="h-2 bg-slate-800 rounded-full overflow-hidden"><div id="barAtr" class="h-full bg-gradient-to-r from-blue-500 to-purple-500" style="width: 0%; transition: width 0.3s;"></div></div>
+</div>
+<div class="mt-2 p-1.5 rounded text-center text-xs font-bold bg-blue-900/30 text-blue-300 border border-blue-800" id="mEstado">AGUARDANDO</div>
+</div>
+<div class="glass p-2 rounded-lg">
+<div class="text-[11px] font-bold text-purple-400 uppercase mb-1 text-center">📊 SENTIMENTO</div>
+<div class="gauge-container-compact">
+<div class="gauge-bg-compact"><div class="gauge-mask-compact"></div></div>
+<div class="gauge-needle-compact" id="gaugeNeedle"></div>
+<div class="gauge-center-compact"></div>
+<div class="gauge-value-compact"><div class="gauge-value-number-compact" id="sentimentValue">0</div></div>
+</div>
+<div class="gauge-labels-compact"><span class="text-red-400">Vendedor</span><span class="text-green-400">Comprador</span></div>
+</div>
+</div>
+<div class="col-span-2">
+<div class="glass p-3 rounded-lg h-full">
+<div class="text-xs font-bold text-purple-400 uppercase mb-1">💪 Força Momentum</div>
+<div id="forcasContainer" class="space-y-1"></div>
+</div>
+</div>
+<div class="col-span-4 space-y-2">
+<div class="glass p-3 rounded-lg">
+<div class="text-xs font-bold text-purple-400 uppercase mb-2">🗺️ Mapa de Níveis</div>
+<div class="mapa-track" id="mapaTrack"><div class="text-slate-600 text-sm text-center py-6">Aguardando dados...</div></div>
+<div class="flex justify-between text-xs text-slate-500 mt-1 px-1"><span id="mapaMax">--</span><span id="mapaMin">--</span></div>
+</div>
+<div class="grid grid-cols-4 gap-1">
+<div class="card-nivel card-hvl" onclick="toggleNivel('hvl')"><div class="text-[11px] text-purple-300 uppercase">HVL</div><div class="font-mono font-bold text-sm text-white" id="cardHvl">--</div></div>
+<div class="card-nivel card-call" onclick="toggleNivel('call')"><div class="text-[11px] text-red-300 uppercase">Call</div><div class="font-mono font-bold text-sm text-white" id="cardCall">--</div></div>
+<div class="card-nivel card-put" onclick="toggleNivel('put')"><div class="text-[11px] text-green-300 uppercase">Put</div><div class="font-mono font-bold text-sm text-white" id="cardPut">--</div></div>
+<div class="card-nivel card-max" onclick="toggleNivel('max1d')"><div class="text-[11px] text-cyan-300 uppercase">1D Max</div><div class="font-mono font-bold text-sm text-white" id="cardMax">--</div></div>
+<div class="card-nivel card-min" onclick="toggleNivel('min1d')"><div class="text-[11px] text-yellow-300 uppercase">1D Min</div><div class="font-mono font-bold text-sm text-white" id="cardMin">--</div></div>
+<div class="card-nivel card-ajuste" onclick="toggleNivel('prev')"><div class="text-[11px] text-orange-300 uppercase">Ajuste</div><div class="font-mono font-bold text-sm text-white" id="cardAjuste">--</div></div>
+<div class="card-nivel card-prevH" onclick="toggleNivel('prevH')"><div class="text-[11px] text-red-300 uppercase">Máx Ant</div><div class="font-mono font-bold text-sm text-white" id="cardPrevH">--</div></div>
+<div class="card-nivel card-prevL" onclick="toggleNivel('prevL')"><div class="text-[11px] text-green-300 uppercase">Mín Ant</div><div class="font-mono font-bold text-sm text-white" id="cardPrevL">--</div></div>
+<div class="card-nivel card-hvl0" onclick="toggleNivel('hvl0')"><div class="text-[11px] text-purple-200 uppercase">HVL 0DTE</div><div class="font-mono font-bold text-sm text-white" id="cardHvl0">--</div></div>
+<div class="card-nivel card-call0" onclick="toggleNivel('call0')"><div class="text-[11px] text-red-200 uppercase">Call 0DTE</div><div class="font-mono font-bold text-sm text-white" id="cardCall0">--</div></div>
+<div class="card-nivel card-put0" onclick="toggleNivel('put0')"><div class="text-[11px] text-green-200 uppercase">Put 0DTE</div><div class="font-mono font-bold text-sm text-white" id="cardPut0">--</div></div>
+<div class="card-nivel card-gwall" onclick="toggleNivel('gwall')"><div class="text-[11px] text-yellow-200 uppercase">GWall 0DTE</div><div class="font-mono font-bold text-sm text-white" id="cardGwall">--</div></div>
+<div class="card-nivel card-gex col-span-2" onclick="toggleNivel('gex')"><span style="font-size:13px"></span><div><div class="text-[11px] text-purple-300 uppercase font-bold">GEX</div><div class="text-[10px] text-slate-400" id="cardGexCount">-- níveis</div></div></div>
+<div class="card-nivel card-bl col-span-2" onclick="toggleNivel('bl')"><span style="font-size:13px">▓</span><div><div class="text-[11px] text-blue-300 uppercase font-bold">BL</div><div class="text-[10px] text-slate-400" id="cardBlCount">-- níveis</div></div></div>
+</div>
+</div>
+<div class="col-span-4">
+<div id="aiDecisionCard" class="glass p-3 rounded-lg text-center border-2 border-slate-700 transition-all h-full flex flex-col justify-between relative">
+<div class="ia-disabled-overlay" id="iaDisabledOverlay"><span class="ia-disabled-badge">⚠ IA DESATIVADA — Sem análise automática</span></div>
+<div>
+<div id="aiSinal" class="text-4xl font-black my-1 text-slate-500">AGUARDANDO</div>
+<div class="text-sm text-gray-400">Confiança: <span id="aiConfianca" class="text-white font-bold">--</span></div>
+<div id="templateBadge" class="template-badge" style="display:none;"> Template: <span id="templateNameDisplay" class="template-name">Padrão</span></div>
+<div class="grid grid-cols-2 gap-2 mt-2 text-sm">
+<div class="bg-slate-800/50 p-2 rounded border border-slate-700"><div class="text-xs text-slate-400"> Alvo</div><div id="aiAlvo" class="text-green-400 font-mono font-bold">--</div></div>
+<div class="bg-slate-800/50 p-2 rounded border border-slate-700"><div class="text-xs text-slate-400">🛑 Stop</div><div id="aiStop" class="text-red-400 font-mono font-bold">--</div></div>
+</div>
+<div id="aiResumo" class="mt-2 text-xs text-slate-300 leading-relaxed bg-slate-800/60 rounded px-2 py-1.5 border border-slate-700 text-left hidden"></div>
+<div id="aiGatilho" class="mt-1 text-xs text-blue-300 italic"></div>
+<div id="aiAlerta" class="mt-1 text-yellow-400 text-xs font-bold"></div>
+</div>
+<div class="delta-gauge-wrap">
+<div class="delta-gauge-labels">
+<span class="text-red-400">VENDA</span>
+<span class="text-slate-400">DELTA</span>
+<span class="text-green-400">COMPRA</span>
+</div>
+<div class="delta-gauge-bar mt-1">
+<div id="deltaGaugeMarker" class="delta-gauge-marker" style="left: 50%"></div>
+</div>
+<div class="flex justify-between text-[11px] mt-2">
+<span class="text-slate-400">Δ: <span id="deltaValue" class="text-white font-mono font-bold">0</span></span>
+<span class="text-slate-400">Ratio: <span id="deltaRatio" class="text-white font-mono font-bold">1.00</span></span>
+<span class="text-slate-400">P/s: <span id="deltaPrints" class="text-white font-mono font-bold">0</span></span>
+</div>
+<div class="flex gap-1 mt-2 justify-center">
+<button onclick="setWindow(Infinity)" id="btnInf" class="window-btn active"></button>
+<button onclick="setWindow(1)" id="btn1m" class="window-btn">1m</button>
+<button onclick="setWindow(5)" id="btn5m" class="window-btn">5m</button>
+<button onclick="setWindow(15)" id="btn15m" class="window-btn">15m</button>
+</div>
+<div id="windowStatus" class="text-[10px] text-center text-slate-400 mt-1">
+Janela: <span id="windowLabel">Acumulado</span>
+<span id="windowTimer" class="text-blue-400"></span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- LINHA 2 DO DASHBOARD -->
+<div class="grid grid-cols-12 gap-3 mb-3">
+<div class="col-span-5">
+<div class="glass p-3 rounded-lg">
+<div class="flex justify-between items-center mb-2"><div class="text-xs font-bold text-blue-400 uppercase">📸 Gráfico (Captura NT8)</div><span class="text-xs text-slate-500" id="screenshotStatus">Aguardando...</span></div>
+<div class="bg-slate-900 rounded-lg overflow-hidden h-64 flex items-center justify-center border border-slate-800">
+<img id="chartImage" src="" alt="Gráfico" class="max-h-full max-w-full object-contain hidden" ondblclick="abrirModalImagem()" style="cursor: zoom-in;" title="Duplo clique para ampliar"><span id="chartPlaceholder" class="text-slate-600 text-sm">Nenhuma captura disponível</span>
+</div>
+<div class="text-[10px] text-slate-500 mt-1 text-center">💡 Dê um <strong>duplo clique</strong> na imagem para ampliar</div>
+</div>
+</div>
+<div class="col-span-3">
+<div class="glass p-3 rounded-lg h-full">
+<div class="flex justify-between items-center mb-2"><div class="text-xs font-bold text-orange-400 uppercase"> Block Trades</div><button onclick="limparBlockTrades()" class="text-xs bg-red-900/50 hover:bg-red-900 text-red-300 px-2 py-1 rounded border border-red-800">🗑</button></div>
+<div id="largeTradesList" class="space-y-1 max-h-64 overflow-y-auto scrollbar-hide text-xs font-mono"><div class="text-slate-500 text-center py-4">Aguardando...</div></div>
+</div>
+</div>
+<!-- CARD LOG DO SISTEMA -->
+<div class="col-span-4">
+<div class="glass p-3 rounded-lg h-full flex flex-col" style="min-height: 320px; max-height: 320px;">
+<div class="flex justify-between items-center mb-2">
+<div class="text-xs font-bold text-orange-400 uppercase">📜 Log do Sistema</div>
+<div class="flex gap-1">
+<button class="log-tab-btn active" onclick="switchLogTab('mensagens', this)">💬 MENSAGENS</button>
+<button class="log-tab-btn" onclick="switchLogTab('noticias', this)">📰 NOTÍCIAS</button>
+</div>
+</div>
+<!-- Aba MENSAGENS -->
+<div id="logTab-mensagens" class="log-tab-content" style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
+<div id="aiLog" class="space-y-0.5 flex-1 overflow-y-auto scrollbar-hide" style="min-height: 0;"><div class="text-slate-500 text-xs text-center py-4">Aguardando...</div></div>
+<div class="flex gap-1 mt-1 pt-1 border-t border-slate-700">
+<button onclick="clearSystemLog()" class="text-[9px] bg-red-900/30 hover:bg-red-900 text-red-400 px-2 py-0.5 rounded border border-red-800/50">🗑 Limpar</button>
+<span class="text-[9px] text-slate-500 flex-1 text-right" id="logCount">0 mensagens</span>
+</div>
+</div>
+<!-- Aba NOTÍCIAS -->
+<div id="logTab-noticias" class="log-tab-content" style="display: none; flex-direction: column; flex: 1; overflow: hidden;">
+<div class="news-filter-bar" id="newsFilterBar">
+<button class="news-filter-btn active" onclick="filterNews('all', this)">Todas</button>
+<button class="news-filter-btn" onclick="filterNews('high', this)"> Alto</button>
+<button class="news-filter-btn" onclick="filterNews('medium', this)"> Médio</button>
+<button class="news-filter-btn" onclick="filterNews('low', this)">🟢 Baixo</button>
+</div>
+<div id="newsList" class="flex-1 overflow-y-auto scrollbar-hide" style="min-height: 0; padding-right: 4px;">
+<div class="text-slate-500 text-xs text-center py-4">Carregando notícias...</div>
+</div>
+<div class="flex gap-1 mt-1 pt-1 border-t border-slate-700">
+<button onclick="fetchNews()" class="text-[9px] bg-blue-900/30 hover:bg-blue-900 text-blue-400 px-2 py-0.5 rounded border border-blue-800/50">🔄 Atualizar</button>
+<span class="text-[9px] text-slate-500 flex-1 text-right" id="newsLastUpdate">--</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- FIM DASHBOARD -->
+<!-- ==================== PÁGINA: CONFIGURAÇÕES ==================== -->
+<div id="configuracoes" class="page-section">
+<div class="glass p-6 rounded-lg max-w-4xl mx-auto">
+<h2 class="text-2xl font-bold mb-6 text-blue-400">️ Configurações do Sistema</h2>
+<div class="flex gap-2 mb-6 border-b border-slate-700 pb-2">
+<button class="alert-tab-btn active" onclick="switchConfigTab('geral', this)">⚙️ Geral</button>
+<button class="alert-tab-btn" onclick="switchConfigTab('fontes', this)"> Fontes de Dados</button>
+<button class="alert-tab-btn" onclick="switchConfigTab('telegram', this)">📱 Telegram</button>
+<button class="alert-tab-btn" onclick="switchConfigTab('noticias', this)">📰 Notícias</button>
+</div>
+<div id="configTab-geral" class="config-tab-content space-y-6">
+<!-- API KEY GROQ -->
+<div>
+<h3 class="text-sm font-bold text-slate-300 mb-3">🔑 API Key (Groq — IA Principal)</h3>
+<div>
+<label class="text-xs text-slate-400 uppercase">IA Principal (Análise de Mercado)</label>
+<input type="password" id="groqKey" placeholder="gsk_..." class="bg-slate-900 border border-slate-700 p-2 rounded text-xs w-full font-mono">
+</div>
+</div>
+<!-- INTERVALO DO CICLO -->
+<div>
+<h3 class="text-sm font-bold text-slate-300 mb-3">⏱️ Intervalo do Ciclo de Análise</h3>
+<div class="grid grid-cols-2 gap-4">
+<div>
+<label class="text-xs text-slate-400 uppercase">Ciclo de análise da IA</label>
+<select id="intervalo" class="bg-slate-900 border border-slate-700 p-2 rounded text-xs w-full">
+<option value="30000" selected>30 segundos</option>
+<option value="60000">60 segundos</option>
+<option value="120000">2 minutos</option>
+</select>
+</div>
+<div>
+<label class="text-xs text-slate-400 uppercase">Modelo IA Principal</label>
+<select id="groqModel" class="bg-slate-900 border border-slate-700 p-2 rounded text-xs w-full">
+<option value="meta-llama/llama-4-scout-17b-16e-instruct" selected>️ Llama 4 Scout (visão)</option>
+<option value="llama-3.3-70b-versatile"> Llama 3.3 70B</option>
+<option value="llama3-70b-8192">🧠 Llama 3 70B</option>
+</select>
+</div>
+</div>
+</div>
+<!-- OPÇÕES VISUAIS -->
+<div>
+<h3 class="text-sm font-bold text-slate-300 mb-3">📸 Opções de Análise Visual</h3>
+<div class="flex items-center justify-between bg-slate-800/50 p-3 rounded border border-slate-700">
+<div>
+<div class="text-sm font-bold text-white">🖼️ Enviar captura do gráfico para IA</div>
+<div class="text-xs text-slate-400">A IA analisa a imagem junto com os dados</div>
+</div>
+<label class="toggle-switch">
+<input type="checkbox" id="enviarImagemIA1" checked>
+<span class="toggle-slider"></span>
+</label>
+</div>
+</div>
+<!-- BOTÃO SALVAR -->
+<button onclick="salvarConfiguracoes()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm font-bold w-full">💾 Salvar Configurações</button>
+</div>
+<!-- FIM configTab-geral -->
+<!-- ABA FONTES DE DADOS (NOVA) -->
+<div id="configTab-fontes" class="config-tab-content space-y-6" style="display:none;">
+<!-- Configurações Supabase (Globais) -->
+<div class="bg-blue-900/20 border border-blue-700/40 p-4 rounded-lg">
+<h3 class="text-sm font-bold text-blue-300 mb-2">🗄️ Credenciais Supabase</h3>
+<p class="text-xs text-slate-400 mb-3">URL e API Key fixas no código. Configure apenas os IDs das instâncias.</p>
+<div class="grid grid-cols-2 gap-4">
+<div>
+<label class="text-xs text-slate-400 uppercase">Instance ID (Força & Níveis)</label>
+<input type="text" id="instanceIdForce" value="painel_principal" class="bg-slate-900 border border-slate-700 p-2 rounded text-xs w-full font-mono">
+</div>
+<div>
+<label class="text-xs text-slate-400 uppercase">Símbolo Gamma (NQ, ES...)</label>
+<input type="text" id="gammaSymbol" value="NQ" class="bg-slate-900 border border-slate-700 p-2 rounded text-xs w-full font-mono">
+</div>
+</div>
+</div>
+<!-- Seletor de Fonte: Market Data -->
+<div class="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
+<h3 class="text-sm font-bold text-white mb-2">📊 Fonte: Market Data (Orderflow/Física)</h3>
+<p class="text-xs text-slate-400 mb-3">De onde o painel deve ler os dados de preço, volume e acelerômetro?</p>
+<div class="flex gap-4">
+<label class="flex items-center gap-2 cursor-pointer">
+<input type="radio" name="sourceMarket" value="local" checked class="accent-blue-500">
+<span class="text-sm"> Local (data.json)</span>
+</label>
+<label class="flex items-center gap-2 cursor-pointer">
+<input type="radio" name="sourceMarket" value="supabase" class="accent-blue-500">
+<span class="text-sm">☁️ Supabase (Nuvem)</span>
+</label>
+</div>
+<div class="mt-2">
+<label class="text-xs text-slate-400 uppercase">Instance ID (Apenas se Supabase)</label>
+<input type="text" id="instanceIdMarket" value="nt8_main" class="bg-slate-900 border border-slate-700 p-2 rounded text-xs w-full font-mono">
+</div>
+</div>
+<!-- Seletor de Fonte: Screenshot -->
+<div class="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
+<h3 class="text-sm font-bold text-white mb-2">📸 Fonte: Screenshot (Gráfico)</h3>
+<p class="text-xs text-slate-400 mb-3">De onde o painel deve ler a imagem do gráfico?</p>
+<div class="flex gap-4">
+<label class="flex items-center gap-2 cursor-pointer">
+<input type="radio" name="sourceScreen" value="local" checked class="accent-blue-500">
+<span class="text-sm">💾 Local (chart.png)</span>
+</label>
+<label class="flex items-center gap-2 cursor-pointer">
+<input type="radio" name="sourceScreen" value="supabase" class="accent-blue-500">
+<span class="text-sm">☁️ Supabase (Nuvem)</span>
+</label>
+</div>
+<div class="mt-2">
+<label class="text-xs text-slate-400 uppercase">Instance ID (Apenas se Supabase)</label>
+<input type="text" id="instanceIdScreen" value="nt8_main" class="bg-slate-900 border border-slate-700 p-2 rounded text-xs w-full font-mono">
+</div>
+</div>
+<button onclick="salvarConfiguracoesFontes()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-bold w-full">💾 Salvar Fontes de Dados</button>
+</div>
+<!-- ABA TELEGRAM -->
+<div id="configTab-telegram" class="config-tab-content space-y-6" style="display:none;">
+<div class="bg-blue-900/20 border border-blue-700/40 p-4 rounded-lg">
+<h3 class="text-sm font-bold text-blue-300 mb-2">📱 Configuração do Telegram</h3>
+<p class="text-xs text-slate-400 mb-4">Configure o bot para receber alertas e sinais de operação.</p>
+<div class="space-y-4">
+<div><label class="text-xs text-slate-400 uppercase block mb-2">🤖 Bot Token (API Key)</label><input type="password" id="telegramBotToken" placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz" class="bg-slate-900 border border-slate-700 p-2 rounded text-xs w-full font-mono"><div class="text-[10px] text-slate-500 mt-1">Obtenha em @BotFather no Telegram</div></div>
+<div><label class="text-xs text-slate-400 uppercase block mb-2">📍 Channel/Chat ID</label><input type="text" id="telegramChatId" placeholder="-1001234567890 ou @seucanal" class="bg-slate-900 border border-slate-700 p-2 rounded text-xs w-full font-mono"><div class="text-[10px] text-slate-500 mt-1">ID do canal/grupo ou username (@canal)</div></div>
+<h4 class="text-xs font-bold text-slate-300 mt-4 mb-2 pt-3 border-t border-slate-700">📨 O que enviar:</h4>
+<div class="flex items-center justify-between bg-slate-800/50 p-3 rounded border border-slate-700">
+<div><div class="text-sm font-bold text-white"> Incluir Gráfico em TODAS as mensagens</div><div class="text-xs text-slate-400">Anexa imagem do gráfico em alertas E sinais da IA</div></div>
+<label class="toggle-switch"><input type="checkbox" id="telegramSendImage" checked><span class="toggle-slider"></span></label>
+</div>
+<div class="flex items-center justify-between bg-slate-800/50 p-3 rounded border border-slate-700">
+<div><div class="text-sm font-bold text-white">📤 Enviar Sinais da IA</div><div class="text-xs text-slate-400">Notifica entradas de COMPRA/VENDA/SAIR da IA</div></div>
+<label class="toggle-switch"><input type="checkbox" id="telegramSendSignals" checked><span class="toggle-slider"></span></label>
+</div>
+<div class="flex items-center justify-between bg-slate-800/50 p-3 rounded border border-slate-700">
+<div><div class="text-sm font-bold text-white">✅ Sinais IA: Apenas Confirmações de Entrada</div><div class="text-xs text-slate-400">Ignora AGUARDAR/MANTER, envia só COMPRA/VENDA/SAIR</div></div>
+<label class="toggle-switch"><input type="checkbox" id="telegramOnlyEntry"><span class="toggle-slider"></span></label>
+</div>
+</div>
+</div>
+<div class="flex gap-2">
+<button onclick="testarTelegram()" class="flex-1 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-bold">📡 Testar Conexão (com imagem)</button>
+<button onclick="salvarConfiguracoesTelegram()" class="flex-1 bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm font-bold">💾 Salvar Telegram</button>
+</div>
+<div id="telegramStatus" class="text-xs text-center p-2 rounded hidden"></div>
+</div>
+<!-- ABA NOTÍCIAS -->
+<div id="configTab-noticias" class="config-tab-content space-y-6" style="display:none;">
+    <div class="bg-green-900/20 border border-green-700/40 p-4 rounded-lg">
+        <h3 class="text-sm font-bold text-green-300 mb-2">📰 Calendário Econômico — ForexFactory</h3>
+        <p class="text-xs text-slate-400 mb-4">Notícias econômicas carregadas do Supabase. Configure os filtros e alertas.</p>
+        
+        <div class="space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="text-xs text-slate-400 uppercase block mb-2">⏰ Alertar ANTES da notícia (minutos)</label>
+                    <input type="number" id="newsAlertBefore" value="5" min="1" max="60" class="bg-slate-900 border border-slate-700 p-2 rounded text-xs w-full">
+                    <div class="text-[10px] text-slate-500 mt-1">Dispara alerta X minutos antes do evento</div>
+                </div>
+                <div>
+                    <label class="text-xs text-slate-400 uppercase block mb-2">⏰ Alertar DEPOIS da notícia (minutos)</label>
+                    <input type="number" id="newsAlertAfter" value="15" min="1" max="120" class="bg-slate-900 border border-slate-700 p-2 rounded text-xs w-full">
+                    <div class="text-[10px] text-slate-500 mt-1">Mantém alerta ativo por X minutos após o evento</div>
+                </div>
+            </div>
+            
+            <div>
+                <label class="text-xs text-slate-400 uppercase block mb-2">🕒 Cooldown entre alertas de notícias (minutos)</label>
+                <input type="number" id="newsCooldown" value="10" min="1" max="120" class="bg-slate-900 border border-slate-700 p-2 rounded text-xs w-full">
+            </div>
+            
+            <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+                <label class="text-xs text-slate-400 uppercase block mb-3">🌍 Filtrar por PAÍS (aplicado no painel)</label>
+                <div class="grid grid-cols-4 gap-2" id="newsCountryFilters">
+                    <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" class="news-country-cb" value="USD" checked> 🇺🇸 USD</label>
+                    <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" class="news-country-cb" value="EUR" checked> 🇪🇺 EUR</label>
+                    <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" class="news-country-cb" value="GBP" checked> 🇬🇧 GBP</label>
+                    <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" class="news-country-cb" value="JPY" checked> 🇯🇵 JPY</label>
+                    <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" class="news-country-cb" value="CAD"> 🇨🇦 CAD</label>
+                    <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" class="news-country-cb" value="AUD"> 🇦 AUD</label>
+                    <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" class="news-country-cb" value="CHF"> 🇨🇭 CHF</label>
+                    <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" class="news-country-cb" value="CNY"> 🇨🇳 CNY</label>
+                    <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" class="news-country-cb" value="NZD"> 🇳🇿 NZD</label>
+                    <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" class="news-country-cb" value="MXN"> 🇲🇽 MXN</label>
+                </div>
+            </div>
+            
+            <div class="bg-slate-800/50 p-3 rounded border border-slate-700">
+                <label class="text-xs text-slate-400 uppercase block mb-3">💥 Filtrar por IMPACTO</label>
+                <div class="flex gap-4">
+                    <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" id="newsImpactHigh" checked> 🔴 <strong>High</strong> (Alto impacto)</label>
+                    <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" id="newsImpactMedium" checked> 🟡 <strong>Medium</strong> (Médio)</label>
+                    <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" id="newsImpactLow"> 🟢 <strong>Low</strong> (Baixo)</label>
+                </div>
+            </div>
+            
+            <div class="flex items-center justify-between bg-slate-800/50 p-3 rounded border border-slate-700">
+                <div>
+                    <div class="text-sm font-bold text-white">📱 Enviar alertas de notícias no Telegram</div>
+                    <div class="text-xs text-slate-400">Notifica quando notícia importante se aproximar</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="newsTelegram" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            
+            <div class="flex items-center justify-between bg-slate-800/50 p-3 rounded border border-slate-700">
+                <div>
+                    <div class="text-sm font-bold text-white">🔊 Som de alerta para notícias</div>
+                    <div class="text-xs text-slate-400">Toca som quando notícia se aproximar</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="newsSound" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+    </div>
+    
+    <div class="flex gap-2">
+        <button onclick="fetchNews()" class="flex-1 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-bold">🔄 Buscar Notícias Agora</button>
+        <button onclick="salvarNewsConfig()" class="flex-1 bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm font-bold">💾 Salvar Configurações</button>
+    </div>
+    
+    <div id="newsConfigStatus" class="text-xs text-center p-2 rounded hidden"></div>
+</div>
+</div>
+</div>
+<!-- FIM CONFIGURAÇÕES -->
+<!-- ==================== PÁGINA: PROMPTS ==================== -->
+<div id="prompts" class="page-section">
+<div class="glass p-6 rounded-lg max-w-4xl mx-auto">
+<h2 class="text-2xl font-bold mb-6 text-purple-400">📝 Gerenciamento de Prompts</h2>
+<div class="mb-6">
+<h3 class="text-sm font-bold text-slate-300 mb-3">🎯 Prompts Pré-configurados</h3>
+<div class="grid grid-cols-4 gap-3">
+<div class="preset-btn preset-conservador" onclick="aplicarPreset('conservador')"><span class="text-lg">🛡️</span><div><div class="font-bold">Conservador</div><div class="text-[10px] opacity-70">Alta confiança</div></div></div>
+<div class="preset-btn preset-scalper" onclick="aplicarPreset('scalper')"><span class="text-lg">⚡</span><div><div class="font-bold">Scalper</div><div class="text-[10px] opacity-70">Rápido + força</div></div></div>
+<div class="preset-btn preset-pullback" onclick="aplicarPreset('pullback')"><span class="text-lg">📊</span><div><div class="font-bold">Pullback</div><div class="text-[10px] opacity-70">Reversão extremos</div></div></div>
+<div class="preset-btn preset-reversal" onclick="aplicarPreset('reversal')"><span class="text-lg">🔄</span><div><div class="font-bold">Reversal</div><div class="text-[10px] opacity-70">Máx/Mín anterior</div></div></div>
+</div>
+</div>
+<div>
+<h3 class="text-sm font-bold text-slate-300 mb-1">🧠 IA Principal (Análise de Mercado)</h3>
+<textarea id="systemPrompt" class="bg-slate-900 border border-slate-700 p-3 rounded text-xs w-full font-mono text-green-300 h-96 focus:border-blue-500 outline-none resize-none"></textarea>
+<div class="flex gap-2 mt-2">
+<button onclick="salvarPrompt('systemPrompt')" class="flex-1 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-xs font-bold"> Salvar</button>
+<button onclick="carregarPrompt('systemPrompt')" class="flex-1 bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded text-xs font-bold">📂 Carregar</button>
+<button onclick="aplicarPrompt('systemPrompt')" class="flex-1 bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-xs font-bold">✅ Aplicar</button>
+</div>
+</div>
+<div class="mt-6 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
+<h3 class="text-sm font-bold text-slate-300 mb-3">📄 Gerenciador de Templates</h3>
+<div class="grid grid-cols-2 gap-4 mb-3">
+<div><label class="text-xs text-slate-400 uppercase">Nome do Template</label><input type="text" id="templateName" placeholder="Ex: Conservador_Gamma" class="bg-slate-900 border border-slate-700 p-2 rounded text-xs w-full"></div>
+<div class="flex items-end gap-2">
+<button onclick="salvarTemplate()" class="flex-1 bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs font-bold">💾 Salvar</button>
+<button onclick="carregarTemplate()" class="flex-1 bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded text-xs font-bold">📂 Carregar</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- FIM PROMPTS -->
+<!-- ==================== PÁGINA: ALERTAS ==================== -->
+<div id="alertas" class="page-section">
+<div class="glass p-6 rounded-lg max-w-5xl mx-auto">
+<h2 class="text-2xl font-bold mb-4 text-yellow-400">🔔 Configurações de Alertas</h2>
+<div class="bg-slate-800/50 p-4 rounded-lg border border-slate-700 mb-6">
+<div class="flex items-center justify-between mb-3">
+<div>
+<div class="text-sm font-bold text-white">🎛️ Modo de Operação dos Alertas</div>
+<div class="text-xs text-slate-400 mt-1">Escolha como os alertas devem se comportar</div>
+</div>
+<div class="logic-mode-toggle">
+<button class="logic-mode-btn active" id="btnModoIndividual" onclick="setAlertMode('individual')">📋 Individual</button>
+<button class="logic-mode-btn" id="btnModoLogica" onclick="setAlertMode('logica')">🔗 Lógica</button>
+</div>
+</div>
+<div id="modoDescricao" class="text-xs text-slate-400 leading-relaxed p-3 bg-slate-900/50 rounded border border-slate-700">
+<strong class="text-blue-300">📋 Modo Individual:</strong> Cada tipo de alerta dispara independentemente quando sua condição é atendida.
+</div>
+<div id="logicStatusPanel" class="mt-3" style="display:none;">
+<div class="text-xs font-bold text-slate-300 mb-2">📊 Status das Condições da Lógica:</div>
+<div id="logicConditionsList"></div>
+<div id="logicStatusMsg" class="logic-status inactive mt-2">Modo Lógica inativo.</div>
+</div>
+</div>
+<div class="bg-yellow-900/20 border border-yellow-700/40 p-3 rounded-lg mb-4">
+<div class="text-xs text-yellow-300 leading-relaxed">
+<strong>💡 Cooldown:</strong> Cada tipo tem tempo mínimo (minutos) entre disparos.
+<br><strong>🔓 Desarmar:</strong> No popup, "Desarmar Este" silencia APENAS aquele tipo/nível. No modo Lógica, desarma o alerta combinado.
+</div>
+</div>
+<div class="flex gap-2 mb-4 border-b border-slate-700 pb-2">
+<button class="alert-tab-btn active" onclick="switchAlertTab('sentimento', this)"> Sentimento</button>
+<button class="alert-tab-btn" onclick="switchAlertTab('blocktrades', this)">⚡ Block Trades</button>
+<button class="alert-tab-btn" onclick="switchAlertTab('delta', this)">📈 Delta / Ratio</button>
+<button class="alert-tab-btn" onclick="switchAlertTab('acelerometro', this)">⚡ Acelerômetro</button>
+<button class="alert-tab-btn" onclick="switchAlertTab('niveis', this)">🗺️ Níveis</button>
+</div>
+<!-- ABA: SENTIMENTO -->
+<div id="alertTab-sentimento" class="alert-tab-content">
+<div class="alert-config-grid">
+<div class="alert-card"><label>Ativar Alerta de Sentimento</label><div class="flex items-center gap-2"><input type="checkbox" id="alertSentAtivo" onchange="saveAlertConfig()"><span class="text-xs text-slate-400">Dispara quando atingir limites</span></div></div>
+<div class="alert-card"><label>Limite Superior (Comprador)</label><input type="number" id="alertSentMax" value="55" min="50" max="100" onchange="saveAlertConfig()"></div>
+<div class="alert-card"><label>Limite Inferior (Vendedor)</label><input type="number" id="alertSentMin" value="45" min="0" max="50" onchange="saveAlertConfig()"></div>
+<div class="alert-card"><label>⏱️ Cooldown (minutos)</label><input type="number" id="alertSentCooldown" value="5" min="1" max="120" onchange="saveAlertConfig()"></div>
+<div class="alert-card"><label>📱 Enviar no Telegram</label><div class="flex items-center gap-2"><input type="checkbox" id="alertSentTelegram" onchange="saveAlertConfig()"><span class="text-xs text-slate-400">Notifica via Telegram</span></div></div>
+</div>
+</div>
+<!-- ABA: BLOCK TRADES -->
+<div id="alertTab-blocktrades" class="alert-tab-content" style="display:none;">
+<div class="alert-config-grid">
+<div class="alert-card"><label>Ativar Alerta de Block Trades</label><div class="flex items-center gap-2"><input type="checkbox" id="alertBtAtivo" onchange="saveAlertConfig()"><span class="text-xs text-slate-400">Alerta apenas trades NOVOS</span></div></div>
+<div class="alert-card"><label>Volume Mínimo (Contratos)</label><input type="number" id="alertBtVol" value="20" min="5" onchange="saveAlertConfig()"></div>
+<div class="alert-card"><label>⏱️ Cooldown (minutos)</label><input type="number" id="alertBtCooldown" value="5" min="1" max="120" onchange="saveAlertConfig()"></div>
+<div class="alert-card"><label>📱 Enviar no Telegram</label><div class="flex items-center gap-2"><input type="checkbox" id="alertBtTelegram" onchange="saveAlertConfig()"><span class="text-xs text-slate-400">Notifica via Telegram</span></div></div>
+</div>
+</div>
+<!-- ABA: DELTA -->
+<div id="alertTab-delta" class="alert-tab-content" style="display:none;">
+<div class="alert-config-grid">
+<div class="alert-card"><label>Ativar Alerta de Delta/Ratio</label><div class="flex items-center gap-2"><input type="checkbox" id="alertDeltaAtivo" onchange="saveAlertConfig()"></div></div>
+<div class="alert-card"><label>Ratio Vendedor (Abaixo de)</label><input type="number" id="alertDeltaSell" value="0.50" step="0.01" min="0" max="1" onchange="saveAlertConfig()"></div>
+<div class="alert-card"><label>Ratio Comprador (Acima de)</label><input type="number" id="alertDeltaBuy" value="1.50" step="0.01" min="1" max="10" onchange="saveAlertConfig()"></div>
+<div class="alert-card"><label>Volume Mínimo (Filtro)</label><input type="number" id="alertDeltaVolMin" value="50" min="0" onchange="saveAlertConfig()"></div>
+<div class="alert-card"><label>⏱️ Cooldown (minutos)</label><input type="number" id="alertDeltaCooldown" value="5" min="1" max="120" onchange="saveAlertConfig()"></div>
+<div class="alert-card"><label> Enviar no Telegram</label><div class="flex items-center gap-2"><input type="checkbox" id="alertDeltaTelegram" onchange="saveAlertConfig()"><span class="text-xs text-slate-400">Notifica via Telegram</span></div></div>
+</div>
+</div>
+<!-- ABA: ACELERÔMETRO -->
+<div id="alertTab-acelerometro" class="alert-tab-content" style="display:none;">
+<div class="alert-config-grid">
+<div class="alert-card"><label>Ativar Alerta de Acelerômetro</label><div class="flex items-center gap-2"><input type="checkbox" id="alertAcelAtivo" onchange="saveAlertConfig()"></div></div>
+<div class="alert-card col-span-2"><label>Tipo de Alerta</label><div class="checkbox-group">
+<div class="checkbox-item"><input type="checkbox" id="alertAcelExplosao" onchange="saveAlertConfig()"><span>💥 EXPLOSÃO</span></div>
+<div class="checkbox-item"><input type="checkbox" id="alertAcelExaustao" onchange="saveAlertConfig()"><span>🔄 EXAUSTÃO</span></div>
+<div class="checkbox-item"><input type="checkbox" id="alertAcelCompressao" onchange="saveAlertConfig()"><span>📦 COMPRESSÃO</span></div>
+</div></div>
+<div class="alert-card"><label>⏱️ Cooldown (minutos)</label><input type="number" id="alertAcelCooldown" value="5" min="1" max="120" onchange="saveAlertConfig()"></div>
+<div class="alert-card"><label> Enviar no Telegram</label><div class="flex items-center gap-2"><input type="checkbox" id="alertAcelTelegram" onchange="saveAlertConfig()"><span class="text-xs text-slate-400">Notifica via Telegram</span></div></div>
+</div>
+</div>
+<!-- ABA: NÍVEIS -->
+<div id="alertTab-niveis" class="alert-tab-content" style="display:none;">
+<div class="alert-config-grid">
+<div class="alert-card"><label>Ativar Alerta de Proximidade</label><div class="flex items-center gap-2"><input type="checkbox" id="alertNivelAtivo" onchange="saveAlertConfig()"></div></div>
+<div class="alert-card"><label>Distância (Pontos)</label><input type="number" id="alertNivelDist" value="10" step="0.1" min="0.5" onchange="saveAlertConfig()"></div>
+<div class="alert-card"><label>️ Cooldown (minutos)</label><input type="number" id="alertNivelCooldown" value="10" min="1" max="120" onchange="saveAlertConfig()"></div>
+<div class="alert-card col-span-2"><label>Selecione os Níveis</label><div class="checkbox-group" style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 4px;">
+<div class="checkbox-item"><input type="checkbox" id="nivelHVL" onchange="saveAlertConfig()"><span>HVL</span></div>
+<div class="checkbox-item"><input type="checkbox" id="nivelCall" onchange="saveAlertConfig()"><span>Call</span></div>
+<div class="checkbox-item"><input type="checkbox" id="nivelPut" onchange="saveAlertConfig()"><span>Put</span></div>
+<div class="checkbox-item"><input type="checkbox" id="nivel1DMax" onchange="saveAlertConfig()"><span>1D Max</span></div>
+<div class="checkbox-item"><input type="checkbox" id="nivel1DMin" onchange="saveAlertConfig()"><span>1D Min</span></div>
+<div class="checkbox-item"><input type="checkbox" id="nivelAjuste" onchange="saveAlertConfig()"><span>Ajuste</span></div>
+<div class="checkbox-item"><input type="checkbox" id="nivelMaxAnt" onchange="saveAlertConfig()"><span>Máx Ant</span></div>
+<div class="checkbox-item"><input type="checkbox" id="nivelMinAnt" onchange="saveAlertConfig()"><span>Mín Ant</span></div>
+<div class="checkbox-item"><input type="checkbox" id="nivelHVL0DTE" onchange="saveAlertConfig()"><span>HVL 0DTE</span></div>
+<div class="checkbox-item"><input type="checkbox" id="nivelCall0DTE" onchange="saveAlertConfig()"><span>Call 0DTE</span></div>
+<div class="checkbox-item"><input type="checkbox" id="nivelPut0DTE" onchange="saveAlertConfig()"><span>Put 0DTE</span></div>
+<div class="checkbox-item"><input type="checkbox" id="nivelGWall0DTE" onchange="saveAlertConfig()"><span>GWall 0DTE</span></div>
+</div></div>
+<div class="alert-card"><label>📱 Enviar no Telegram</label><div class="flex items-center gap-2"><input type="checkbox" id="alertNivelTelegram" onchange="saveAlertConfig()"><span class="text-xs text-slate-400">Notifica via Telegram</span></div></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- FIM ALERTAS -->
+</div>
+<!-- POPUP DE ALERTA -->
+<div id="alertPopup">
+<div class="alert-title"> ALERTA DISPARADO</div>
+<div class="alert-msg" id="alertMsg">Motivo do alerta...</div>
+<div class="alert-detail" id="alertDetail"></div>
+<div class="alert-btns">
+<button class="btn-disarm" onclick="disarmCurrentAlert()">🔓 Desarmar Este Alerta</button>
+</div>
+</div>
+<!-- MODAL IMAGEM -->
+<div id="imageModal">
+<button onclick="fecharModalImagem()">✕ FECHAR</button>
+<img id="modalImagem" src="" alt="Gráfico Ampliado">
+</div>
+<script>
+// ================================================================
+//  CONFIGURAÇÕES GLOBAIS E CREDENCIAIS
+// ================================================================
+const SUPABASE_URL = 'https://db.vemviraramesa.com.br';
+const SUPABASE_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJyb2xlIjogInNlcnZpY2Vfcm9sZSIsCiAgImlzcyI6ICJzdXBhYmFzZSIsCiAgImlhdCI6IDE3MTUwNTA4MDAsCiAgImV4cCI6IDE4NzI4MTcyMDAKfQ.YtBPvGJb6-WoLS70wxSXaKTg4TGQnMUcUTeD2p_2jBY';
+
+// Variáveis de Fonte (Carregadas do LocalStorage)
+let CONFIG = {
+    instanceIdForce: 'painel_principal',
+    gammaSymbol: 'NQ',
+    sourceMarket: 'local', // 'local' ou 'supabase'
+    instanceIdMarket: 'nt8_main',
+    sourceScreen: 'local', // 'local' ou 'supabase'
+    instanceIdScreen: 'nt8_main'
+};
+
+// ================================================================
+//  AUTENTICAÇÃO
+// ================================================================
+let authToken = null;
+let authAssinaturaId = null;
+let authCheckInterval = null;
+const AUTH_STORAGE_KEY = 'vortex_auth_token';
+const AUTH_ASSINATURA_KEY = 'vortex_auth_assinatura';
+// ================================================================
+//  FUNÇÕES DE AUTENTICAÇÃO
+// ================================================================
+async function carregarMachineId() {
+try {
+const response = await fetch('http://localhost:8001/machine-id');
+if (response.ok) {
+const data = await response.json();
+const input = document.getElementById('loginMachineId');
+if (input && data.machine_id) {
+input.value = data.machine_id;
+input.style.color = '#22c55e';
+addSystemLog('sistema', '🖥️ Machine ID carregado: ' + data.machine_id.substring(0, 8) + '...');
+}
+} else {
+const input = document.getElementById('loginMachineId');
+if (input) {
+input.value = 'Não encontrado - Execute o NinjaTrader';
+input.style.color = '#ef4444';
+}
+addSystemLog('erro', '⚠️ Machine ID não encontrado. Execute o NinjaTrader primeiro.');
+}
+} catch (error) {
+console.error('[AUTH] Erro ao carregar Machine ID:', error);
+const input = document.getElementById('loginMachineId');
+if (input) {
+input.value = 'Erro de conexão com servidor';
+input.style.color = '#ef4444';
+}
+}
+}
+async function fazerLogin() {
+const assinaturaInput = document.getElementById('loginAssinatura');
+const machineIdInput = document.getElementById('loginMachineId');
+const errorDiv = document.getElementById('loginError');
+const btn = document.getElementById('loginBtn');
+const assinaturaId = assinaturaInput.value.trim();
+const machineId = machineIdInput.value.trim();
+if (!assinaturaId) { mostrarErroLogin('Informe o número da assinatura'); assinaturaInput.focus(); return; }
+if (!machineId || machineId.includes('Não encontrado') || machineId.includes('Erro')) { mostrarErroLogin('Machine ID não disponível. Execute o NinjaTrader primeiro.'); return; }
+btn.disabled = true; btn.innerHTML = '⏳ Validando...'; errorDiv.classList.remove('show');
+try {
+const response = await fetch('http://localhost:8001/validar', {
+method: 'POST', headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({ assinatura_id: assinaturaId })
+});
+const data = await response.json();
+if (data.success) {
+authToken = data.token; authAssinaturaId = data.assinatura_id;
+localStorage.setItem(AUTH_STORAGE_KEY, authToken);
+localStorage.setItem(AUTH_ASSINATURA_KEY, authAssinaturaId);
+addSystemLog('sistema', '✅ Login realizado — Assinatura: ' + assinaturaId);
+document.getElementById('loginOverlay').classList.add('hidden');
+iniciarVerificacaoSessao(); iniciarPainel();
+} else { mostrarErroLogin(data.message || 'Falha na validação'); }
+} catch (error) {
+let mensagemErro = 'Erro de conexão com o servidor.';
+if (error.message.includes('fetch')) mensagemErro = 'Servidor Python não está rodando.';
+mostrarErroLogin(mensagemErro);
+} finally { btn.disabled = false; btn.innerHTML = '🔐 Validar e Acessar'; }
+}
+function mostrarErroLogin(mensagem) { const errorDiv = document.getElementById('loginError'); errorDiv.textContent = '❌ ' + mensagem; errorDiv.classList.add('show'); }
+async function verificarSessao() {
+if (!authToken) return false;
+try {
+const response = await fetch('http://localhost:8001/check-auth', { method: 'GET', headers: { 'Authorization': 'Bearer ' + authToken } });
+const data = await response.json();
+if (data.authenticated) return true; else { fazerLogout('Sessão expirada.'); return false; }
+} catch (error) { return false; }
+}
+function iniciarVerificacaoSessao() {
+if (authCheckInterval) clearInterval(authCheckInterval);
+authCheckInterval = setInterval(async () => { const valido = await verificarSessao(); if (!valido) clearInterval(authCheckInterval); }, 5 * 60 * 1000);
+}
+async function fazerLogout(motivo) {
+authToken = null; authAssinaturaId = null;
+localStorage.removeItem(AUTH_STORAGE_KEY); localStorage.removeItem(AUTH_ASSINATURA_KEY);
+if (authCheckInterval) { clearInterval(authCheckInterval); authCheckInterval = null; }
+if (typeof iaRodando !== 'undefined' && iaRodando) { if (typeof toggleIA === 'function') toggleIA(); }
+if (typeof dataUpdateInterval !== 'undefined' && dataUpdateInterval) { clearInterval(dataUpdateInterval); dataUpdateInterval = null; }
+document.getElementById('loginOverlay').classList.remove('hidden');
+addSystemLog('sistema', ' ' + (motivo || 'Logout realizado'));
+}
+async function tentarRestaurarSessao() {
+const savedToken = localStorage.getItem(AUTH_STORAGE_KEY);
+const savedAssinatura = localStorage.getItem(AUTH_ASSINATURA_KEY);
+if (savedToken && savedAssinatura) {
+authToken = savedToken; authAssinaturaId = savedAssinatura;
+const valido = await verificarSessao();
+if (valido) {
+addSystemLog('sistema', '✅ Sessão restaurada — Assinatura: ' + savedAssinatura);
+document.getElementById('loginOverlay').classList.add('hidden');
+iniciarVerificacaoSessao();
+if (typeof iniciarPainel === 'function') iniciarPainel();
+return true;
+} else {
+localStorage.removeItem(AUTH_STORAGE_KEY); localStorage.removeItem(AUTH_ASSINATURA_KEY);
+authToken = null; authAssinaturaId = null;
+}
+}
+return false;
+}
+
+// Função para salvar notícias no Supabase
+async function saveNewsToSupabase(newsEvents) {
+    try {
+        const newsToInsert = newsEvents.map(event => ({
+            event_id: `${event.date.getTime()}_${event.country}_${event.title.replace(/\s+/g, '_')}`,
+            country: event.country,
+            title: event.title,
+            impact: event.impact,
+            event_date: event.date.toISOString(),
+            forecast: event.forecast || null,
+            previous: event.previous || null,
+            actual: event.actual || null,
+            unit: event.unit || null
+        }));
+
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/economic_news`, {
+            method: 'POST',
+            headers: {
+                'apikey': SUPABASE_API_KEY,
+                'Authorization': `Bearer ${SUPABASE_API_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'resolution=merge-duplicates'
+            },
+            body: JSON.stringify(newsToInsert)
+        });
+
+        if (response.ok) {
+            console.log('✅ Notícias salvas no Supabase');
+            addSystemLog('sistema', `✅ ${newsEvents.length} notícias salvas no banco`);
+        }
+    } catch (error) {
+        console.error('❌ Erro ao salvar notícias:', error);
+    }
+}
+
+// Função para buscar notícias do Supabase
+async function fetchNewsFromSupabase() {
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        const url = `${SUPABASE_URL}/rest/v1/economic_news?event_date=gte.${today}&select=*`;
+        
+        const res = await fetch(url, {
+            headers: {
+                'apikey': SUPABASE_API_KEY,
+                'Authorization': `Bearer ${SUPABASE_API_KEY}`
+            }
+        });
+        
+        if (res.ok) {
+            const data = await res.json();
+            // Converte do formato do banco para o formato do painel
+            newsEvents = data.map(row => ({
+                date: new Date(row.event_date),
+                country: row.country,
+                title: row.title,
+                impact: row.impact,
+                forecast: row.forecast,
+                previous: row.previous,
+                actual: row.actual,
+                unit: row.unit,
+                alertedBefore: false,
+                alertedAfter: false
+            })).sort((a, b) => a.date - b.date);
+            
+            renderNewsList();
+            addSystemLog('sistema', `✅ ${newsEvents.length} notícias carregadas do banco`);
+        }
+    } catch (e) {
+        console.warn('[SUPABASE] Erro ao buscar notícias:', e);
+    }
+}
+// ================================================================
+//  ESTADO GLOBAL
+// ================================================================
+let dataUpdateInterval = null, analysisCycleInterval = null, latestMarketData = null, analisesRecentes = [], blockTradesHistory = [], forcasData = {}, dadosRodando = false, iaRodando = false, cycleRunning = false, cicloNum = 0, ai1BackoffUntil = 0, currentTemplateName = "Padrão";
+let windowMinutes = Infinity, windowBaseline = null, windowTimer = null, rawBuyVol = 0, rawSellVol = 0;
+const MODELOS_COM_VISAO = ['meta-llama/llama-4-scout-17b-16e-instruct', 'meta-llama/llama-4-maverick-17b-128e-instruct'];
+const forcasConfig = [{ id: 'nasdaq_impulso', nome: 'Nasdaq', ativo: false }, { id: 'sp500_impulso', nome: 'S&P 500', ativo: false }, { id: 'vix_impulso', nome: 'VIX', ativo: false }, { id: 'usdindex_impulso', nome: 'USDIndex', ativo: false }, { id: 'nvidia_impulso', nome: 'NVIDIA', ativo: false }, { id: 'microsoft_impulso', nome: 'Microsoft', ativo: false }, { id: 'apple_impulso', nome: 'Apple', ativo: false }, { id: 'meta_impulso', nome: 'Meta', ativo: false }, { id: 'amazon_impulso', nome: 'Amazon', ativo: false }, { id: 'alphabet_impulso', nome: 'Alphabet', ativo: false }, { id: 'tesla_impulso', nome: 'Tesla', ativo: false }];
+let alertConfig = {
+sent: { ativo: false, max: 55, min: 45, cooldown: 5, telegram: false },
+bt: { ativo: false, vol: 20, cooldown: 5, telegram: false },
+delta: { ativo: false, sell: 0.50, buy: 1.50, volMin: 50, cooldown: 5, telegram: false },
+acel: { ativo: false, explosao: false, exaustao: false, compressao: false, cooldown: 5, telegram: false },
+nivel: { ativo: false, dist: 10, niveis: [], cooldown: 10, telegram: false }
+};
+let alertCooldowns = { sent: 0, bt: 0, delta: 0, acel: 0, nivel: 0 };
+let nivelCooldowns = {};
+let btAlertedTrades = [];
+let currentAlertContext = null;
+let alertMode = 'individual';
+let logicConditionsState = {
+sent: { met: false, direction: null, value: 0 },
+bt: { met: false, direction: null, volume: 0 },
+delta: { met: false, direction: null, ratio: 0 },
+acel: { met: false, estado: null, direction: null },
+nivel: { met: false, nivel: null, distance: 0 }
+};
+let logicAlertCooldown = 0;
+let telegramConfig = { botToken: '', chatId: '', sendImage: true, sendSignals: true, onlyEntry: false };
+let activeAlertTimeout = null;
+let systemLog = [];
+const MAX_LOG_ENTRIES = 100;
+let newsConfig = { endpoint: '/api/news', alertBefore: 5, alertAfter: 15, cooldown: 10, countries: ['USD', 'EUR', 'GBP', 'JPY'], impactHigh: true, impactMedium: true, impactLow: false, telegram: true, sound: true };
+let newsEvents = [];
+let newsCooldowns = {};
+let newsFilter = 'all';
+let newsCheckInterval = null;
+// ================================================================
+//  NAVEGAÇÃO
+// ================================================================
+function showPage(pageId, element) {
+    console.log('[NAV] Abrindo página:', pageId);
+    
+    // Esconde todas as páginas
+    document.querySelectorAll('.page-section').forEach(p => {
+        p.classList.remove('active');
+        p.style.display = 'none';
+    });
+    
+    // Remove active de todos os menu items
+    document.querySelectorAll('.menu-item').forEach(m => {
+        m.classList.remove('active');
+    });
+    
+    // Mostra a página selecionada
+    const targetPage = document.getElementById(pageId);
+    if (targetPage) {
+        targetPage.classList.add('active');
+        targetPage.style.display = 'block';
+        console.log('[NAV] Página exibida:', pageId);
+    } else {
+        console.error('[NAV] Página não encontrada:', pageId);
+    }
+    
+    // Marca o menu item como ativo
+    if (element) {
+        element.classList.add('active');
+    }
+    
+    // Rola para o topo
+    window.scrollTo(0, 0);
+}
+
+function toggleMenu() { document.getElementById('sideMenu').classList.toggle('collapsed'); document.getElementById('mainContent').classList.toggle('expanded'); }
+function switchConfigTab(tab, btn) {
+document.querySelectorAll('#configuracoes .config-tab-content').forEach(el => el.style.display = 'none');
+document.querySelectorAll('#configuracoes .alert-tab-btn').forEach(el => el.classList.remove('active'));
+const target = document.getElementById(`configTab-${tab}`);
+if (target) target.style.display = 'block';
+if (btn) btn.classList.add('active');
+}
+function switchAlertTab(tab, btn) {
+document.querySelectorAll('#alertas .alert-tab-content').forEach(el => el.style.display = 'none');
+document.querySelectorAll('#alertas .alert-tab-btn').forEach(el => el.classList.remove('active'));
+const target = document.getElementById(`alertTab-${tab}`);
+if (target) target.style.display = 'block';
+if (btn) btn.classList.add('active');
+}
+function switchLogTab(tab, btn) {
+document.querySelectorAll('.log-tab-content').forEach(el => el.style.display = 'none');
+document.querySelectorAll('.log-tab-btn').forEach(el => el.classList.remove('active'));
+const target = document.getElementById(`logTab-${tab}`);
+if (target) target.style.display = 'flex';
+if (btn) btn.classList.add('active');
+if (tab === 'noticias' && newsEvents.length === 0) fetchNews();
+}
+// ================================================================
+//  SISTEMA DE LOG UNIFICADO
+// ================================================================
+function addSystemLog(tipo, mensagem) {
+const entry = { ts: new Date().toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit', second:'2-digit'}), tipo: tipo, mensagem: mensagem };
+systemLog.unshift(entry);
+if (systemLog.length > MAX_LOG_ENTRIES) systemLog.pop();
+renderSystemLog();
+}
+function renderSystemLog() {
+const logDiv = document.getElementById('aiLog');
+if (!logDiv) return;
+if (systemLog.length === 0) { logDiv.innerHTML = '<div class="text-slate-500 text-xs text-center py-4">Aguardando eventos...</div>'; document.getElementById('logCount').textContent = '0 mensagens'; return; }
+logDiv.innerHTML = systemLog.map(e => {
+let prefix = '', cls = '';
+switch(e.tipo) {
+case 'sistema': prefix = 'SISTEMA:'; cls = 'log-entry-sistema'; break;
+case 'alerta': prefix = 'ALERTA:'; cls = 'log-entry-alerta'; break;
+case 'ia': prefix = 'IA:'; cls = 'log-entry-ia'; break;
+case 'erro': prefix = 'ERRO:'; cls = 'log-entry-erro'; break;
+case 'noticia': prefix = 'NOTÍCIA:'; cls = 'log-entry-noticia'; break;
+}
+return `<div class="log-entry ${cls}"><span class="log-time">${e.ts}</span><span class="log-prefix">${prefix}</span>${e.mensagem}</div>`;
+}).join('');
+document.getElementById('logCount').textContent = systemLog.length + ' mensagens';
+}
+function clearSystemLog() { systemLog = []; renderSystemLog(); }
+// ================================================================
+//  FUNÇÕES DE BUSCA HÍBRIDAS
+// ================================================================
+async function fetchMarketData() {
+    if (CONFIG.sourceMarket === 'supabase') {
+        await fetchMarketDataSupabase();
+    } else {
+        await fetchMarketDataLocal();
+    }
+}
+
+async function fetchMarketDataSupabase() {
+    try {
+        const url = `${SUPABASE_URL}/rest/v1/market_data?instance_id=eq.${CONFIG.instanceIdMarket}&select=*`;
+        
+        const res = await fetch(url, { 
+            headers: { 
+                'apikey': SUPABASE_API_KEY, 
+                'Authorization': `Bearer ${SUPABASE_API_KEY}` 
+            } 
+        });
+        
+        if (!res.ok) {
+            console.error('[MARKET] Erro HTTP:', res.status);
+            return;
+        }
+        
+        const data = await res.json();
+        console.log('[MARKET] Dados Supabase:', data);
+        
+        if (data && data.length > 0) {
+            const row = data[0];
+            
+            latestMarketData = {
+                symbol: row.symbol || 'NQ',
+                price: parseFloat(row.price) || 0,
+                ts: row.ts || new Date().toLocaleTimeString(),
+                buyVolume: parseFloat(row.buy_volume) || 0,
+                sellVolume: parseFloat(row.sell_volume) || 0,
+                delta: parseFloat(row.delta) || 0,
+                deltaPct: parseFloat(row.delta_pct) || 0,
+                ratio: parseFloat(row.ratio) || 0,
+                printRate: parseFloat(row.print_rate) || 0,
+                buyPrints: parseFloat(row.buy_prints) || 0,
+                sellPrints: parseFloat(row.sell_prints) || 0,
+                largeTradeCount: parseFloat(row.large_trade_count) || 0,
+                lastLargeTradePrice: parseFloat(row.last_large_trade_price) || 0,
+                lastLargeTradeSide: row.last_large_trade_side || '',
+                recentTrades: row.recent_trades || [],
+                fisica: {
+                    zScore: parseFloat(row.zscore) || 0,
+                    atrRatio: parseFloat(row.atr_ratio) || 0,
+                    estado: row.estado || 'NORMAL'
+                },
+                gamma: latestMarketData?.gamma || {},
+                referencias: latestMarketData?.referencias || {}
+            };
+            
+            console.log('[MARKET] latestMarketData atualizado:', latestMarketData);
+            
+            // ✅ CHAMA updateUI IMEDIATAMENTE
+            updateUI(latestMarketData);
+            
+            // ✅ CHAMA updateMapaNiveis se tiver dados gamma
+            if (latestMarketData.gamma && latestMarketData.gamma.hvl > 0) {
+                updateMapaNiveis(latestMarketData);
+            }
+        }
+    } catch (e) { 
+        console.error('[MARKET] Erro:', e); 
+    }
+}
+
+async function fetchMarketDataLocal() {
+    try {
+        const res = await fetch('data.json?t=' + Date.now());
+        if (res.ok) {
+            latestMarketData = await res.json();
+            
+            // Garante estrutura
+            if (!latestMarketData.fisica) latestMarketData.fisica = { zScore: 0, atrRatio: 0, estado: 'NORMAL' };
+            if (!latestMarketData.gamma) latestMarketData.gamma = {};
+            if (!latestMarketData.referencias) latestMarketData.referencias = {};
+            
+            console.log('[MARKET] Dados locais:', latestMarketData);
+            
+            // ✅ CHAMA updateUI IMEDIATAMENTE
+            updateUI(latestMarketData);
+            
+            // ✅ CHAMA updateMapaNiveis se tiver dados gamma
+            if (latestMarketData.gamma && latestMarketData.gamma.hvl > 0) {
+                updateMapaNiveis(latestMarketData);
+            }
+        }
+    } catch (e) { 
+        console.error('[MARKET] Erro:', e); 
+    }
+}
+
+// 2. SCREENSHOT (Local ou Supabase)
+async function fetchScreenshot() {
+    if (CONFIG.sourceScreen === 'supabase') {
+        await fetchScreenshotSupabase();
+    } else {
+        await fetchScreenshotLocal();
+    }
+}
+
+async function fetchScreenshotLocal() {
+    try {
+        const res = await fetch('chart.png?t=' + Date.now());
+        if (res.ok) {
+            const blob = await res.blob();
+            const reader = new FileReader();
+            reader.onloadend = function() {
+                const img = document.getElementById('chartImage');
+                img.src = reader.result;
+                img.classList.remove('hidden');
+                document.getElementById('chartPlaceholder').classList.add('hidden');
+            };
+            reader.readAsDataURL(blob);
+        }
+    } catch (e) { /* silencioso */ }
+}
+
+async function fetchScreenshotSupabase() {
+    try {
+        const url = `${SUPABASE_URL}/rest/v1/screenshots?instance_id=eq.${CONFIG.instanceIdScreen}&select=image_data`;
+        const res = await fetch(url, { headers: { 'apikey': SUPABASE_API_KEY, 'Authorization': `Bearer ${SUPABASE_API_KEY}` } });
+        if (res.ok) {
+            const data = await res.json();
+            if (data && data.length > 0 && data[0].image_data) {
+                const img = document.getElementById('chartImage');
+                img.src = 'data:image/png;base64,' + data[0].image_data;
+                img.classList.remove('hidden');
+                document.getElementById('chartPlaceholder').classList.add('hidden');
+            }
+        }
+    } catch (e) { console.warn('[SUPABASE] Erro screenshot', e); }
+}
+
+// 3. FORÇA E NÍVEIS (SEMPRE SUPABASE)
+async function fetchForceFromSupabase() {
+    const url = `${SUPABASE_URL}/rest/v1/nasdaq_force?instance_id=eq.${CONFIG.instanceIdForce}&select=*&limit=1`;
+    try {
+        const res = await fetch(url, { headers: { 'apikey': SUPABASE_API_KEY, 'Authorization': `Bearer ${SUPABASE_API_KEY}` } });
+        if (res.ok) {
+            const data = await res.json();
+            if (data && data.length > 0) {
+                const row = data[0];
+                const mapping = {
+                    'nasdaq_impulso': { c: 'nasdaq_compra', v: 'nasdaq_venda' },
+                    'sp500_impulso': { c: 'sp500_compra', v: 'sp500_venda' },
+                    'vix_impulso': { c: 'vix_compra', v: 'vix_venda' },
+                    'usdindex_impulso': { c: 'usdindex_compra', v: 'usdindex_venda' },
+                    'nvidia_impulso': { c: 'nvidia_compra', v: 'nvidia_venda' },
+                    'microsoft_impulso': { c: 'microsoft_compra', v: 'microsoft_venda' },
+                    'apple_impulso': { c: 'apple_compra', v: 'apple_venda' },
+                    'meta_impulso': { c: 'meta_compra', v: 'meta_venda' },
+                    'amazon_impulso': { c: 'amazon_compra', v: 'amazon_venda' },
+                    'alphabet_impulso': { c: 'alphabet_compra', v: 'alphabet_venda' },
+                    'tesla_impulso': { c: 'tesla_compra', v: 'tesla_venda' }
+                };
+                for (const [key, cols] of Object.entries(mapping)) {
+                    const compra = parseFloat(row[cols.c]) || 0;
+                    forcasData[key] = {
+                        compra: Math.max(0, Math.min(100, Math.round(compra))),
+                        venda: Math.max(0, Math.min(100, 100 - Math.round(compra)))
+                    };
+                }
+                renderizarForcas();
+            }
+        }
+    } catch (e) { console.warn('[SUPABASE] Erro force', e); }
+}
+
+function parseGammaArray(val) {
+    if (Array.isArray(val)) return val.map(v => parseFloat(v) || 0);
+    if (typeof val === 'string') { try { const parsed = JSON.parse(val); if (Array.isArray(parsed)) return parsed.map(v => parseFloat(v) || 0); } catch(e) {} }
+    return [];
+}
+
+async function fetchGammaLevels() {
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        const url = `${SUPABASE_URL}/rest/v1/gamma_levels?reference_symbol=eq.${CONFIG.gammaSymbol}&trade_date=eq.${today}&select=*`;
+        
+        console.log('[GAMMA] Buscando:', url);
+        
+        const res = await fetch(url, { 
+            headers: { 
+                'apikey': SUPABASE_API_KEY, 
+                'Authorization': `Bearer ${SUPABASE_API_KEY}` 
+            } 
+        });
+        
+        if (!res.ok) {
+            console.error('[GAMMA] Erro HTTP:', res.status);
+            addSystemLog('erro', `Gamma: Erro ${res.status}`);
+            return;
+        }
+        
+        const data = await res.json();
+        console.log('[GAMMA] Dados recebidos:', data);
+        
+        if (data && data.length > 0) {
+            const row = data[0];
+            
+            // ✅ CRÍTICO: Inicializa latestMarketData se não existir
+            if (!latestMarketData) {
+                latestMarketData = {
+                    price: 0,
+                    gamma: {},
+                    referencias: {}
+                };
+            }
+            
+            if (!latestMarketData.gamma) latestMarketData.gamma = {};
+            if (!latestMarketData.referencias) latestMarketData.referencias = {};
+            
+            const g = latestMarketData.gamma;
+            const r = latestMarketData.referencias;
+            
+            // Preenche dados Gamma
+            g.hvl = parseFloat(row.hvl) || 0;
+            g.callRes = parseFloat(row.call_resistance) || 0;
+            g.putSup = parseFloat(row.put_support) || 0;
+            g.max1D = parseFloat(row.max_1d) || 0;
+            g.min1D = parseFloat(row.min_1d) || 0;
+            g.hvl0DTE = parseFloat(row.hvl_0dte) || 0;
+            g.callRes0DTE = parseFloat(row.call_resistance_0dte) || 0;
+            g.putSup0DTE = parseFloat(row.put_support_0dte) || 0;
+            g.gammaWall0DTE = parseFloat(row.gamma_wall_0dte) || 0;
+            g.gex = parseGammaArray(row.gex);
+            g.bl = parseGammaArray(row.bl);
+            
+            // Preenche referências
+            r.prevDayAdjuste = parseFloat(row.prev_day_adjust) || 0;
+            r.prevDayHigh = parseFloat(row.prev_day_high) || 0;
+            r.prevDayLow = parseFloat(row.prev_day_low) || 0;
+            r.prevDayOpen = parseFloat(row.prev_day_open) || 0;
+            r.prevDayClose = parseFloat(row.prev_day_close) || 0;
+            
+            console.log('[GAMMA] Dados atualizados:', g);
+            console.log('[GAMMA] Referências:', r);
+            
+            // ✅ CHAMA updateMapaNiveis IMEDIATAMENTE
+            if (latestMarketData.price || g.hvl > 0) {
+                updateMapaNiveis(latestMarketData);
+            }
+            
+            // ✅ Se não tem preço ainda, tenta buscar do Supabase
+            if (!latestMarketData.price || latestMarketData.price === 0) {
+                await fetchMarketData();
+            }
+            
+            addSystemLog('sistema', `✅ Níveis Gamma carregados: HVL=${g.hvl > 0 ? g.hvl.toFixed(2) : 'sem dados'}`);
+        } else {
+            console.warn('[GAMMA] Nenhum dado encontrado para hoje');
+            addSystemLog('sistema', `⚠️ Sem níveis Gamma no Supabase para ${today}`);
+        }
+    } catch (e) { 
+        console.error('[GAMMA] Erro:', e); 
+        addSystemLog('erro', 'Gamma: ' + e.message);
+    }
+}
+
+// ================================================================
+//  GERENCIAMENTO DE CONFIGURAÇÕES (UI)
+// ================================================================
+function salvarConfiguracoesFontes() {
+    CONFIG.instanceIdForce = document.getElementById('instanceIdForce').value;
+    CONFIG.gammaSymbol = document.getElementById('gammaSymbol').value;
+    CONFIG.sourceMarket = document.querySelector('input[name="sourceMarket"]:checked').value;
+    CONFIG.instanceIdMarket = document.getElementById('instanceIdMarket').value;
+    CONFIG.sourceScreen = document.querySelector('input[name="sourceScreen"]:checked').value;
+    CONFIG.instanceIdScreen = document.getElementById('instanceIdScreen').value;
+
+    localStorage.setItem('vortexConfigFontes', JSON.stringify(CONFIG));
+    alert('✅ Fontes de dados atualizadas! O painel vai alternar automaticamente.');
+    addSystemLog('sistema', `Fontes: Market=${CONFIG.sourceMarket}, Screen=${CONFIG.sourceScreen}`);
+}
+
+function carregarConfiguracoesFontes() {
+    const saved = localStorage.getItem('vortexConfigFontes');
+    if (saved) {
+        CONFIG = { ...CONFIG, ...JSON.parse(saved) };
+    }
+    // Atualiza UI
+    document.getElementById('instanceIdForce').value = CONFIG.instanceIdForce;
+    document.getElementById('gammaSymbol').value = CONFIG.gammaSymbol;
+    document.querySelector(`input[name="sourceMarket"][value="${CONFIG.sourceMarket}"]`).checked = true;
+    document.getElementById('instanceIdMarket').value = CONFIG.instanceIdMarket;
+    document.querySelector(`input[name="sourceScreen"][value="${CONFIG.sourceScreen}"]`).checked = true;
+    document.getElementById('instanceIdScreen').value = CONFIG.instanceIdScreen;
+}
+
+// ================================================================
+//  INICIALIZAÇÃO
+// ================================================================
+window.onload = async function () {
+carregarConfiguracoes(); carregarAlertConfig(); carregarTelegramConfig(); carregarNewsConfig();
+carregarConfiguracoesFontes();
+const savedMode = localStorage.getItem('vortexAlertMode');
+if (savedMode) setAlertMode(savedMode);
+renderizarForcas();
+addSystemLog('sistema', '🚀 Vortex AI inicializado — Aguardando autenticação');
+await carregarMachineId();
+const sessaoRestaurada = await tentarRestaurarSessao();
+if (!sessaoRestaurada) addSystemLog('sistema', '🔐 Tela de login exibida');
+setTimeout(function() { fetchNews(); }, 2000);
+newsCheckInterval = setInterval(checkNewsAlerts, 30000);
+setInterval(function() { if (newsEvents.length > 0) renderNewsList(); }, 10000);
+};
+function iniciarPainel() {
+const btnIAIn = document.getElementById('btnIAIniciar');
+const btnIAPar = document.getElementById('btnIAParar');
+const statusEl = document.getElementById('statusIndicator');
+if (dadosRodando) return;
+dadosRodando = true;
+btnIAIn.style.display = ''; btnIAPar.style.display = 'none';
+statusEl.innerText = '● DADOS ATIVOS  ⏸ IA PAUSADA';
+statusEl.className = 'text-[12px] text-center mb-2 text-blue-400';
+setIADisabledState(true);
+addSystemLog('sistema', '📊 Monitoramento de dados iniciado (Híbrido)');
+
+dataUpdateInterval = setInterval(() => {
+    fetchMarketData();
+    fetchForceFromSupabase();
+    fetchScreenshot();
+}, 1000);
+
+// Gamma Levels atualiza a cada 60 segundos
+setInterval(fetchGammaLevels, 900000);
+
+fetchMarketData(); fetchForceFromSupabase(); fetchGammaLevels(); fetchScreenshot();
+setInterval(updateWindowStatus, 1000);
+}
+function setIADisabledState(disabled) {
+const card = document.getElementById('aiDecisionCard');
+const overlay = document.getElementById('iaDisabledOverlay');
+const sinal = document.getElementById('aiSinal');
+if (disabled) { card.classList.add('ia-off'); overlay.style.display = 'block'; if (sinal.innerText === 'AGUARDANDO') { sinal.innerText = 'IA OFF'; sinal.style.color = '#eab308'; } }
+else { card.classList.remove('ia-off'); overlay.style.display = 'none'; if (sinal.innerText === 'IA OFF') { sinal.innerText = 'AGUARDANDO'; sinal.style.color = ''; } }
+}
+function toggleIA() {
+const btnIAIn = document.getElementById('btnIAIniciar');
+const btnIAPar = document.getElementById('btnIAParar');
+const statusEl = document.getElementById('statusIndicator');
+const intervaloMs = parseInt(document.getElementById('intervalo').value);
+if (!dadosRodando) return;
+if (iaRodando) {
+clearInterval(analysisCycleInterval); analysisCycleInterval = null; iaRodando = false; cycleRunning = false;
+btnIAIn.style.display = ''; btnIAPar.style.display = 'none';
+statusEl.innerText = '● DADOS ATIVOS  ⏸ IA PAUSADA';
+statusEl.className = 'text-[12px] text-center mb-2 text-blue-400';
+setCicloStatus('⏸ IA pausada', 'text-slate-500'); setIADisabledState(true);
+addSystemLog('sistema', '⏸ IA pausada');
+} else {
+const apiKey = document.getElementById('groqKey').value.trim();
+if (!apiKey) { alert('Configure a API Key da Groq.'); return; }
+if (!apiKey.startsWith('gsk_')) { alert('API Key inválida.'); return; }
+iaRodando = true; btnIAIn.style.display = 'none'; btnIAPar.style.display = '';
+statusEl.innerText = '● DADOS ATIVOS  🧠 IA ATIVA';
+statusEl.className = 'text-[12px] text-center mb-2 text-green-400';
+setIADisabledState(false); esconderErroAPI();
+analysisCycleInterval = setInterval(() => runAnalysisCycle(), intervaloMs);
+setTimeout(() => runAnalysisCycle(), 500);
+addSystemLog('sistema', '🧠 IA ativada — Ciclo: ' + (intervaloMs/1000) + 's');
+}
+}
+async function runAnalysisCycle() {
+if (cycleRunning) return; cycleRunning = true;
+try { setCicloStatus('🔵 IA: Analisando...', 'text-blue-400'); await callGroqAI1(); setCicloStatus('✅ ' + new Date().toLocaleTimeString(), 'text-green-400'); }
+catch (err) { console.error('[ERRO IA]', err); setCicloStatus('❌ ' + err.message, 'text-red-400'); addSystemLog('erro', 'IA: ' + err.message); }
+finally { cycleRunning = false; }
+}
+function setCicloStatus(texto, colorClass) { const el = document.getElementById('cicloStatus'); el.innerText = texto; el.className = colorClass; }
+function mostrarErroAPI(msg) { const banner = document.getElementById('apiErrorBanner'); document.getElementById('apiErrorMsg').textContent = msg; banner.classList.add('show'); addSystemLog('erro', 'API Groq: ' + msg); setTimeout(() => banner.classList.remove('show'), 30000); }
+function esconderErroAPI() { document.getElementById('apiErrorBanner').classList.remove('show'); }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+// ================================================================
+//  TELEGRAM
+// ================================================================
+async function testarTelegram() {
+const token = document.getElementById('telegramBotToken').value.trim();
+const chatId = document.getElementById('telegramChatId').value.trim();
+const statusEl = document.getElementById('telegramStatus');
+if (!token || !chatId) { statusEl.className = 'text-xs text-center p-2 rounded bg-red-900/30 text-red-400'; statusEl.textContent = '❌ Preencha Token e Chat ID'; statusEl.classList.remove('hidden'); return; }
+statusEl.className = 'text-xs text-center p-2 rounded bg-blue-900/30 text-blue-400'; statusEl.textContent = ' Testando...'; statusEl.classList.remove('hidden');
+try {
+const url = `https://api.telegram.org/bot${token}`;
+const symbol = latestMarketData?.symbol || 'N/A';
+const textRes = await fetch(`${url}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chatId, text: `✅ *VORTEX AI — Teste*\n📊 Ativo: *${symbol}*\n🕐 ${new Date().toLocaleString('pt-BR')}`, parse_mode: 'Markdown' }) });
+const textData = await textRes.json();
+if (!textData.ok) { statusEl.className = 'text-xs text-center p-2 rounded bg-red-900/30 text-red-400'; statusEl.textContent = '❌ ' + (textData.description || 'Erro'); setTimeout(() => statusEl.classList.add('hidden'), 8000); return; }
+statusEl.className = 'text-xs text-center p-2 rounded bg-green-900/30 text-green-400'; statusEl.innerHTML = '✅ <strong>Texto OK!</strong>';
+} catch (e) { statusEl.className = 'text-xs text-center p-2 rounded bg-red-900/30 text-red-400'; statusEl.textContent = ' ' + e.message; }
+setTimeout(() => statusEl.classList.add('hidden'), 10000);
+}
+async function enviarTelegram(mensagem, incluirImagem = false) {
+if (!telegramConfig.botToken || !telegramConfig.chatId) return false;
+try {
+const url = `https://api.telegram.org/bot${telegramConfig.botToken}`;
+if (incluirImagem && telegramConfig.sendImage) {
+const imgEl = document.getElementById('chartImage');
+if (imgEl && imgEl.src && imgEl.src.startsWith('data:')) {
+const base64Data = imgEl.src.split(',')[1]; const byteCharacters = atob(base64Data); const byteNumbers = new Array(byteCharacters.length); for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i); const blob = new Blob([new Uint8Array(byteNumbers)], { type: 'image/png' }); const formData = new FormData(); formData.append('chat_id', telegramConfig.chatId); formData.append('photo', blob, 'chart.png'); formData.append('caption', mensagem); formData.append('parse_mode', 'Markdown'); const response = await fetch(`${url}/sendPhoto`, { method: 'POST', body: formData }); return response.ok;
+}
+}
+const response = await fetch(`${url}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: telegramConfig.chatId, text: mensagem, parse_mode: 'Markdown' }) });
+return response.ok;
+} catch (e) { return false; }
+}
+function getSymbolHeader() { const symbol = latestMarketData?.symbol || 'N/A'; return `📊 *Ativo:* ${symbol}`; }
+function getCurrentPrice() { return latestMarketData?.price?.toFixed(2) || '--'; }
+async function enviarAlertaTelegram(tipoEmoji, tipoNome, msg, detail) {
+const header = getSymbolHeader(); const timestamp = new Date().toLocaleString('pt-BR');
+let mensagem = `${tipoEmoji} *ALERTA ${tipoNome}*\n${header}\n⏰ ${timestamp}\n${msg}`;
+if (detail) mensagem += `\n📋 *Detalhes:*\n${detail}`;
+await enviarTelegram(mensagem, true);
+}
+async function enviarSinalTelegram(sinal, confianca, alvo, stop, resumo, gatilho) {
+if (!telegramConfig.sendSignals) return;
+if (telegramConfig.onlyEntry && (sinal === 'AGUARDAR' || sinal === 'MANTER')) return;
+const emoji = sinal === 'COMPRA' ? '🟢' : sinal === 'VENDA' ? '🔴' : sinal === 'SAIR' ? '' : '';
+const header = getSymbolHeader(); const preco = getCurrentPrice();
+let msg = `${emoji} *VORTEX AI — ${sinal}*\n${header}\n💰 *Preço:* ${preco}\n📄 *Estratégia:* ${currentTemplateName}\n📊 *Confiança:* ${confianca}\n🎯 *Alvo:* ${alvo}\n🛑 *Stop:* ${stop}\n⏰ ${new Date().toLocaleString('pt-BR')}`;
+if (gatilho) msg += `\n*Gatilho:* ${gatilho}`;
+if (resumo) msg += `\n*Resumo:* ${resumo}`;
+await enviarTelegram(msg, telegramConfig.sendImage);
+}
+function salvarConfiguracoesTelegram() {
+telegramConfig.botToken = document.getElementById('telegramBotToken').value.trim();
+telegramConfig.chatId = document.getElementById('telegramChatId').value.trim();
+telegramConfig.sendImage = document.getElementById('telegramSendImage').checked;
+telegramConfig.sendSignals = document.getElementById('telegramSendSignals').checked;
+telegramConfig.onlyEntry = document.getElementById('telegramOnlyEntry').checked;
+localStorage.setItem('vortexTelegram', JSON.stringify(telegramConfig));
+alert('✅ Telegram salvo!');
+}
+function carregarTelegramConfig() {
+const s = localStorage.getItem('vortexTelegram');
+if (s) { try { telegramConfig = JSON.parse(s); document.getElementById('telegramBotToken').value = telegramConfig.botToken || ''; document.getElementById('telegramChatId').value = telegramConfig.chatId || ''; document.getElementById('telegramSendImage').checked = telegramConfig.sendImage !== false; document.getElementById('telegramSendSignals').checked = telegramConfig.sendSignals !== false; document.getElementById('telegramOnlyEntry').checked = telegramConfig.onlyEntry || false; } catch(e){} }
+}
+function salvarTemplate() {
+const nome = document.getElementById('templateName').value.trim();
+const prompt = document.getElementById('systemPrompt').value;
+if (!nome) { alert('Digite um nome!'); return; }
+const blob = new Blob([JSON.stringify({ nome, prompt, data: new Date().toISOString() }, null, 2)], { type: 'application/json' });
+const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `template_${nome.replace(/\s+/g, '_')}.json`; a.click();
+alert(`✅ Template "${nome}" salvo!`);
+currentTemplateName = nome; atualizarBadgeTemplate();
+}
+function carregarTemplate() {
+const input = document.createElement('input'); input.type = 'file'; input.accept = '.json,.txt';
+input.onchange = e => { const file = e.target.files[0]; const reader = new FileReader(); reader.onload = ev => { try { const data = JSON.parse(ev.target.result); if (data.prompt) { document.getElementById('systemPrompt').value = data.prompt; document.getElementById('templateName').value = data.nome || ''; currentTemplateName = data.nome || file.name; } else { document.getElementById('systemPrompt').value = ev.target.result; currentTemplateName = file.name; } atualizarBadgeTemplate(); alert(`✅ Template carregado!`); } catch (err) { alert('❌ Erro: ' + err.message); } }; reader.readAsText(file); }; input.click();
+}
+function atualizarBadgeTemplate() { const badge = document.getElementById('templateBadge'); const nameDisplay = document.getElementById('templateNameDisplay'); if (currentTemplateName && currentTemplateName !== "Padrão") { badge.style.display = 'inline-block'; nameDisplay.textContent = currentTemplateName; } else { badge.style.display = 'none'; } }
+function calcularSentimento() {
+const pesos = { nasdaq: 0.35, sp500: 0.15, vix: 0.10, usdindex: 0.10, acoes: 0.20, zscore: 0.10 };
+const pesosAcoes = { nvidia: 0.25, tesla: 0.15, meta: 0.15, apple: 0.15, amazon: 0.10, alphabet: 0.10, microsoft: 0.10 };
+let sentimentoBruto = 0, totalPesosAtivos = 0;
+if (forcasData['nasdaq_impulso'] && forcasConfig.find(f => f.id === 'nasdaq_impulso')?.ativo) { sentimentoBruto += forcasData['nasdaq_impulso'].compra * pesos.nasdaq; totalPesosAtivos += pesos.nasdaq; }
+if (forcasData['sp500_impulso'] && forcasConfig.find(f => f.id === 'sp500_impulso')?.ativo) { sentimentoBruto += forcasData['sp500_impulso'].compra * pesos.sp500; totalPesosAtivos += pesos.sp500; }
+if (forcasData['vix_impulso'] && forcasConfig.find(f => f.id === 'vix_impulso')?.ativo) { sentimentoBruto += (100 - forcasData['vix_impulso'].compra) * pesos.vix; totalPesosAtivos += pesos.vix; }
+if (forcasData['usdindex_impulso'] && forcasConfig.find(f => f.id === 'usdindex_impulso')?.ativo) { sentimentoBruto += forcasData['usdindex_impulso'].compra * pesos.usdindex; totalPesosAtivos += pesos.usdindex; }
+for (const [key, weight] of Object.entries(pesosAcoes)) { const k = `${key}_impulso`; if (forcasData[k] && forcasConfig.find(f => f.id === k)?.ativo) { sentimentoBruto += forcasData[k].compra * weight * pesos.acoes; totalPesosAtivos += weight * pesos.acoes; } }
+if (latestMarketData?.fisica) { const z = 50 + (latestMarketData.fisica.zScore / 3) * 50; sentimentoBruto += Math.max(0, Math.min(100, z)) * pesos.zscore; totalPesosAtivos += pesos.zscore; }
+if (totalPesosAtivos === 0) return 50;
+return Math.round(Math.max(0, Math.min(100, sentimentoBruto / totalPesosAtivos)));
+}
+function setWindow(minutes) {
+document.querySelectorAll('.window-btn').forEach(btn => btn.classList.remove('active'));
+if (minutes === Infinity) document.getElementById('btnInf').classList.add('active'); else if (minutes === 1) document.getElementById('btn1m').classList.add('active'); else if (minutes === 5) document.getElementById('btn5m').classList.add('active'); else if (minutes === 15) document.getElementById('btn15m').classList.add('active');
+windowMinutes = minutes; windowBaseline = { buy: rawBuyVol, sell: rawSellVol, time: Date.now() };
+if (windowTimer) clearTimeout(windowTimer);
+if (windowMinutes < Infinity) { windowTimer = setTimeout(() => { windowBaseline = { buy: rawBuyVol, sell: rawSellVol, time: Date.now() }; setWindow(windowMinutes); }, windowMinutes * 60 * 1000); }
+if (latestMarketData) updateUI(latestMarketData);
+}
+function updateWindowStatus() {
+const label = document.getElementById('windowLabel'); const timer = document.getElementById('windowTimer');
+if (!label || !timer) return;
+if (windowMinutes === Infinity) { label.textContent = 'Acumulado'; timer.textContent = ''; }
+else { label.textContent = `${windowMinutes}min`; if (windowBaseline) { const remaining = windowMinutes * 60 - Math.floor((Date.now() - windowBaseline.time) / 1000); if (remaining > 0) timer.textContent = ` • ${Math.floor(remaining/60)}:${(remaining%60).toString().padStart(2,'0')}s`; else timer.textContent = ' • 0:00s'; } }
+}
+const UNIVERSAL_JSON_SCHEMA = `
+FORMATO JSON:
+{"sinal":"COMPRA|VENDA|AGUARDAR|MANTER|SAIR","confianca":"ALTA|MEDIA|BAIXA","gatilho":"descrição","alvo":numero,"stop":numero,"alerta":"aviso","som":"entrada|saida|alerta|nenhum","resumo":"máx 2 linhas"}`;
+const defaultPromptPrincipal = `Você é um Algoritmo Quantitativo de Scalpe especializado em Gamma Exposure e Order Flow.
+REGIME: Z-Score > 2 + ATR > 1.5 = EXPLOSÃO. ATR < 1 = EXAUSTÃO. |Z-Score| < 0.5 = COMPRESSÃO.
+NIVEIS: Call = teto. Put = piso. HVL = alto volume.
+REGRA: COMPRA: alvo > preço, stop < preço. VENDA: alvo < preço, stop > preço.`;
+const presets = { conservador: defaultPromptPrincipal, scalper: defaultPromptPrincipal, pullback: defaultPromptPrincipal, reversal: defaultPromptPrincipal };
+function getFilteredDataForIA() {
+if (!latestMarketData) return null;
+const data = latestMarketData;
+const filtered = {};
+filtered.preco = { ativo: data.symbol || 'N/A', preco: data.price ? data.price.toFixed(2) : '--', horario: data.ts || '--:--:--' };
+if (data.fisica) {
+filtered.acelerometro = {
+zscore: window.zScoreSuavizado ? window.zScoreSuavizado.toFixed(2) : (data.fisica.zScore || 0).toFixed(2),
+atrRatio: window.atrSuavizado ? window.atrSuavizado.toFixed(2) : (data.fisica.atrRatio || 0).toFixed(2),
+situacao: data.fisica.estado || 'NORMAL'
+};
+}
+filtered.sentimento = { percentual: calcularSentimento() };
+filtered.forcaMomentum = {};
+forcasConfig.forEach(f => { if (f.ativo && forcasData[f.id]) { filtered.forcaMomentum[f.nome] = { compra: forcasData[f.id].compra, venda: forcasData[f.id].venda }; } });
+filtered.niveis = {};
+const g = data.gamma || {}; const r = data.referencias || {};
+const nivelMap = { 'HVL': g.hvl, 'Call': g.callRes, 'Put': g.putSup, '1D Max': g.max1D, '1D Min': g.min1D, 'Ajuste': r.prevDayAdjuste, 'Máx Ant': r.prevDayHigh, 'Mín Ant': r.prevDayLow, 'HVL 0DTE': g.hvl0DTE, 'Call 0DTE': g.callRes0DTE, 'Put 0DTE': g.putSup0DTE, 'GWall 0DTE': g.gammaWall0DTE };
+const tipoToName = { 'hvl': 'HVL', 'call': 'Call', 'put': 'Put', 'max1d': '1D Max', 'min1d': '1D Min', 'prev': 'Ajuste', 'prevH': 'Máx Ant', 'prevL': 'Mín Ant', 'hvl0': 'HVL 0DTE', 'call0': 'Call 0DTE', 'put0': 'Put 0DTE', 'gwall': 'GWall 0DTE' };
+for (const [tipo, nome] of Object.entries(tipoToName)) { if (!niveisOcultos.has(tipo) && nivelMap[nome] > 0) { filtered.niveis[nome] = nivelMap[nome].toFixed(2); } }
+if (!niveisOcultos.has('bl') && g.bl) { filtered.niveis['BL'] = g.bl.filter(v => v > 0).map(v => v.toFixed(2)); }
+if (!niveisOcultos.has('gex') && g.gex) { filtered.niveis['GEX'] = g.gex.filter(v => v > 0).map(v => v.toFixed(2)); }
+filtered.blockTraders = (blockTradesHistory || []).slice(-10).map(t => ({ lado: t.side, volume: t.volume, preco: t.price.toFixed(2), horario: t.time }));
+const now = new Date(); const upcomingNews = newsEvents.filter(e => e.date > now).sort((a, b) => a.date - b.date)[0];
+if (upcomingNews) { filtered.noticia = { descricao: upcomingNews.title, impacto: upcomingNews.impact, horario: upcomingNews.date.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}), pais: upcomingNews.country }; }
+let displayBuy = rawBuyVol, displaySell = rawSellVol;
+if (windowBaseline && windowMinutes < Infinity) { displayBuy = Math.max(0, rawBuyVol - windowBaseline.buy); displaySell = Math.max(0, rawSellVol - windowBaseline.sell); }
+const displayTotal = displayBuy + displaySell;
+const displayRatio = displaySell > 0 ? (displayBuy / displaySell) : (displayBuy > 0 ? 999.99 : 1.0);
+let tempoRestante = 'N/A';
+if (windowMinutes < Infinity && windowBaseline) { const restanteSeg = Math.max(0, Math.floor((windowMinutes * 60 * 1000 - (Date.now() - windowBaseline.time)) / 1000)); tempoRestante = `${Math.floor(restanteSeg/60)}m ${restanteSeg%60}s`; }
+filtered.detalVolume = { ratio: displayRatio.toFixed(2), janela: windowMinutes === Infinity ? 'Acumulado' : `${windowMinutes}min`, tempoRestante: tempoRestante };
+return filtered;
+}
+async function callGroqAI1() {
+if (Date.now() < ai1BackoffUntil) return;
+const apiKey = document.getElementById('groqKey').value.trim();
+const model = document.getElementById('groqModel').value;
+const enviarImagem = document.getElementById('enviarImagemIA1').checked;
+const modelSuportaVisao = MODELOS_COM_VISAO.includes(model);
+const usarImagem = enviarImagem && modelSuportaVisao;
+if (!apiKey || !latestMarketData) return;
+let systemPrompt = (document.getElementById('systemPrompt').value || defaultPromptPrincipal) + UNIVERSAL_JSON_SCHEMA;
+const filteredData = getFilteredDataForIA();
+let userText = `📊 DADOS FILTRADOS (Apenas o que está ativo no painel):\n${JSON.stringify(filteredData, null, 2)}\nResponda APENAS com JSON.`;
+let userContent = userText;
+if (usarImagem) {
+const parts = [{ type: 'text', text: userText }];
+try {
+const imgEl = document.getElementById('chartImage');
+if (imgEl && imgEl.src && imgEl.src.startsWith('data:')) {
+parts.push({ type: 'image_url', image_url: { url: imgEl.src } });
+}
+} catch(e){}
+userContent = parts;
+}
+const payload = { model, temperature: 0.2, max_tokens: 1200, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }] };
+try {
+const res = await fetch('https://api.groq.com/openai/v1/chat/completions', { method: 'POST', headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+if (res.status === 429) { ai1BackoffUntil = Date.now() + 62000; addSystemLog('erro', 'IA: Rate limit Groq (62s backoff)'); return; }
+if (!res.ok) { mostrarErroAPI(`Erro Groq API: ${res.status}`); addSystemLog('erro', `IA: HTTP ${res.status}`); return; }
+const result = await res.json();
+const raw = result.choices?.[0]?.message?.content || '';
+let aiJson = null;
+try { aiJson = JSON.parse(raw.replace(/```json?/g, '').replace(/```/g, '').trim()); }
+catch(e) { const m = raw.match(/(\{[\s\S]*\})/); if (m) try { aiJson = JSON.parse(m[1]); } catch(e2){ addSystemLog('erro', 'IA: JSON inválido'); } }
+if (aiJson) { aiJson = normalizeAIResponse(aiJson); processAIResponse(aiJson); }
+else { addSystemLog('erro', 'IA: Resposta sem JSON válido'); }
+} catch(e){ addSystemLog('erro', 'IA: ' + e.message); }
+}
+function normalizeAIResponse(ai) {
+const normalized = { ...ai };
+if (!normalized.sinal && normalized.acao) {
+const acaoMap = { 'COMPRA': 'COMPRA', 'BUY': 'COMPRA', 'LONG': 'COMPRA', 'VENDA': 'VENDA', 'SELL': 'VENDA', 'SHORT': 'VENDA', 'NEUTRO': 'AGUARDAR', 'NEUTRAL': 'AGUARDAR', 'WAIT': 'AGUARDAR', 'AGUARDANDO_SINAL': 'AGUARDAR', 'AGUARDAR': 'AGUARDAR', 'HOLD': 'MANTER', 'MANTER': 'MANTER', 'SAIR': 'SAIR', 'EXIT': 'SAIR', 'CLOSE': 'SAIR' };
+normalized.sinal = acaoMap[normalized.acao?.toUpperCase()] || normalized.acao || 'AGUARDAR';
+}
+if (!normalized.sinal) normalized.sinal = 'AGUARDAR';
+if (!normalized.alvo && normalized.preco_entrada) normalized.alvo = normalized.preco_entrada;
+if (!normalized.stop && normalized.stop_loss) normalized.stop = normalized.stop_loss;
+if (!normalized.alvo && normalized.take_profit) normalized.alvo = normalized.take_profit;
+if (!normalized.resumo && normalized.motivo) normalized.resumo = normalized.motivo;
+if (typeof normalized.confianca === 'number') {
+if (normalized.confianca >= 75) normalized.confianca = 'ALTA';
+else if (normalized.confianca >= 50) normalized.confianca = 'MEDIA';
+else normalized.confianca = 'BAIXA';
+}
+if (!normalized.gatilho && normalized.vies_abertura) {
+const vies = normalized.vies_abertura;
+let gatilho = '';
+if (vies.direcao_preferencial) gatilho += `Viés: ${vies.direcao_preferencial}`;
+if (vies.nivel_gatilho) gatilho += ` | Gatilho: ${vies.nivel_gatilho}`;
+if (vies.janela_tempo) gatilho += ` | ${vies.janela_tempo}`;
+normalized.gatilho = gatilho;
+}
+if (!normalized.confianca) normalized.confianca = '--';
+if (!normalized.alvo) normalized.alvo = '--';
+if (!normalized.stop) normalized.stop = '--';
+return normalized;
+}
+function processAIResponse(ai) {
+cicloNum++;
+document.getElementById('aiSinal').innerText = ai.sinal || 'AGUARDANDO';
+document.getElementById('aiConfianca').innerText = ai.confianca || '--';
+document.getElementById('aiAlvo').innerText = ai.alvo || '--';
+document.getElementById('aiStop').innerText = ai.stop || '--';
+document.getElementById('aiGatilho').innerText = ai.gatilho || '';
+document.getElementById('aiAlerta').innerText = ai.alerta || '';
+const resumoEl = document.getElementById('aiResumo');
+if (ai.resumo) { resumoEl.innerText = ai.resumo; resumoEl.classList.remove('hidden'); } else { resumoEl.classList.add('hidden'); }
+const card = document.getElementById('aiDecisionCard');
+card.className = 'glass p-3 rounded-lg text-center border-2 transition-all h-full flex flex-col justify-between relative ';
+if (ai.sinal === 'COMPRA') { card.className += 'pulse-buy'; document.getElementById('aiSinal').className = 'text-4xl font-black my-1 text-green-400'; }
+else if (ai.sinal === 'VENDA') { card.className += 'pulse-sell'; document.getElementById('aiSinal').className = 'text-4xl font-black my-1 text-red-400'; }
+else { document.getElementById('aiSinal').className = 'text-4xl font-black my-1 text-slate-500'; }
+const resumoCurto = ai.resumo ? (ai.resumo.length > 60 ? ai.resumo.substring(0, 60) + '...' : ai.resumo) : '';
+addSystemLog('ia', `${ai.sinal} (${ai.confianca}) — Alvo: ${ai.alvo} | Stop: ${ai.stop} ${resumoCurto ? '— ' + resumoCurto : ''}`);
+enviarSinalTelegram(ai.sinal, ai.confianca, ai.alvo, ai.stop, ai.resumo, ai.gatilho);
+analisesRecentes.unshift({ ts: latestMarketData?.ts || new Date().toLocaleTimeString(), sinal: ai.sinal, confianca: ai.confianca, alvo: ai.alvo, stop: ai.stop, alerta: ai.alerta, resumo: ai.resumo });
+if (analisesRecentes.length > 3) analisesRecentes.pop();
+}
+function updateUI(data) {
+if (!data) return;
+document.getElementById('mSymbol').innerText = data.symbol || '--';
+document.getElementById('mPrice').innerText = data.price?.toFixed(2) || '--';
+document.getElementById('mTs').innerText = data.ts || '--:--:--';
+if (data.fisica) {
+const s = 0.3;
+if (!window.zScoreSuavizado) window.zScoreSuavizado = data.fisica.zScore || 0;
+if (!window.atrSuavizado) window.atrSuavizado = data.fisica.atrRatio || 0;
+window.zScoreSuavizado = (data.fisica.zScore * s) + (window.zScoreSuavizado * (1 - s));
+window.atrSuavizado = (data.fisica.atrRatio * s) + (window.atrSuavizado * (1 - s));
+document.getElementById('mZscore').innerText = window.zScoreSuavizado.toFixed(2);
+document.getElementById('mAtr').innerText = window.atrSuavizado.toFixed(2);
+let estado = data.fisica.estado;
+if (Math.abs(window.zScoreSuavizado) > 2.0 && window.atrSuavizado > 1.5) estado = window.zScoreSuavizado > 0 ? "EXPLOSAO_COMPRA" : "EXPLOSAO_VENDA";
+else if (Math.abs(window.zScoreSuavizado) > 2.0 && window.atrSuavizado < 1.0) estado = window.zScoreSuavizado > 0 ? "EXAUSTAO_ALTA" : "EXAUSTAO_BAIXA";
+else if (Math.abs(window.zScoreSuavizado) < 0.5) estado = "COMPRESSAO";
+else estado = "NORMAL";
+const estadoEl = document.getElementById('mEstado');
+estadoEl.innerText = estado;
+const cores = { 'EXPLOSAO_COMPRA': 'bg-green-900/50 text-green-400 border border-green-700', 'EXPLOSAO_VENDA': 'bg-red-900/50 text-red-400 border border-red-700', 'EXAUSTAO_ALTA': 'bg-yellow-900/50 text-yellow-400 border border-yellow-700', 'EXAUSTAO_BAIXA': 'bg-orange-900/50 text-orange-400 border border-orange-700', 'COMPRESSAO': 'bg-slate-800 text-slate-400 border border-slate-700', 'NORMAL': 'bg-blue-900/30 text-blue-300 border border-blue-800' };
+estadoEl.className = `mt-2 p-1.5 rounded text-center text-xs font-bold ${cores[estado] || cores['NORMAL']}`;
+document.getElementById('barZscore').style.width = Math.min(100, Math.max(0, (window.zScoreSuavizado + 3) / 6 * 100)) + '%';
+document.getElementById('barAtr').style.width = Math.min(100, window.atrSuavizado * 50) + '%';
+}
+if (data.gamma) { const g = data.gamma; document.getElementById('cardHvl').innerText = g.hvl > 0 ? g.hvl.toFixed(2) : '--'; document.getElementById('cardCall').innerText = g.callRes > 0 ? g.callRes.toFixed(2) : '--'; document.getElementById('cardPut').innerText = g.putSup > 0 ? g.putSup.toFixed(2) : '--'; document.getElementById('cardMax').innerText = g.max1D > 0 ? g.max1D.toFixed(2) : '--'; document.getElementById('cardMin').innerText = g.min1D > 0 ? g.min1D.toFixed(2) : '--'; document.getElementById('cardHvl0').innerText = g.hvl0DTE > 0 ? g.hvl0DTE.toFixed(2) : '--'; document.getElementById('cardCall0').innerText = g.callRes0DTE > 0 ? g.callRes0DTE.toFixed(2) : '--'; document.getElementById('cardPut0').innerText = g.putSup0DTE > 0 ? g.putSup0DTE.toFixed(2) : '--'; document.getElementById('cardGwall').innerText = g.gammaWall0DTE > 0 ? g.gammaWall0DTE.toFixed(2) : '--'; }
+if (data.referencias) { const r = data.referencias; document.getElementById('cardAjuste').innerText = r.prevDayAdjuste > 0 ? r.prevDayAdjuste.toFixed(2) : '--'; document.getElementById('cardPrevH').innerText = r.prevDayHigh > 0 ? r.prevDayHigh.toFixed(2) : '--'; document.getElementById('cardPrevL').innerText = r.prevDayLow > 0 ? r.prevDayLow.toFixed(2) : '--'; }
+rawBuyVol = data.buyVolume || 0; rawSellVol = data.sellVolume || 0;
+let displayBuy = rawBuyVol, displaySell = rawSellVol;
+if (windowBaseline && windowMinutes < Infinity) { displayBuy = Math.max(0, rawBuyVol - windowBaseline.buy); displaySell = Math.max(0, rawSellVol - windowBaseline.sell); }
+const displayDelta = displayBuy - displaySell;
+const displayTotal = displayBuy + displaySell;
+const displayRatio = displaySell > 0 ? (displayBuy / displaySell) : (displayBuy > 0 ? 999.99 : 1.0);
+const displayDeltaPct = displayTotal > 0 ? (displayBuy / displayTotal) * 100 : 50;
+document.getElementById('deltaValue').textContent = (displayDelta >= 0 ? '+' : '') + formatVol(displayDelta);
+document.getElementById('deltaValue').className = `font-mono font-bold ${displayDelta >= 0 ? 'text-green-400' : 'text-red-400'}`;
+document.getElementById('deltaRatio').textContent = displayRatio.toFixed(2);
+document.getElementById('deltaPrints').textContent = data.printRate?.toFixed(1) || '0';
+const marker = document.getElementById('deltaGaugeMarker'); if (marker) marker.style.left = `${Math.max(0, Math.min(100, displayDeltaPct))}%`;
+const sentiment = calcularSentimento();
+document.getElementById('sentimentValue').textContent = sentiment;
+const needle = document.getElementById('gaugeNeedle');
+needle.style.transform = `rotate(${(sentiment - 50) * 1.8}deg)`;
+needle.style.background = sentiment < 40 ? '#ef4444' : (sentiment < 60 ? '#f59e0b' : '#22c55e');
+checkAlerts(data, sentiment, displayRatio, displayBuy, displaySell, displayTotal);
+updateMapaNiveis(data);
+updateBlockTrades(data);
+}
+function formatVol(vol) { if (!vol && vol !== 0) return '0'; if (vol >= 1e6) return (vol/1e6).toFixed(2) + 'M'; if (vol >= 1e3) return (vol/1e3).toFixed(1) + 'K'; return vol.toString(); }
+// ================================================================
+//  SISTEMA DE ALERTAS
+// ================================================================
+function carregarAlertConfig() {
+const saved = localStorage.getItem('vortexAlerts');
+if (saved) {
+try {
+const p = JSON.parse(saved);
+alertConfig = { sent: { ...alertConfig.sent, ...(p.sent || {}) }, bt: { ...alertConfig.bt, ...(p.bt || {}) }, delta: { ...alertConfig.delta, ...(p.delta || {}) }, acel: { ...alertConfig.acel, ...(p.acel || {}) }, nivel: { ...alertConfig.nivel, ...(p.nivel || {}) } };
+document.getElementById('alertSentAtivo').checked = alertConfig.sent.ativo; document.getElementById('alertSentMax').value = alertConfig.sent.max; document.getElementById('alertSentMin').value = alertConfig.sent.min; document.getElementById('alertSentCooldown').value = alertConfig.sent.cooldown || 5; document.getElementById('alertSentTelegram').checked = alertConfig.sent.telegram || false;
+document.getElementById('alertBtAtivo').checked = alertConfig.bt.ativo; document.getElementById('alertBtVol').value = alertConfig.bt.vol; document.getElementById('alertBtCooldown').value = alertConfig.bt.cooldown || 5; document.getElementById('alertBtTelegram').checked = alertConfig.bt.telegram || false;
+document.getElementById('alertDeltaAtivo').checked = alertConfig.delta.ativo; document.getElementById('alertDeltaSell').value = alertConfig.delta.sell; document.getElementById('alertDeltaBuy').value = alertConfig.delta.buy; document.getElementById('alertDeltaVolMin').value = alertConfig.delta.volMin || 50; document.getElementById('alertDeltaCooldown').value = alertConfig.delta.cooldown || 5; document.getElementById('alertDeltaTelegram').checked = alertConfig.delta.telegram || false;
+document.getElementById('alertAcelAtivo').checked = alertConfig.acel.ativo; document.getElementById('alertAcelExplosao').checked = alertConfig.acel.explosao; document.getElementById('alertAcelExaustao').checked = alertConfig.acel.exaustao; document.getElementById('alertAcelCompressao').checked = alertConfig.acel.compressao || false; document.getElementById('alertAcelCooldown').value = alertConfig.acel.cooldown || 5; document.getElementById('alertAcelTelegram').checked = alertConfig.acel.telegram || false;
+document.getElementById('alertNivelAtivo').checked = alertConfig.nivel.ativo; document.getElementById('alertNivelDist').value = alertConfig.nivel.dist; document.getElementById('alertNivelCooldown').value = alertConfig.nivel.cooldown || 10; document.getElementById('alertNivelTelegram').checked = alertConfig.nivel.telegram || false;
+(alertConfig.nivel.niveis || []).forEach(niv => { const chk = document.getElementById(`nivel${niv}`); if (chk) chk.checked = true; });
+} catch(e) {}
+}
+}
+function saveAlertConfig() {
+alertConfig.sent.ativo = document.getElementById('alertSentAtivo').checked; alertConfig.sent.max = parseFloat(document.getElementById('alertSentMax').value) || 55; alertConfig.sent.min = parseFloat(document.getElementById('alertSentMin').value) || 45; alertConfig.sent.cooldown = parseFloat(document.getElementById('alertSentCooldown').value) || 5; alertConfig.sent.telegram = document.getElementById('alertSentTelegram').checked;
+alertConfig.bt.ativo = document.getElementById('alertBtAtivo').checked; alertConfig.bt.vol = parseFloat(document.getElementById('alertBtVol').value) || 20; alertConfig.bt.cooldown = parseFloat(document.getElementById('alertBtCooldown').value) || 5; alertConfig.bt.telegram = document.getElementById('alertBtTelegram').checked;
+alertConfig.delta.ativo = document.getElementById('alertDeltaAtivo').checked; alertConfig.delta.sell = parseFloat(document.getElementById('alertDeltaSell').value) || 0.50; alertConfig.delta.buy = parseFloat(document.getElementById('alertDeltaBuy').value) || 1.50; alertConfig.delta.volMin = parseFloat(document.getElementById('alertDeltaVolMin').value) || 50; alertConfig.delta.cooldown = parseFloat(document.getElementById('alertDeltaCooldown').value) || 5; alertConfig.delta.telegram = document.getElementById('alertDeltaTelegram').checked;
+alertConfig.acel.ativo = document.getElementById('alertAcelAtivo').checked; alertConfig.acel.explosao = document.getElementById('alertAcelExplosao').checked; alertConfig.acel.exaustao = document.getElementById('alertAcelExaustao').checked; alertConfig.acel.compressao = document.getElementById('alertAcelCompressao').checked; alertConfig.acel.cooldown = parseFloat(document.getElementById('alertAcelCooldown').value) || 5; alertConfig.acel.telegram = document.getElementById('alertAcelTelegram').checked;
+alertConfig.nivel.ativo = document.getElementById('alertNivelAtivo').checked; alertConfig.nivel.dist = parseFloat(document.getElementById('alertNivelDist').value) || 10; alertConfig.nivel.cooldown = parseFloat(document.getElementById('alertNivelCooldown').value) || 10; alertConfig.nivel.telegram = document.getElementById('alertNivelTelegram').checked;
+const niveis = []; ['HVL', 'Call', 'Put', '1DMax', '1DMin', 'Ajuste', 'MaxAnt', 'MinAnt', 'HVL0DTE', 'Call0DTE', 'Put0DTE', 'GWall0DTE'].forEach(niv => { if (document.getElementById(`nivel${niv}`).checked) niveis.push(niv); }); alertConfig.nivel.niveis = niveis;
+localStorage.setItem('vortexAlerts', JSON.stringify(alertConfig));
+if (alertMode === 'logica') updateLogicStatusPanel();
+}
+function evaluateConditions(data, sentiment, ratio, buyVol, sellVol, totalVol) {
+if (alertConfig.sent.ativo) { if (sentiment >= alertConfig.sent.max) logicConditionsState.sent = { met: true, direction: 'compra', value: sentiment }; else if (sentiment <= alertConfig.sent.min) logicConditionsState.sent = { met: true, direction: 'venda', value: sentiment }; else logicConditionsState.sent = { met: false, direction: sentiment >= 50 ? 'compra' : 'venda', value: sentiment }; } else logicConditionsState.sent = { met: false, direction: null, value: sentiment };
+logicConditionsState.bt = { met: false, direction: null, volume: 0 };
+if (alertConfig.bt.ativo && data.recentTrades?.length > 0) { for (let i = data.recentTrades.length - 1; i >= 0; i--) { const trade = data.recentTrades[i]; if (trade.volume >= alertConfig.bt.vol) { const tradeKey = `${trade.price.toFixed(2)}_${trade.volume}_${trade.side}`; if (!btAlertedTrades.includes(tradeKey)) { logicConditionsState.bt = { met: true, direction: trade.side === 'COMPRA' ? 'compra' : 'venda', volume: trade.volume }; break; } } } }
+if (alertConfig.delta.ativo && totalVol >= (alertConfig.delta.volMin || 50)) { if (ratio <= alertConfig.delta.sell) logicConditionsState.delta = { met: true, direction: 'venda', ratio }; else if (ratio >= alertConfig.delta.buy) logicConditionsState.delta = { met: true, direction: 'compra', ratio }; else logicConditionsState.delta = { met: false, direction: ratio >= 1 ? 'compra' : 'venda', ratio }; } else logicConditionsState.delta = { met: false, direction: null, ratio };
+if (alertConfig.acel.ativo && data.fisica?.estado) { const estado = data.fisica.estado; let tipoAlerta = null, direction = null; if (alertConfig.acel.explosao && estado.includes('EXPLOSAO')) { tipoAlerta = estado.replace('_', ' '); direction = estado.includes('COMPRA') ? 'compra' : 'venda'; } else if (alertConfig.acel.exaustao && estado.includes('EXAUSTAO')) { tipoAlerta = estado.replace('_', ' '); direction = estado.includes('ALTA') ? 'venda' : 'compra'; } else if (alertConfig.acel.compressao && estado.includes('COMPRESSAO')) { tipoAlerta = 'COMPRESSAO'; } logicConditionsState.acel = tipoAlerta ? { met: true, estado: tipoAlerta, direction } : { met: false, estado: null, direction: null }; } else logicConditionsState.acel = { met: false, estado: null, direction: null };
+logicConditionsState.nivel = { met: false, nivel: null, distance: 0 };
+if (alertConfig.nivel.ativo && data.price && data.gamma && alertConfig.nivel.niveis.length > 0) { const nivelMap = { 'HVL': data.gamma.hvl, 'Call': data.gamma.callRes, 'Put': data.gamma.putSup, '1DMax': data.gamma.max1D, '1DMin': data.gamma.min1D, 'Ajuste': data.referencias?.prevDayAdjuste, 'MaxAnt': data.referencias?.prevDayHigh, 'MinAnt': data.referencias?.prevDayLow, 'HVL0DTE': data.gamma.hvl0DTE, 'Call0DTE': data.gamma.callRes0DTE, 'Put0DTE': data.gamma.putSup0DTE, 'GWall0DTE': data.gamma.gammaWall0DTE }; let nivelProximo = null, menorDist = Infinity; alertConfig.nivel.niveis.forEach(niv => { const val = nivelMap[niv]; if (val > 0) { const dist = Math.abs(data.price - val); if (dist <= alertConfig.nivel.dist && dist < menorDist) { menorDist = dist; nivelProximo = niv; } } }); if (nivelProximo) logicConditionsState.nivel = { met: true, nivel: nivelProximo, distance: menorDist }; }
+}
+function checkAlerts(data, sentiment, ratio, buyVol, sellVol, totalVol) {
+evaluateConditions(data, sentiment, ratio, buyVol, sellVol, totalVol);
+if (alertMode === 'logica') updateLogicStatusPanel();
+if (alertMode === 'individual') checkAlertsIndividual(data, sentiment, ratio, totalVol);
+else checkAlertsLogica(data);
+}
+function checkAlertsIndividual(data, sentiment, ratio, totalVol) {
+if (alertConfig.sent.ativo && canAlert('sent')) {
+if (sentiment >= alertConfig.sent.max) { const msg = `Sentimento COMPRADOR FORTE: ${sentiment}% (≥${alertConfig.sent.max}%)`; triggerAlert(`📊 ${msg}`, `Sentimento: ${sentiment}%\nLimite: ≥${alertConfig.sent.max}%`, { tipo: 'sent' }); addSystemLog('alerta', msg); if (alertConfig.sent.telegram) enviarAlertaTelegram('📊', 'SENTIMENTO', msg, `Sentimento: ${sentiment}%`); registerAlert('sent'); }
+else if (sentiment <= alertConfig.sent.min) { const msg = `Sentimento VENDEDOR FORTE: ${sentiment}% (≤${alertConfig.sent.min}%)`; triggerAlert(`📊 ${msg}`, `Sentimento: ${sentiment}%\nLimite: ≤${alertConfig.sent.min}%`, { tipo: 'sent' }); addSystemLog('alerta', msg); if (alertConfig.sent.telegram) enviarAlertaTelegram('📊', 'SENTIMENTO', msg, `Sentimento: ${sentiment}%`); registerAlert('sent'); }
+}
+if (alertConfig.delta.ativo && canAlert('delta')) {
+if (totalVol >= (alertConfig.delta.volMin || 50)) {
+if (ratio <= alertConfig.delta.sell) { const msg = `Delta Ratio VENDEDOR: ${ratio.toFixed(2)} — Vol: ${formatVol(totalVol)}`; triggerAlert(`📈 ${msg}`, `Ratio: ${ratio.toFixed(2)}\nVolume: ${formatVol(totalVol)}`, { tipo: 'delta' }); addSystemLog('alerta', msg); if (alertConfig.delta.telegram) enviarAlertaTelegram('📈', 'DELTA', msg, `Ratio: ${ratio.toFixed(2)}`); registerAlert('delta'); }
+else if (ratio >= alertConfig.delta.buy) { const msg = `Delta Ratio COMPRADOR: ${ratio.toFixed(2)} — Vol: ${formatVol(totalVol)}`; triggerAlert(`📈 ${msg}`, `Ratio: ${ratio.toFixed(2)}\nVolume: ${formatVol(totalVol)}`, { tipo: 'delta' }); addSystemLog('alerta', msg); if (alertConfig.delta.telegram) enviarAlertaTelegram('', 'DELTA', msg, `Ratio: ${ratio.toFixed(2)}`); registerAlert('delta'); }
+}
+}
+if (alertConfig.acel.ativo && data.fisica?.estado && canAlert('acel')) {
+const estado = data.fisica.estado; let tipoAlerta = null;
+if (alertConfig.acel.explosao && estado.includes('EXPLOSAO')) tipoAlerta = estado.replace('_', ' ');
+else if (alertConfig.acel.exaustao && estado.includes('EXAUSTAO')) tipoAlerta = estado.replace('_', ' ');
+else if (alertConfig.acel.compressao && estado.includes('COMPRESSAO')) tipoAlerta = 'COMPRESSAO';
+if (tipoAlerta) { const emoji = estado.includes('EXPLOSAO') ? '' : estado.includes('EXAUSTAO') ? '🔄' : '📦'; const msg = `Acelerômetro: ${tipoAlerta}`; triggerAlert(`${emoji} ${msg}`, `Estado: ${tipoAlerta}\nZ-Score: ${data.fisica.zScore?.toFixed(2) || 0}`, { tipo: 'acel' }); addSystemLog('alerta', msg); if (alertConfig.acel.telegram) enviarAlertaTelegram(emoji, 'ACELERÔMETRO', msg, `Estado: ${tipoAlerta}`); registerAlert('acel'); }
+}
+if (alertConfig.nivel.ativo && data.price && data.gamma && alertConfig.nivel.niveis.length > 0) {
+const nivelMap = { 'HVL': data.gamma.hvl, 'Call': data.gamma.callRes, 'Put': data.gamma.putSup, '1DMax': data.gamma.max1D, '1DMin': data.gamma.min1D, 'Ajuste': data.referencias?.prevDayAdjuste, 'MaxAnt': data.referencias?.prevDayHigh, 'MinAnt': data.referencias?.prevDayLow, 'HVL0DTE': data.gamma.hvl0DTE, 'Call0DTE': data.gamma.callRes0DTE, 'Put0DTE': data.gamma.putSup0DTE, 'GWall0DTE': data.gamma.gammaWall0DTE };
+alertConfig.nivel.niveis.forEach(niv => { const val = nivelMap[niv]; if (val > 0) { const dist = Math.abs(data.price - val); if (dist <= alertConfig.nivel.dist && canNivelAlert(niv)) { const msg = `Preço próximo de ${niv} (${val.toFixed(2)}) — Dist: ${dist.toFixed(1)} pts`; triggerAlert(`️ ${msg}`, `Nível: ${niv}\nValor: ${val.toFixed(2)}\nDistância: ${dist.toFixed(1)} pts\nPreço: ${data.price.toFixed(2)}`, { tipo: 'nivel', nivel: niv }); addSystemLog('alerta', msg); if (alertConfig.nivel.telegram) enviarAlertaTelegram('🗺️', 'NÍVEL', msg, `Nível: ${niv} = ${val.toFixed(2)}\nDistância: ${dist.toFixed(1)} pts`); registerNivelAlert(niv); } } });
+}
+if (alertConfig.bt.ativo && data.recentTrades?.length > 0 && canAlert('bt')) {
+for (let i = data.recentTrades.length - 1; i >= 0; i--) { const trade = data.recentTrades[i]; if (trade.volume >= alertConfig.bt.vol) { const tradeKey = `${trade.price.toFixed(2)}_${trade.volume}_${trade.side}`; if (!btAlertedTrades.includes(tradeKey)) { const lado = trade.side === 'COMPRA' ? '🟢 COMPRA' : '🔴 VENDA'; const msg = `BLOCK TRADE: ${lado} de ${trade.volume} contratos @ ${trade.price.toFixed(2)}`; triggerAlert(`⚡ ${msg}`, `Lado: ${trade.side}\nVolume: ${trade.volume} ct\nPreço: ${trade.price.toFixed(2)}`, { tipo: 'bt' }); addSystemLog('alerta', msg); if (alertConfig.bt.telegram) enviarAlertaTelegram('⚡', 'BLOCK TRADE', msg, `Lado: ${trade.side}\nVolume: ${trade.volume} ct`); registerAlert('bt'); btAlertedTrades.push(tradeKey); if (btAlertedTrades.length > 500) btAlertedTrades = btAlertedTrades.slice(-250); break; } } }
+}
+}
+function checkAlertsLogica(data) {
+const activeConditions = [], metConditions = [], directions = [];
+if (alertConfig.sent.ativo) { activeConditions.push('sent'); if (logicConditionsState.sent.met) { metConditions.push('sent'); if (logicConditionsState.sent.direction) directions.push(logicConditionsState.sent.direction); } }
+if (alertConfig.bt.ativo) { activeConditions.push('bt'); if (logicConditionsState.bt.met) { metConditions.push('bt'); if (logicConditionsState.bt.direction) directions.push(logicConditionsState.bt.direction); } }
+if (alertConfig.delta.ativo) { activeConditions.push('delta'); if (logicConditionsState.delta.met) { metConditions.push('delta'); if (logicConditionsState.delta.direction) directions.push(logicConditionsState.delta.direction); } }
+if (alertConfig.acel.ativo) { activeConditions.push('acel'); if (logicConditionsState.acel.met) { metConditions.push('acel'); if (logicConditionsState.acel.direction) directions.push(logicConditionsState.acel.direction); } }
+if (alertConfig.nivel.ativo && alertConfig.nivel.niveis.length > 0) { activeConditions.push('nivel'); if (logicConditionsState.nivel.met) metConditions.push('nivel'); }
+if (activeConditions.length === 0 || metConditions.length !== activeConditions.length) return;
+const allCompra = directions.length === 0 || directions.every(d => d === 'compra');
+const allVenda = directions.length === 0 || directions.every(d => d === 'venda');
+if (!(allCompra || allVenda)) return;
+const cooldownMin = Math.max(...activeConditions.map(c => alertConfig[c]?.cooldown || 5));
+if ((Date.now() - logicAlertCooldown) < cooldownMin * 60 * 1000) return;
+const dirLabel = allCompra ? '🟢 COMPRA' : ' VENDA';
+const condNames = { sent: 'Sentimento', bt: 'Block Trade', delta: 'Delta', acel: 'Acelerômetro', nivel: 'Nível' };
+const condList = metConditions.map(c => condNames[c]).join(' + ');
+const msg = `LÓGICA COMPLETA — ${dirLabel}\nCondições: ${condList}`;
+let detail = `Direção: ${dirLabel}\n`;
+if (logicConditionsState.sent.met) detail += `✅ Sentimento: ${logicConditionsState.sent.value}%\n`;
+if (logicConditionsState.bt.met) detail += `✅ Block Trade: ${logicConditionsState.bt.volume} ct\n`;
+if (logicConditionsState.delta.met) detail += `✅ Delta: ${logicConditionsState.delta.ratio.toFixed(2)}\n`;
+if (logicConditionsState.acel.met) detail += `✅ Acelerômetro: ${logicConditionsState.acel.estado}\n`;
+if (logicConditionsState.nivel.met) detail += `✅ Nível: ${logicConditionsState.nivel.nivel}\n`;
+triggerAlert(`🔗 ${msg}`, detail, { tipo: 'logica' });
+addSystemLog('alerta', msg);
+const telegramEnabled = activeConditions.some(c => alertConfig[c]?.telegram);
+if (telegramEnabled) enviarAlertaTelegram('🔗', 'LÓGICA', msg, detail);
+logicAlertCooldown = Date.now();
+if (logicConditionsState.bt.met && data.recentTrades) { for (let i = data.recentTrades.length - 1; i >= 0; i--) { const trade = data.recentTrades[i]; if (trade.volume >= alertConfig.bt.vol) { const tradeKey = `${trade.price.toFixed(2)}_${trade.volume}_${trade.side}`; if (!btAlertedTrades.includes(tradeKey)) { btAlertedTrades.push(tradeKey); break; } } } }
+}
+function triggerAlert(msg, detail, context) {
+if (document.getElementById('alertPopup').classList.contains('active')) return;
+document.getElementById('alertMsg').textContent = msg;
+document.getElementById('alertDetail').innerHTML = detail.replace(/\n/g, '<br>');
+currentAlertContext = context;
+document.getElementById('alertPopup').classList.add('active');
+tocarAlerta();
+if (activeAlertTimeout) clearTimeout(activeAlertTimeout);
+activeAlertTimeout = setTimeout(() => dismissAlert(), 20000);
+}
+function tocarAlerta() {
+if (audioCtx.state === 'suspended') audioCtx.resume();
+const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+osc.connect(gain); gain.connect(audioCtx.destination); osc.type = 'square';
+osc.frequency.setValueAtTime(880, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.2);
+gain.gain.setValueAtTime(0.4, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+osc.start(); osc.stop(audioCtx.currentTime + 0.4);
+setTimeout(() => { const o2 = audioCtx.createOscillator(); const g2 = audioCtx.createGain(); o2.connect(g2); g2.connect(audioCtx.destination); o2.type = 'square'; o2.frequency.setValueAtTime(880, audioCtx.currentTime); g2.gain.setValueAtTime(0.4, audioCtx.currentTime); g2.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3); o2.start(); o2.stop(audioCtx.currentTime + 0.3); }, 250);
+}
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const niveisOcultos = new Set();
+function toggleNivel(tipo) {
+const cardMap = { hvl: '[onclick="toggleNivel(\'hvl\')"]', call: '[onclick="toggleNivel(\'call\')"]', put: '[onclick="toggleNivel(\'put\')"]', max1d: '[onclick="toggleNivel(\'max1d\')"]', min1d: '[onclick="toggleNivel(\'min1d\')"]', prev: '[onclick="toggleNivel(\'prev\')"]', prevH: '[onclick="toggleNivel(\'prevH\')"]', prevL: '[onclick="toggleNivel(\'prevL\')"]', hvl0: '[onclick="toggleNivel(\'hvl0\')"]', call0: '[onclick="toggleNivel(\'call0\')"]', put0: '[onclick="toggleNivel(\'put0\')"]', gwall: '[onclick="toggleNivel(\'gwall\')"]', gex: '[onclick="toggleNivel(\'gex\')"]', bl: '[onclick="toggleNivel(\'bl\')"]' };
+const card = document.querySelector(`.card-nivel${cardMap[tipo]}`);
+if (niveisOcultos.has(tipo)) { niveisOcultos.delete(tipo); if (card) card.classList.remove('nivel-off'); } else { niveisOcultos.add(tipo); if (card) card.classList.add('nivel-off'); }
+if (latestMarketData) updateMapaNiveis(latestMarketData);
+}
+// Substitua a função updateMapaNiveis por esta versão corrigida:
+function updateMapaNiveis(data) {
+    if (!data) return;
+    
+    const g = data.gamma || {};
+    const r = data.referencias || {};
+    const price = data.price || 0;
+    
+    // Debug
+    console.log('[MAPA] gamma:', g);
+    console.log('[MAPA] referencias:', r);
+    console.log('[MAPA] price:', price);
+    
+    const niveis = [];
+    const push = (val, label, tipo) => { 
+        if (val > 0 && !niveisOcultos.has(tipo)) {
+            niveis.push({ valor: val, label, tipo });
+        }
+    };
+    
+    push(g.hvl, 'HVL', 'hvl'); 
+    push(g.callRes, 'Call', 'call'); 
+    push(g.putSup, 'Put', 'put');
+    push(g.max1D, 'Max', 'max1d'); 
+    push(g.min1D, 'Min', 'min1d');
+    push(r.prevDayAdjuste, 'Ajuste', 'prev'); 
+    push(r.prevDayHigh, 'MxAnt', 'prevH'); 
+    push(r.prevDayLow, 'MnAnt', 'prevL');
+    push(g.hvl0DTE, 'HVL0', 'hvl0'); 
+    push(g.callRes0DTE, 'Call0', 'call0'); 
+    push(g.putSup0DTE, 'Put0', 'put0'); 
+    push(g.gammaWall0DTE, 'GWall', 'gwall');
+    
+    if (!niveisOcultos.has('bl')) {
+        (g.bl || []).forEach((v, i) => { if (v > 0) niveis.push({ valor: v, label: `BL${i+1}`, tipo: 'bl' }); });
+    }
+    if (!niveisOcultos.has('gex')) {
+        (g.gex || []).forEach((v, i) => { if (v > 0) niveis.push({ valor: v, label: `GEX${i+1}`, tipo: 'gex' }); });
+    }
+    
+    console.log('[MAPA] Níveis encontrados:', niveis.length);
+    
+    if (niveis.length === 0 && price === 0) {
+        document.getElementById('mapaTrack').innerHTML = '<div class="text-slate-600 text-sm text-center py-6">Aguardando dados...</div>';
+        return;
+    }
+    
+    const vals = niveis.map(n => n.valor).filter(v => v > 0); 
+    vals.push(price);
+    const rawMin = Math.min(...vals), rawMax = Math.max(...vals), rawRange = rawMax - rawMin || 20;
+    const margem = rawRange * 0.10, tMin = rawMin - margem, tMax = rawMax + margem, range = tMax - tMin;
+    
+    document.getElementById('mapaMax').innerText = rawMax.toFixed(2);
+    document.getElementById('mapaMin').innerText = rawMin.toFixed(2);
+    
+    let html = '';
+    niveis.forEach(n => { 
+        const pct = 100 - ((n.valor - tMin) / range) * 100; 
+        html += `<div class="nivel-linha ${n.tipo}" style="left:${pct.toFixed(2)}%">
+            <div class="nivel-label" style="background:${getCorFundo(n.tipo)};color:#fff">${n.label}</div>
+        </div>`; 
+    });
+    
+    const pricePct = 100 - ((price - tMin) / range) * 100;
+    html += `<div class="preco-marker" style="left:${pricePct.toFixed(2)}%"></div>`;
+    
+    document.getElementById('mapaTrack').innerHTML = html;
+}
+
+function getCorNivel(tipo) {
+    const cores = {
+        'hvl': 'text-purple-400',
+        'call': 'text-red-400',
+        'put': 'text-green-400',
+        'max1d': 'text-cyan-400',
+        'min1d': 'text-yellow-400',
+        'ajuste': 'text-orange-400',
+        'prevH': 'text-red-300',
+        'prevL': 'text-green-300',
+        'hvl0dte': 'text-purple-300',
+        'call0dte': 'text-red-300',
+        'put0dte': 'text-green-300',
+        'gwall0dte': 'text-yellow-300',
+        'bl': 'text-blue-400',
+        'gex': 'text-purple-400'
+    };
+    return cores[tipo] || 'text-slate-400';
+}
+function getCorFundo(tipo) { const c = { hvl: '#a855f7', call: '#ef4444', put: '#22c55e', max1d: '#06b6d4', min1d: '#eab308', prev: '#f97316', prevH: '#f87171', prevL: '#4ade80', hvl0: '#c084fc', call0: '#fca5a5', put0: '#86efac', gwall: '#fbbf24', gex: '#a855f7', bl: '#3b82f6' }; return c[tipo] || '#64748b'; }
+
+function updateBlockTrades(data) {
+    if (!data || !data.recentTrades) return;
+    
+    // Processa cada trade recente
+    data.recentTrades.forEach(t => {
+        // Verifica se já existe pelo preço EXATO + volume + lado
+        const existe = blockTradesHistory.some(h => 
+            Math.abs(h.price - t.price) < 0.01 && 
+            h.volume === t.volume && 
+            h.side === t.side
+        );
+        
+        if (!existe) {
+            blockTradesHistory.push({ 
+                time: new Date().toLocaleTimeString(), 
+                price: t.price, 
+                volume: t.volume, 
+                side: t.side 
+            });
+        }
+    });
+    
+    // Mantém apenas os últimos 30 trades
+    if (blockTradesHistory.length > 30) {
+        blockTradesHistory = blockTradesHistory.slice(-30);
+    }
+    
+    const listEl = document.getElementById('largeTradesList');
+    if (!listEl) return;
+    
+    if (blockTradesHistory.length === 0) { 
+        listEl.innerHTML = '<div class="text-slate-500 text-center py-4">Aguardando...</div>'; 
+        return; 
+    }
+    
+    listEl.innerHTML = blockTradesHistory.slice().reverse().map(t => { 
+        const cor = t.side === 'COMPRA' ? 'text-green-400 bg-green-900/20 border-l-2 border-green-500' : 'text-red-400 bg-red-900/20 border-l-2 border-red-500'; 
+        return `<div class="flex justify-between items-center p-1.5 rounded ${cor}">
+            <span>${t.side}</span>
+            <span class="font-bold">${t.volume} ct</span>
+            <span>@ ${t.price.toFixed(2)}</span>
+            <span class="text-slate-500">${t.time}</span>
+        </div>`; 
+    }).join('');
+}
+
+function limparBlockTrades() { blockTradesHistory = []; btAlertedTrades = []; document.getElementById('largeTradesList').innerHTML = '<div class="text-slate-500 text-center py-4">Limpo</div>'; }
+function renderizarForcas() {
+const container = document.getElementById('forcasContainer');
+container.innerHTML = forcasConfig.map(f => { const d = forcasData[f.id] || { compra: 0, venda: 0 }; const cls = f.ativo ? 'ativo' : 'inativo'; const tick = f.ativo ? '✓' : ''; const compra = Math.max(0, Math.min(100, Math.round(d.compra || 0))); const venda = Math.max(0, Math.min(100, 100 - compra)); return `<div class="forca-item ${cls}" onclick="toggleForca('${f.id}')"><div class="forca-toggle">${tick}</div><div class="forca-nome">${f.nome}</div><div class="forca-barra-container"><div class="forca-barra-compra" style="width:${compra}%"></div><div class="forca-barra-venda" style="width:${venda}%"></div></div><div class="forca-percentual-compra">${compra}%</div><div class="forca-percentual-venda">${venda}%</div></div>`; }).join('');
+}
+function toggleForca(id) { const f = forcasConfig.find(f => f.id === id); if (f) { f.ativo = !f.ativo; renderizarForcas(); } }
+function salvarConfiguracoes() { const config = { groqKey: document.getElementById('groqKey').value, intervalo: document.getElementById('intervalo').value, groqModel: document.getElementById('groqModel').value, enviarImagemIA1: document.getElementById('enviarImagemIA1').checked }; localStorage.setItem('vortexConfig', JSON.stringify(config)); addSystemLog('sistema', '✅ Configurações gerais salvas'); alert('✅ Salvo!'); }
+function carregarConfiguracoes() { const saved = localStorage.getItem('vortexConfig'); if (saved) { const c = JSON.parse(saved); document.getElementById('groqKey').value = c.groqKey || ''; document.getElementById('intervalo').value = c.intervalo || '30000'; document.getElementById('groqModel').value = c.groqModel || 'meta-llama/llama-4-scout-17b-16e-instruct'; document.getElementById('enviarImagemIA1').checked = c.enviarImagemIA1 !== false; } document.getElementById('systemPrompt').value = localStorage.getItem('vortexPromptPrincipal') || defaultPromptPrincipal; }
+function salvarPrompt(id) { localStorage.setItem('vortexPromptPrincipal', document.getElementById(id).value); addSystemLog('sistema', '✅ Prompt salvo'); alert('✅ Salvo!'); }
+function carregarPrompt(id) { const input = document.createElement('input'); input.type = 'file'; input.accept = '.txt'; input.onchange = e => { const file = e.target.files[0]; const reader = new FileReader(); reader.onload = ev => { document.getElementById(id).value = ev.target.result; addSystemLog('sistema', '📂 Prompt carregado: ' + file.name); alert('✅ Carregado: ' + file.name); }; reader.readAsText(file); }; input.click(); }
+function aplicarPrompt(id) { addSystemLog('sistema', '✅ Prompt aplicado'); alert('✅ Aplicado!'); }
+function aplicarPreset(tipo) { if (presets[tipo]) { document.getElementById('systemPrompt').value = presets[tipo]; addSystemLog('sistema', '✅ Preset "' + tipo.toUpperCase() + '" aplicado'); alert('✅ Preset "' + tipo.toUpperCase() + '" carregado!'); } }
+function abrirModalImagem() {
+const imgOriginal = document.getElementById('chartImage');
+const modal = document.getElementById('imageModal');
+const modalImg = document.getElementById('modalImagem');
+if (imgOriginal.src && !imgOriginal.classList.contains('hidden') && imgOriginal.src.startsWith('data:')) {
+if (!modal.classList.contains('active')) { modalImg.src = imgOriginal.src; modal.classList.add('active'); }
+} else { alert('Nenhuma imagem disponível'); }
+}
+function fecharModalImagem() { document.getElementById('imageModal').classList.remove('active'); }
+document.getElementById('imageModal').addEventListener('click', function(e) { if (e.target === this) fecharModalImagem(); });
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') { const modal = document.getElementById('imageModal'); if (modal.classList.contains('active')) fecharModalImagem(); } });
+// ================================================================
+//  SISTEMA DE NOTÍCIAS ECONÔMICAS
+// ================================================================
+async function fetchNews() {
+    const statusEl = document.getElementById('newsConfigStatus');
+    
+    try {
+        addSystemLog('sistema', '📡 Buscando notícias do Supabase...');
+        
+        // Busca notícias de hoje do Supabase
+        const today = new Date();
+        const todayStr = today.toISOString().split('T')[0];
+        const url = `${SUPABASE_URL}/rest/v1/economic_news?event_date=gte.${todayStr}&select=*&order=event_date.asc`;
+        
+        const res = await fetch(url, {
+            headers: {
+                'apikey': SUPABASE_API_KEY,
+                'Authorization': `Bearer ${SUPABASE_API_KEY}`
+            }
+        });
+        
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+        
+        const data = await res.json();
+        
+        if (data && data.length > 0) {
+            // Converte do formato Supabase para o formato do painel
+            newsEvents = data.map(row => ({
+                date: new Date(row.event_date),
+                country: row.country,
+                title: row.title,
+                impact: row.impact,
+                forecast: row.forecast || '',
+                previous: row.previous || '',
+                unit: row.unit || '',
+                alertedBefore: false,
+                alertedAfter: false
+            }));
+            
+            renderNewsList();
+            document.getElementById('newsLastUpdate').textContent = '✓ ' + new Date().toLocaleTimeString();
+            addSystemLog('sistema', `✅ ${newsEvents.length} notícias carregadas do Supabase`);
+            
+            if (statusEl) {
+                statusEl.className = 'text-xs text-center p-2 rounded bg-green-900/30 text-green-400';
+                statusEl.textContent = `✅ ${newsEvents.length} notícias carregadas!`;
+                statusEl.classList.remove('hidden');
+                setTimeout(() => statusEl.classList.add('hidden'), 5000);
+            }
+            
+            // Cache local como fallback
+            localStorage.setItem('vortexNewsCache', JSON.stringify({ events: newsEvents, ts: Date.now() }));
+        } else {
+            addSystemLog('sistema', '⚠️ Nenhuma notícia disponível no Supabase ainda');
+            
+            // Usa cache local se existir
+            const cached = localStorage.getItem('vortexNewsCache');
+            if (cached) {
+                try {
+                    const c = JSON.parse(cached);
+                    newsEvents = c.events || [];
+                    renderNewsList();
+                    addSystemLog('sistema', '📦 Usando cache local (' + new Date(c.ts).toLocaleString() + ')');
+                } catch(e2){}
+            }
+        }
+    } catch(e) {
+        console.error('❌ ERRO AO BUSCAR NOTÍCIAS:', e.message);
+        addSystemLog('erro', '❌ Notícias: ' + e.message);
+        
+        // Fallback: usa cache local
+        const cached = localStorage.getItem('vortexNewsCache');
+        if (cached) {
+            try {
+                const c = JSON.parse(cached);
+                newsEvents = c.events || [];
+                renderNewsList();
+                addSystemLog('sistema', '📦 Usando cache (' + new Date(c.ts).toLocaleString() + ')');
+            } catch(e2){}
+        }
+        
+        if (statusEl) {
+            statusEl.className = 'text-xs text-center p-2 rounded bg-red-900/30 text-red-400';
+            statusEl.textContent = '❌ ' + e.message;
+            statusEl.classList.remove('hidden');
+        }
+    }
+}
+
+function parseNewsEvents(data) {
+if (!Array.isArray(data)) return [];
+return data.map(item => {
+try {
+const date = new Date(item.date);
+let impact = (item.impact || 'low').toLowerCase();
+if (impact === 'holiday') impact = 'low';
+return { date: date, country: (item.country || 'ALL').trim().toUpperCase(), title: (item.title || '').trim(), impact: impact, forecast: item.forecast || '', previous: item.previous || '', unit: item.unit || '', alertedBefore: false, alertedAfter: false };
+} catch(e) { return null; }
+}).filter(e => e !== null).sort((a, b) => a.date - b.date);
+}
+function renderNewsList() {
+const listEl = document.getElementById('newsList');
+if (!listEl) return;
+const now = new Date();
+const today = now.toISOString().split('T')[0];
+let filtered = newsEvents.filter(e => {
+const eventDate = e.date.toISOString().split('T')[0];
+if (eventDate !== today) return false;
+if (newsFilter !== 'all') { if (e.impact !== newsFilter) return false; }
+if (!newsConfig.countries.includes(e.country) && e.country !== 'ALL') return false;
+if (e.impact === 'high' && !newsConfig.impactHigh) return false;
+if (e.impact === 'medium' && !newsConfig.impactMedium) return false;
+if (e.impact === 'low' && !newsConfig.impactLow) return false;
+return true;
+});
+if (filtered.length === 0) { listEl.innerHTML = '<div class="text-slate-500 text-xs text-center py-4">Nenhuma notícia hoje com os filtros atuais</div>'; return; }
+listEl.innerHTML = filtered.map(e => {
+const impactClass = e.impact === 'high' ? 'news-high' : e.impact === 'medium' ? 'news-medium' : 'news-low';
+const impactEmoji = e.impact === 'high' ? '🔴' : e.impact === 'medium' ? '' : '🟢';
+const timeStr = e.date.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+const diffMs = e.date - now;
+const diffMin = Math.round(diffMs / 60000);
+let countdownHtml = '';
+let countdownClass = 'distant';
+if (diffMs > 0) {
+if (diffMin <= newsConfig.alertBefore) { countdownClass = 'imminent'; countdownHtml = `<span class="news-countdown ${countdownClass}">⏰ ${diffMin}min</span>`; }
+else if (diffMin <= 30) { countdownClass = 'soon'; const hours = Math.floor(diffMin / 60); const mins = diffMin % 60; const label = hours > 0 ? `${hours}h${mins}m` : `${mins}min`; countdownHtml = `<span class="news-countdown ${countdownClass}">⏰ ${label}</span>`; }
+else { countdownHtml = `<span class="news-countdown ${countdownClass}">${timeStr}</span>`; }
+} else {
+const afterMin = Math.abs(diffMin);
+if (afterMin <= newsConfig.alertAfter) { countdownHtml = `<span class="news-countdown imminent">🔥 ATIVA</span>`; }
+else { countdownHtml = `<span class="news-countdown passed">✓ ${timeStr}</span>`; }
+}
+const forecastText = e.forecast || e.previous ? `Prev: ${e.forecast || '--'} | Ant: ${e.previous || '--'} ${e.unit}` : '';
+return `<div class="news-item ${impactClass}">
+<div class="news-header"><span class="news-time">${timeStr}</span><span class="news-country">${e.country}</span><span class="news-impact">${impactEmoji} ${e.impact}</span></div>
+${countdownHtml}
+<div class="news-title">${e.title}</div>
+${forecastText ? `<div class="news-forecast" title="${forecastText}">${forecastText}</div>` : ''}
+</div>`;
+}).join('');
+}
+function filterNews(filter, btn) { newsFilter = filter; document.querySelectorAll('.news-filter-btn').forEach(b => b.classList.remove('active')); if (btn) btn.classList.add('active'); renderNewsList(); }
+function checkNewsAlerts() {
+if (newsEvents.length === 0) return;
+const now = new Date();
+newsEvents.forEach(event => {
+const diffMs = event.date - now;
+const diffMin = Math.round(diffMs / 60000);
+const eventKey = `${event.date.getTime()}_${event.country}_${event.title}`;
+if (!newsConfig.countries.includes(event.country) && event.country !== 'ALL') return;
+if (event.impact === 'high' && !newsConfig.impactHigh) return;
+if (event.impact === 'medium' && !newsConfig.impactMedium) return;
+if (event.impact === 'low' && !newsConfig.impactLow) return;
+if (diffMin > 0 && diffMin <= newsConfig.alertBefore) {
+if (!newsCooldowns[eventKey + '_before'] && !event.alertedBefore) {
+const msg = `${event.country} — ${event.title} em ${diffMin} min! (Impacto: ${event.impact.toUpperCase()})`;
+addSystemLog('noticia', `⏰ ${msg}`);
+triggerAlert(`📰 NOTÍCIA EM ${diffMin} MIN`, `${event.country}: ${event.title}\nImpacto: ${event.impact.toUpperCase()}\nHorário: ${event.date.toLocaleTimeString()}\nPrevisão: ${event.forecast || '--'} | Anterior: ${event.previous || '--'}`, { tipo: 'noticia' });
+if (newsConfig.sound) tocarAlerta();
+if (newsConfig.telegram) enviarNoticiaTelegram(event, 'antes');
+newsCooldowns[eventKey + '_before'] = Date.now();
+event.alertedBefore = true;
+}
+}
+if (diffMin <= 0 && diffMin >= -2 && !event.alertedAfter) {
+const msg = `${event.country} — ${event.title} ACABOU DE SAIR! (Impacto: ${event.impact.toUpperCase()})`;
+addSystemLog('noticia', `🔥 ${msg}`);
+triggerAlert(`🔥 NOTÍCIA LIBERADA!`, `${event.country}: ${event.title}\nImpacto: ${event.impact.toUpperCase()}\nHorário: ${event.date.toLocaleTimeString()}`, { tipo: 'noticia' });
+if (newsConfig.sound) tocarAlerta();
+if (newsConfig.telegram) enviarNoticiaTelegram(event, 'depois');
+event.alertedAfter = true;
+}
+});
+renderNewsList();
+}
+async function enviarNoticiaTelegram(event, tipo) {
+const emoji = tipo === 'antes' ? '⏰' : '';
+const tipoLabel = tipo === 'antes' ? 'EM BREVE' : 'LIBERADA';
+const diffMs = event.date - new Date();
+const diffMin = Math.round(diffMs / 60000);
+const header = getSymbolHeader();
+let msg = `${emoji} *NOTÍCIA ${tipoLabel}*\n${header}\n🌍 *País:* ${event.country}\n📰 *Evento:* ${event.title}\n💥 *Impacto:* ${event.impact.toUpperCase()}\n⏰ *Horário:* ${event.date.toLocaleTimeString('pt-BR')}\n *Previsão:* ${event.forecast || '--'}\n📈 *Anterior:* ${event.previous || '--'} ${event.unit}`;
+if (tipo === 'antes') msg += `\n *Faltam ${diffMin} minutos!*`;
+await enviarTelegram(msg, false);
+}
+function salvarNewsConfig() {
+newsConfig.endpoint = document.getElementById('newsEndpoint').value.trim();
+newsConfig.alertBefore = parseInt(document.getElementById('newsAlertBefore').value) || 5;
+newsConfig.alertAfter = parseInt(document.getElementById('newsAlertAfter').value) || 15;
+newsConfig.cooldown = parseInt(document.getElementById('newsCooldown').value) || 10;
+newsConfig.impactHigh = document.getElementById('newsImpactHigh').checked;
+newsConfig.impactMedium = document.getElementById('newsImpactMedium').checked;
+newsConfig.impactLow = document.getElementById('newsImpactLow').checked;
+newsConfig.telegram = document.getElementById('newsTelegram').checked;
+newsConfig.sound = document.getElementById('newsSound').checked;
+newsConfig.countries = [];
+document.querySelectorAll('.news-country-cb:checked').forEach(cb => newsConfig.countries.push(cb.value));
+localStorage.setItem('vortexNewsConfig', JSON.stringify(newsConfig));
+addSystemLog('sistema', '✅ Configurações de notícias salvas');
+const statusEl = document.getElementById('newsConfigStatus');
+statusEl.className = 'text-xs text-center p-2 rounded bg-green-900/30 text-green-400';
+statusEl.textContent = '✅ Salvo!';
+statusEl.classList.remove('hidden');
+setTimeout(() => statusEl.classList.add('hidden'), 3000);
+}
+function carregarNewsConfig() {
+const saved = localStorage.getItem('vortexNewsConfig');
+if (saved) {
+try {
+newsConfig = { ...newsConfig, ...JSON.parse(saved) };
+document.getElementById('newsEndpoint').value = newsConfig.endpoint;
+document.getElementById('newsAlertBefore').value = newsConfig.alertBefore;
+document.getElementById('newsAlertAfter').value = newsConfig.alertAfter;
+document.getElementById('newsCooldown').value = newsConfig.cooldown;
+document.getElementById('newsImpactHigh').checked = newsConfig.impactHigh;
+document.getElementById('newsImpactMedium').checked = newsConfig.impactMedium;
+document.getElementById('newsImpactLow').checked = newsConfig.impactLow;
+document.getElementById('newsTelegram').checked = newsConfig.telegram;
+document.getElementById('newsSound').checked = newsConfig.sound;
+document.querySelectorAll('.news-country-cb').forEach(cb => { cb.checked = newsConfig.countries.includes(cb.value); });
+} catch(e){}
+}
+}
+// ================================================================
+//  MODO INDIVIDUAL / LÓGICA
+// ================================================================
+function setAlertMode(mode) {
+alertMode = mode;
+document.getElementById('btnModoIndividual').classList.toggle('active', mode === 'individual');
+document.getElementById('btnModoLogica').classList.toggle('active', mode === 'logica');
+const desc = document.getElementById('modoDescricao');
+const panel = document.getElementById('logicStatusPanel');
+if (mode === 'individual') { desc.innerHTML = '<strong class="text-blue-300">📋 Modo Individual:</strong> Cada tipo de alerta dispara independentemente quando sua condição é atendida.'; panel.style.display = 'none'; }
+else { desc.innerHTML = '<strong class="text-green-300"> Modo Lógica:</strong> Alerta combinado só dispara quando <strong>TODAS</strong> as condições ativadas estiverem satisfeitas <strong>simultaneamente</strong> e na mesma direção.'; panel.style.display = 'block'; updateLogicStatusPanel(); }
+localStorage.setItem('vortexAlertMode', mode);
+}
+function updateLogicStatusPanel() {
+const list = document.getElementById('logicConditionsList');
+const statusMsg = document.getElementById('logicStatusMsg');
+if (!list) return;
+let html = '', totalActive = 0, totalMet = 0;
+if (alertConfig.sent.ativo) { totalActive++; const s = logicConditionsState.sent; if (s.met) totalMet++; const dir = s.direction === 'compra' ? '🟢 Compra' : s.direction === 'venda' ? '🔴 Venda' : '—'; html += `<div class="logic-condition ${s.met ? 'met' : 'unmet'}"><span class="check">${s.met ? '✅' : ''}</span><strong>Sentimento:</strong> ${dir} (${s.value}%)</div>`; }
+if (alertConfig.bt.ativo) { totalActive++; const b = logicConditionsState.bt; if (b.met) totalMet++; const dir = b.direction === 'compra' ? ' Compra' : b.direction === 'venda' ? '🔴 Venda' : '—'; html += `<div class="logic-condition ${b.met ? 'met' : 'unmet'}"><span class="check">${b.met ? '✅' : '⬜'}</span><strong>Block Trade:</strong> ${dir} (${b.volume} ct)</div>`; }
+if (alertConfig.delta.ativo) { totalActive++; const d = logicConditionsState.delta; if (d.met) totalMet++; const dir = d.direction === 'compra' ? '🟢 Compra' : d.direction === 'venda' ? ' Venda' : '—'; html += `<div class="logic-condition ${d.met ? 'met' : 'unmet'}"><span class="check">${d.met ? '✅' : '⬜'}</span><strong>Delta:</strong> ${dir} (Ratio: ${d.ratio.toFixed(2)})</div>`; }
+if (alertConfig.acel.ativo) { totalActive++; const a = logicConditionsState.acel; if (a.met) totalMet++; html += `<div class="logic-condition ${a.met ? 'met' : 'unmet'}"><span class="check">${a.met ? '✅' : '⬜'}</span><strong>Acelerômetro:</strong> ${a.estado || 'Aguardando'}</div>`; }
+if (alertConfig.nivel.ativo && alertConfig.nivel.niveis.length > 0) { totalActive++; const n = logicConditionsState.nivel; if (n.met) totalMet++; html += `<div class="logic-condition ${n.met ? 'met' : 'unmet'}"><span class="check">${n.met ? '✅' : '⬜'}</span><strong>Nível:</strong> ${n.nivel ? n.nivel + ' (' + n.distance.toFixed(1) + ' pts)' : 'Aguardando'}</div>`; }
+list.innerHTML = html || '<div class="text-xs text-slate-500 italic">Nenhuma condição ativada.</div>';
+if (totalActive === 0) { statusMsg.className = 'logic-status inactive'; statusMsg.innerHTML = '⚪ Nenhuma condição ativada.'; }
+else if (totalMet === totalActive && totalActive > 0) {
+const directions = [];
+if (alertConfig.sent.ativo && logicConditionsState.sent.direction) directions.push(logicConditionsState.sent.direction);
+if (alertConfig.bt.ativo && logicConditionsState.bt.direction) directions.push(logicConditionsState.bt.direction);
+if (alertConfig.delta.ativo && logicConditionsState.delta.direction) directions.push(logicConditionsState.delta.direction);
+const allCompra = directions.every(d => d === 'compra');
+const allVenda = directions.every(d => d === 'venda');
+const consistente = directions.length === 0 || allCompra || allVenda;
+if (consistente) { const dirLabel = allCompra ? '🟢 COMPRA' : allVenda ? '🔴 VENDA' : '⚪ NEUTRO'; statusMsg.className = 'logic-status ready'; statusMsg.innerHTML = `✅ <strong>PRONTO!</strong> ${totalActive} condições atendidas — Direção: ${dirLabel}`; }
+else { statusMsg.className = 'logic-status pending'; statusMsg.innerHTML = `⚠️ <strong>Direção conflitante!</strong> ${totalMet}/${totalActive} ok, mas lados opostos.`; }
+} else { statusMsg.className = 'logic-status pending'; statusMsg.innerHTML = `⏳ <strong>Aguardando:</strong> ${totalMet}/${totalActive} condições atendidas.`; }
+}
+// ================================================================
+//  COOLDOWN E CONTROLE
+// ================================================================
+function canAlert(tipo) { const cooldownMs = (alertConfig[tipo]?.cooldown || 5) * 60 * 1000; return (Date.now() - (alertCooldowns[tipo] || 0)) >= cooldownMs; }
+function canNivelAlert(nivelNome) { const cooldownMs = (alertConfig.nivel?.cooldown || 10) * 60 * 1000; return (Date.now() - (nivelCooldowns[nivelNome] || 0)) >= cooldownMs; }
+function registerAlert(tipo) { alertCooldowns[tipo] = Date.now(); }
+function registerNivelAlert(nivelNome) { nivelCooldowns[nivelNome] = Date.now(); }
+function disarmCurrentAlert() {
+if (!currentAlertContext) { dismissAlert(); return; }
+const ctx = currentAlertContext;
+if (ctx.tipo === 'nivel' && ctx.nivel) { nivelCooldowns[ctx.nivel] = Date.now(); showToast(`🔓 Nível ${ctx.nivel} desarmado.`); }
+else if (ctx.tipo === 'logica') { logicAlertCooldown = Date.now(); showToast('🔓 Alerta lógico desarmado.'); }
+else if (ctx.tipo === 'noticia') { showToast('🔓 Alerta de notícia desarmado.'); }
+else { alertCooldowns[ctx.tipo] = Date.now(); const nomes = { sent: 'Sentimento', bt: 'Block Trade', delta: 'Delta', acel: 'Acelerômetro' }; showToast(`🔓 ${nomes[ctx.tipo] || ctx.tipo} desarmado.`); }
+dismissAlert();
+}
+function dismissAlert() { document.getElementById('alertPopup').classList.remove('active'); if (activeAlertTimeout) clearTimeout(activeAlertTimeout); currentAlertContext = null; }
+function showToast(msg) {
+const toast = document.createElement('div');
+toast.style.cssText = 'position:fixed;top:20px;right:20px;background:#1e293b;color:#e2e8f0;padding:12px 20px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.5);z-index:99999;font-size:13px;border:1px solid #334155;animation:slideIn 0.3s ease;max-width:350px;';
+toast.textContent = msg;
+document.body.appendChild(toast);
+setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.3s'; setTimeout(() => toast.remove(), 300); }, 3000);
+}
+// Debug: Verifica se as páginas existem
+window.addEventListener('DOMContentLoaded', function() {
+    console.log('[DEBUG] Páginas encontradas:');
+    ['dashboard', 'configuracoes', 'prompts', 'alertas'].forEach(id => {
+        const el = document.getElementById(id);
+        console.log(`  ${id}:`, el ? '✓ Existe' : '✗ NÃO ENCONTRADO');
+    });
+    
+    // Testa os clicks manualmente
+    document.querySelectorAll('.menu-item').forEach((item, index) => {
+        item.addEventListener('click', function(e) {
+            console.log('[DEBUG] Click no menu item:', index, this.textContent.trim());
+        });
+    });
+});
+</script>
+</body>
+</html>

@@ -1,5 +1,12 @@
 import { supabase } from '../supabaseClient';
 
+export interface BlockTrade {
+  time: string;
+  price: number;
+  volume: number;
+  side: 'COMPRA' | 'VENDA' | string;
+}
+
 export interface MarketData {
   symbol: string;
   price: string;
@@ -11,7 +18,7 @@ export interface MarketData {
   delta: number;
   deltaRatio: number;
   printsPerSecond: number;
-  blockTrades: string[];
+  blockTrades: BlockTrade[];
 }
 
 export interface NasdaqForce {
@@ -33,17 +40,19 @@ export interface GammaLevels {
   gwall?: string;
   gex_count?: number;
   bl_count?: number;
+  gex?: number[];
+  bl?: number[];
 }
 
 export interface EconomicNewsItem {
   id: string;
-  event_time: string;
-  event_date: string;
+  date: Date;
   country: string;
   impact: 'high' | 'medium' | 'low';
-  event_name: string;
+  title: string;
   forecast: string;
   previous: string;
+  unit: string;
 }
 
 // 1. Buscar Market Data do Supabase
@@ -53,7 +62,7 @@ export async function fetchMarketDataSupabase(instanceId: string): Promise<Marke
       .from('market_data')
       .select('*')
       .eq('instance_id', instanceId)
-      .order('id', { ascending: false }) // ou order por timestamp
+      .order('id', { ascending: false })
       .limit(1)
       .maybeSingle();
 
@@ -62,13 +71,15 @@ export async function fetchMarketDataSupabase(instanceId: string): Promise<Marke
       return null;
     }
 
-    // Adaptar o formato
+    // Processar recent_trades (Block Trades)
     const recentTrades = data.recent_trades ? (typeof data.recent_trades === 'string' ? JSON.parse(data.recent_trades) : data.recent_trades) : [];
-    const formattedTrades = Array.isArray(recentTrades) ? recentTrades.map((t: any) => {
-      const side = t.side || 'TRADE';
-      const price = t.price || '--';
-      const vol = t.volume || '--';
-      return `${side} @ ${price} (Vol: ${vol})`;
+    const formattedTrades: BlockTrade[] = Array.isArray(recentTrades) ? recentTrades.map((t: any) => {
+      return {
+        time: t.time || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        price: Number(t.price || 0),
+        volume: Number(t.volume || 0),
+        side: String(t.side || 'COMPRA').toUpperCase()
+      };
     }) : [];
 
     return {
@@ -93,7 +104,6 @@ export async function fetchMarketDataSupabase(instanceId: string): Promise<Marke
 // 2. Buscar Força Nasdaq (nasdaq_force)
 export async function fetchForceSupabase(instanceId: string): Promise<NasdaqForce | null> {
   try {
-    // Como a tabela pode se chamar nasdaq_force
     const { data, error } = await supabase
       .from('nasdaq_force')
       .select('*')
@@ -107,7 +117,6 @@ export async function fetchForceSupabase(instanceId: string): Promise<NasdaqForc
       return null;
     }
 
-    // Se o formato da força vier como JSON ou colunas individuais, tratamos:
     let forces: { symbol: string; buy: number; sell: number }[] = [];
     if (data.force_data) {
       const parsed = typeof data.force_data === 'string' ? JSON.parse(data.force_data) : data.force_data;
@@ -164,6 +173,15 @@ export async function fetchGammaLevelsSupabase(symbol: string): Promise<GammaLev
       return null;
     }
 
+    const parseGammaArray = (val: any): number[] => {
+      if (!val) return [];
+      if (Array.isArray(val)) return val.map(Number);
+      return String(val)
+        .split(',')
+        .map(v => parseFloat(v.trim()))
+        .filter(v => !isNaN(v) && v > 0);
+    };
+
     return {
       hvl: data.hvl !== undefined ? String(data.hvl) : '--',
       call: data.call_resistance !== undefined ? String(data.call_resistance) : '--',
@@ -178,7 +196,9 @@ export async function fetchGammaLevelsSupabase(symbol: string): Promise<GammaLev
       put0: data.put_support_0dte !== undefined ? String(data.put_support_0dte) : '--',
       gwall: data.gamma_wall_0dte !== undefined ? String(data.gamma_wall_0dte) : '--',
       gex_count: data.gex ? String(data.gex).split(',').length : 0,
-      bl_count: data.bl ? String(data.bl).split(',').length : 0
+      bl_count: data.bl ? String(data.bl).split(',').length : 0,
+      gex: parseGammaArray(data.gex),
+      bl: parseGammaArray(data.bl)
     };
   } catch (err) {
     console.error('[DB] Erro ao buscar gamma_levels:', err);
@@ -217,8 +237,7 @@ export async function fetchNewsSupabase(): Promise<EconomicNewsItem[]> {
       .from('economic_news')
       .select('*')
       .gte('event_date', today)
-      .order('event_date', { ascending: true })
-      .order('event_time', { ascending: true });
+      .order('event_date', { ascending: true });
 
     if (error) {
       console.error('[DB] Erro economic_news:', error);
@@ -227,13 +246,13 @@ export async function fetchNewsSupabase(): Promise<EconomicNewsItem[]> {
 
     return (data || []).map(item => ({
       id: String(item.id),
-      event_time: item.event_time || '00:00',
-      event_date: item.event_date || today,
+      date: new Date(item.event_date),
       country: item.country || 'US',
       impact: item.impact || 'low',
-      event_name: item.event_name || '--',
+      title: item.title || item.event_name || '--',
       forecast: item.forecast || '',
-      previous: item.previous || ''
+      previous: item.previous || '',
+      unit: item.unit || ''
     }));
   } catch (err) {
     console.error('[DB] Erro ao buscar notícias:', err);
@@ -244,10 +263,19 @@ export async function fetchNewsSupabase(): Promise<EconomicNewsItem[]> {
 // 6. Buscar Sinal Local (quando configurado no modo local)
 export async function fetchLocalSinal(): Promise<MarketData | null> {
   try {
-    // Busca do servidor local de API na porta 8001
     const response = await fetch('http://localhost:8001/sinal', { method: 'GET' });
     if (!response.ok) return null;
     const data = await response.json();
+
+    const localTrades = data.block_trades || [];
+    const formattedTrades: BlockTrade[] = Array.isArray(localTrades) ? localTrades.map((t: any) => {
+      return {
+        time: t.time || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        price: Number(t.price || 0),
+        volume: Number(t.volume || 0),
+        side: String(t.side || 'COMPRA').toUpperCase()
+      };
+    }) : [];
 
     return {
       symbol: data.symbol || '--',
@@ -256,11 +284,11 @@ export async function fetchLocalSinal(): Promise<MarketData | null> {
       atrRatio: Number(data.atr_ratio || 0),
       estado: data.estado || 'AGUARDANDO',
       timestamp: data.timestamp || '--:--:--',
-      sentiment: Number(data.sentiment || 0),
+      sentiment: Number(data.sentiment || 50),
       delta: Number(data.delta_value || 0),
       deltaRatio: Number(data.delta_ratio || 1.0),
       printsPerSecond: Number(data.prints_per_second || 0),
-      blockTrades: data.block_trades || []
+      blockTrades: formattedTrades
     };
   } catch (err) {
     console.warn('[DB] Servidor local offline:', err);

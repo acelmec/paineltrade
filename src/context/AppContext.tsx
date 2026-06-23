@@ -467,6 +467,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
+    const formattedTrades = marketData.blockTrades.map(t => 
+      `[${t.time}] ${t.side} | Vol: ${t.volume} @ Price: ${t.price}`
+    );
+
     const aiReqData = {
       provider: settings.ai_provider,
       apiKey: apiKey || '',
@@ -480,8 +484,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       deltaRatio: marketData.deltaRatio,
       prints: marketData.printsPerSecond,
       forces,
-      blockTrades: marketData.blockTrades,
-      news: news.map(n => `[${n.event_time}] ${n.country} - ${n.event_name} (Impacto: ${n.impact})`),
+      blockTrades: formattedTrades,
+      news: news.map(n => `[${n.date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}] ${n.country} - ${n.title} (Impacto: ${n.impact})`),
       levels: levelsObj,
       screenshotBase64: settings.enviar_imagem_ia ? (screenshot || undefined) : undefined,
       promptTemplate: settings.ai_system_prompt || undefined

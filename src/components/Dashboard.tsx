@@ -31,95 +31,134 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  // Helper de cores de fundo para os badges de níveis
+  const getCorFundo = (tipo: string) => {
+    const c: { [key: string]: string } = {
+      hvl: '#a855f7',
+      call: '#ef4444',
+      put: '#22c55e',
+      max1d: '#06b6d4',
+      min1d: '#eab308',
+      prev: '#f97316',
+      prevH: '#f87171',
+      prevL: '#4ade80',
+      hvl0: '#c084fc',
+      call0: '#fca5a5',
+      put0: '#86efac',
+      gwall: '#fbbf24',
+      gex: '#a855f7',
+      bl: '#3b82f6'
+    };
+    return c[tipo] || '#64748b';
+  };
+
   // Cálculo do Mapa de Níveis
   const renderLevelsMap = () => {
     if (!marketData || !gammaLevels) {
-      return <div className="text-slate-600 text-sm text-center py-6">Aguardando dados do mercado...</div>;
+      return <div className="text-slate-600 text-sm text-center py-6">Aguardando dados...</div>;
     }
 
     const currentPrice = Number(marketData.price);
-    if (isNaN(currentPrice)) {
-      return <div className="text-slate-600 text-sm text-center py-6">Preço do mercado inválido...</div>;
+    const activePrices: number[] = [];
+    if (!isNaN(currentPrice) && currentPrice > 0) {
+      activePrices.push(currentPrice);
     }
 
     // Mapear chaves de níveis e suas cores/labels
-    const levelConfigs: { [key: string]: { label: string; class: string; price: number } } = {};
+    const niveis: { label: string; class: string; price: number }[] = [];
     
-    const mappingKeys = [
-      { key: 'hvl', label: 'HVL', class: 'hvl' },
-      { key: 'call', label: 'Call', class: 'call' },
-      { key: 'put', label: 'Put', class: 'put' },
-      { key: 'max1d', label: '1D Max', class: 'max1d' },
-      { key: 'min1d', label: '1D Min', class: 'min1d' },
-      { key: 'prev', label: 'Ajuste', class: 'prev' },
-      { key: 'prevH', label: 'Máx Ant', class: 'prevH' },
-      { key: 'prevL', label: 'Mín Ant', class: 'prevL' },
-      { key: 'hvl0', label: 'HVL 0DTE', class: 'hvl0' },
-      { key: 'call0', label: 'Call 0DTE', class: 'call0' },
-      { key: 'put0', label: 'Put 0DTE', class: 'put0' },
-      { key: 'gwall', label: 'GWall 0DTE', class: 'gwall' }
-    ];
-
-    const activePrices: number[] = [currentPrice];
-
-    mappingKeys.forEach(cfg => {
-      const priceRaw = (gammaLevels as any)[cfg.key];
-      const priceNum = Number(priceRaw);
-      if (priceRaw && !isNaN(priceNum) && priceNum > 0 && !disabledLevels.includes(cfg.key)) {
-        levelConfigs[cfg.key] = {
-          label: cfg.label,
-          class: cfg.class,
-          price: priceNum
-        };
-        activePrices.push(priceNum);
+    const pushNivel = (val: any, label: string, tipo: string) => {
+      const num = Number(val);
+      if (val && !isNaN(num) && num > 0 && !disabledLevels.includes(tipo)) {
+        niveis.push({ label, class: tipo, price: num });
+        activePrices.push(num);
       }
-    });
+    };
 
-    const minPrice = Math.min(...activePrices);
-    const maxPrice = Math.max(...activePrices);
-    const range = maxPrice - minPrice || 1;
+    pushNivel(gammaLevels.hvl, 'HVL', 'hvl');
+    pushNivel(gammaLevels.call, 'Call', 'call');
+    pushNivel(gammaLevels.put, 'Put', 'put');
+    pushNivel(gammaLevels.max1d, 'Max', 'max1d');
+    pushNivel(gammaLevels.min1d, 'Min', 'min1d');
+    pushNivel(gammaLevels.prev, 'Ajuste', 'prev');
+    pushNivel(gammaLevels.prevH, 'MxAnt', 'prevH');
+    pushNivel(gammaLevels.prevL, 'MnAnt', 'prevL');
+    pushNivel(gammaLevels.hvl0, 'HVL0', 'hvl0');
+    pushNivel(gammaLevels.call0, 'Call0', 'call0');
+    pushNivel(gammaLevels.put0, 'Put0', 'put0');
+    pushNivel(gammaLevels.gwall, 'GWall', 'gwall');
 
-    // Margem de 5% nas pontas para não esmagar os elementos nas bordas
-    const padding = range * 0.05;
-    const mapMin = minPrice - padding;
-    const mapMax = maxPrice + padding;
-    const mapRange = mapMax - mapMin;
+    // Adicionar listas GEX e BL adicionais
+    if (gammaLevels.bl && !disabledLevels.includes('bl')) {
+      gammaLevels.bl.forEach((v, i) => {
+        if (v > 0) {
+          niveis.push({ label: `BL${i + 1}`, class: 'bl', price: v });
+          activePrices.push(v);
+        }
+      });
+    }
+    if (gammaLevels.gex && !disabledLevels.includes('gex')) {
+      gammaLevels.gex.forEach((v, i) => {
+        if (v > 0) {
+          niveis.push({ label: `GEX${i + 1}`, class: 'gex', price: v });
+          activePrices.push(v);
+        }
+      });
+    }
+
+    if (niveis.length === 0 && activePrices.length === 0) {
+      return <div className="text-slate-600 text-sm text-center py-6">Aguardando dados...</div>;
+    }
+
+    const rawMin = Math.min(...activePrices);
+    const rawMax = Math.max(...activePrices);
+    const rawRange = rawMax - rawMin || 20;
+    const margem = rawRange * 0.10; // Margem de 10% do projeto base offline
+    const tMin = rawMin - margem;
+    const tMax = rawMax + margem;
+    const range = tMax - tMin;
 
     const getPercent = (p: number) => {
-      return ((p - mapMin) / mapRange) * 100;
+      // Inverter a direção conforme lógica offline (100 - x)
+      return 100 - ((p - tMin) / range) * 100;
     };
 
     return (
       <div className="relative h-full w-full">
-        {/* Linha do Preço Atual */}
-        <div
-          className="preco-marker"
-          style={{ left: `${getPercent(currentPrice)}%` }}
-          title={`Preço Atual: ${currentPrice}`}
-        />
-
         {/* Linhas de Nível */}
-        {Object.entries(levelConfigs).map(([key, cfg]) => {
-          const pct = getPercent(cfg.price);
+        {niveis.map((n, idx) => {
+          const pct = getPercent(n.price);
           return (
             <div
-              key={key}
-              className={`nivel-linha ${cfg.class}`}
-              style={{ left: `${pct}%` }}
+              key={idx}
+              className={`nivel-linha ${n.class}`}
+              style={{ left: `${pct.toFixed(2)}%` }}
             >
-              <span className="nivel-label bg-slate-900 border border-slate-700 text-slate-300">
-                {cfg.label}: {cfg.price}
+              <span 
+                className="nivel-label text-white text-[8px]" 
+                style={{ backgroundColor: getCorFundo(n.class) }}
+              >
+                {n.label}
               </span>
             </div>
           );
         })}
 
-        {/* Eixo de Min/Max */}
-        <div className="absolute bottom-1 left-2 text-[10px] text-slate-500 font-mono">
-          Min: {mapMin.toFixed(2)}
+        {/* Linha do Preço Atual */}
+        {!isNaN(currentPrice) && currentPrice > 0 && (
+          <div
+            className="preco-marker"
+            style={{ left: `${getPercent(currentPrice).toFixed(2)}%` }}
+            title={`Preço Atual: ${currentPrice}`}
+          />
+        )}
+
+        {/* Indicadores de Mínimo e Máximo do Range nas extremidades */}
+        <div className="absolute bottom-1 left-1 text-[8px] text-slate-500 font-mono font-bold">
+          {tMax.toFixed(2)}
         </div>
-        <div className="absolute bottom-1 right-2 text-[10px] text-slate-500 font-mono">
-          Max: {mapMax.toFixed(2)}
+        <div className="absolute bottom-1 right-1 text-[8px] text-slate-500 font-mono font-bold text-right">
+          {tMin.toFixed(2)}
         </div>
       </div>
     );
@@ -134,7 +173,7 @@ export const Dashboard: React.FC = () => {
   // Rotação do Needle do Sentiment Gauge (-90deg a 90deg)
   const getSentimentRotation = () => {
     if (!marketData) return -90;
-    const value = marketData.sentiment; // De 0 a 100
+    const value = Math.round(marketData.sentiment); // Apenas valor inteiro sem decimal
     // Mapear de [0, 100] para [-90, 90]
     return (value / 100) * 180 - 90;
   };
@@ -164,6 +203,38 @@ export const Dashboard: React.FC = () => {
       case 'VENDA': return 'border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.15)]';
       case 'SAIR': return 'border-orange-500/50';
       default: return 'border-slate-700';
+    }
+  };
+
+  const renderNewsCountdown = (itemDate: Date) => {
+    const now = new Date();
+    const itemTime = new Date(itemDate);
+    const diffMs = itemTime.getTime() - now.getTime();
+    const diffMin = Math.round(diffMs / 60000);
+    const timeStr = itemTime.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    // Pega limites locais (default 5 e 15 como no projeto base)
+    const alertBefore = 5;
+    const alertAfter = 15;
+
+    if (diffMs > 0) {
+      if (diffMin <= alertBefore) {
+        return <span className="news-countdown imminent">⏰ {diffMin}min</span>;
+      } else if (diffMin <= 30) {
+        const hours = Math.floor(diffMin / 60);
+        const mins = diffMin % 60;
+        const label = hours > 0 ? `${hours}h${mins}m` : `${mins}min`;
+        return <span className="news-countdown soon">⏰ {label}</span>;
+      } else {
+        return <span className="news-countdown distant">{timeStr}</span>;
+      }
+    } else {
+      const afterMin = Math.abs(diffMin);
+      if (afterMin <= alertAfter) {
+        return <span className="news-countdown imminent animate-pulse">🔥 ATIVA</span>;
+      } else {
+        return <span className="news-countdown passed">✓ {timeStr}</span>;
+      }
     }
   };
 
@@ -240,13 +311,13 @@ export const Dashboard: React.FC = () => {
               <div className="gauge-center-compact"></div>
               <div className="gauge-value-compact">
                 <div className="gauge-value-number-compact text-white font-mono">
-                  {marketData?.sentiment !== undefined ? `${marketData.sentiment}%` : '0%'}
+                  {marketData?.sentiment !== undefined ? `${Math.round(marketData.sentiment)}%` : '0%'}
                 </div>
               </div>
             </div>
             <div className="gauge-labels-compact text-[9px] flex justify-between px-2">
-              <span className="text-red-400">Vendedor</span>
-              <span className="text-green-400">Comprador</span>
+              <span className="text-red-400 font-bold">Vendedor</span>
+              <span className="text-green-400 font-bold">Comprador</span>
             </div>
           </div>
         </div>
@@ -257,7 +328,7 @@ export const Dashboard: React.FC = () => {
             <div className="text-xs font-bold text-purple-400 uppercase mb-2">💪 Força Momentum</div>
             <div className="space-y-1 flex-1 overflow-y-auto pr-1">
               {forces.length === 0 ? (
-                <div className="text-slate-500 text-xs py-4 text-center">Buscando forças...</div>
+                <div className="text-slate-500 text-xs py-4 text-center">Buscando forces...</div>
               ) : (
                 forces.map((item) => (
                   <div key={item.symbol} className="flex items-center gap-1.5 py-0.5 border-b border-slate-800/20 last:border-b-0 text-[10px]">
@@ -424,9 +495,9 @@ export const Dashboard: React.FC = () => {
             {/* Delta Gauge */}
             <div className="delta-gauge-wrap border-t border-slate-800 pt-2 mt-2">
               <div className="delta-gauge-labels text-[9px] flex justify-between font-bold text-slate-400">
-                <span className="text-red-400">VENDA</span>
+                <span className="text-red-400 font-bold">VENDA</span>
                 <span>DELTA</span>
-                <span className="text-green-400">COMPRA</span>
+                <span className="text-green-400 font-bold">COMPRA</span>
               </div>
               <div className="delta-gauge-bar mt-1 h-2 bg-slate-850 rounded-full relative overflow-hidden">
                 <div
@@ -481,15 +552,27 @@ export const Dashboard: React.FC = () => {
               <span>🐋 Block Trades</span>
               <span className="text-[9px] bg-orange-950/20 text-orange-400 px-1.5 py-0.5 rounded font-mono border border-orange-800/30">Ordens Grandes</span>
             </div>
-            <div className="flex-1 overflow-y-auto py-2 font-mono text-[10px] text-slate-400 space-y-1 scrollbar-hide">
+            <div className="flex-1 overflow-y-auto py-2 font-mono text-[10px] text-slate-400 space-y-1.5 scrollbar-hide">
               {!marketData?.blockTrades || marketData.blockTrades.length === 0 ? (
                 <div className="text-slate-500 text-center py-10">Sem ordens registradas...</div>
               ) : (
-                marketData.blockTrades.map((trade, idx) => (
-                  <div key={idx} className="bg-slate-900/30 border border-slate-850 p-1.5 rounded text-left">
-                    {trade}
-                  </div>
-                ))
+                marketData.blockTrades.map((trade, idx) => {
+                  const isCompra = trade.side === 'COMPRA';
+                  return (
+                    <div 
+                      key={idx} 
+                      className={`p-1.5 rounded border border-l-2 text-[9px] flex justify-between items-center ${
+                        isCompra 
+                          ? 'bg-green-950/25 border-green-900/50 border-l-green-500 text-green-400' 
+                          : 'bg-red-950/25 border-red-900/50 border-l-red-500 text-red-400'
+                      }`}
+                    >
+                      <span className="font-bold">{trade.side}</span>
+                      <span>{trade.volume} ct @ {trade.price}</span>
+                      <span className="text-slate-500 text-[8px]">{trade.time}</span>
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
@@ -573,16 +656,14 @@ export const Dashboard: React.FC = () => {
                         <div className="space-y-0.5">
                           <div className="flex items-center gap-1">
                             <span className="news-country bg-blue-900/30 text-blue-300 px-1 rounded text-[8px]">{item.country}</span>
-                            <span className="font-bold text-slate-200">{item.event_name}</span>
+                            <span className="font-bold text-slate-200">{item.title}</span>
                           </div>
                           <div className="text-[8px] text-slate-500 flex gap-2">
                             <span>Previsão: {item.forecast || '--'}</span>
                             <span>Anterior: {item.previous || '--'}</span>
                           </div>
                         </div>
-                        <span className="news-countdown text-slate-400 font-bold text-[8px] whitespace-nowrap bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
-                          {item.event_time}
-                        </span>
+                        {renderNewsCountdown(item.date)}
                       </div>
                     ))
                   )}
