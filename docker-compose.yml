@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+        - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+        - VITE_WOO_BASE_URL=${VITE_WOO_BASE_URL}
+        - VITE_WOO_CONSUMER_KEY=${VITE_WOO_CONSUMER_KEY}
+        - VITE_WOO_CONSUMER_SECRET=${VITE_WOO_CONSUMER_SECRET}
+        - VITE_WOO_COD_PRODUTO=${VITE_WOO_COD_PRODUTO}
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: always
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8001:8001"
+      - "8000:8000"
+    volumes:
+      - ./NinjaPanel:/NinjaPanel
+    restart: always

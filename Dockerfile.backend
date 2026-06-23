@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# O backend Python usa apenas pacotes nativos da biblioteca padrão do Python.
+# Não há necessidade de instalar dependências extras com pip.
+
+COPY main.py ./
+
+# Direciona NinjaPanel para a pasta interna mapeada
+RUN mkdir -p /NinjaPanel
+
+EXPOSE 8000 8001
+
+CMD ["python", "main.py"]
