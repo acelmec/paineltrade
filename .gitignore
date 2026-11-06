@@ -21,6 +21,7 @@ dist-ssr
 *.ntvs*
 *.njsproj
 *.sln
+
 # Environment variables
 .env
 .env.*
@@ -28,3 +29,18 @@ dist-ssr
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Large binaries and output packages (GitHub >100MB limit)
+publish-output/
+release/
+src-csharp/**/bin/
+src-csharp/**/obj/
+src-csharp/bin/
+src-csharp/obj/
+android/**/build/
+*.exe
+*.apk
+easypanel-deploy.zip
+vortex-easypanel.zip
+vortexweb-release.apk
+wwwroot.zip

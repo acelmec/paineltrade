@@ -1,0 +1,198 @@
+{
+  "filter_rth": true,
+  "total_candles": 7038,
+  "valid_candles": 6823,
+  "target_distribution_all": {
+    "0": 4656,
+    "1": 2167,
+    "-1": 215
+  },
+  "target_distribution_binary": {
+    "0": 4656,
+    "1": 2167
+  },
+  "split": {
+    "train_size": 4776,
+    "val_size": 1023,
+    "test_size": 1024
+  },
+  "scale_pos_weight": 2.0872656755009698,
+  "auc_val": 0.582394366197183,
+  "auc_test": 0.5425656122370173,
+  "metrics_by_threshold": {
+    "0.5": {
+      "threshold": 0.5,
+      "num_signals": 0,
+      "signal_pct": 0.0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1_score": 0.0,
+      "accuracy": 0.0
+    },
+    "0.55": {
+      "threshold": 0.55,
+      "num_signals": 0,
+      "signal_pct": 0.0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1_score": 0.0,
+      "accuracy": 0.0
+    },
+    "0.6": {
+      "threshold": 0.6,
+      "num_signals": 0,
+      "signal_pct": 0.0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1_score": 0.0,
+      "accuracy": 0.0
+    },
+    "0.65": {
+      "threshold": 0.65,
+      "num_signals": 0,
+      "signal_pct": 0.0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1_score": 0.0,
+      "accuracy": 0.0
+    },
+    "0.7": {
+      "threshold": 0.7,
+      "num_signals": 0,
+      "signal_pct": 0.0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1_score": 0.0,
+      "accuracy": 0.0
+    }
+  },
+  "confusion_matrix_50": [
+    [
+      717,
+      0
+    ],
+    [
+      307,
+      0
+    ]
+  ],
+  "confusion_matrix_60": [
+    [
+      717,
+      0
+    ],
+    [
+      307,
+      0
+    ]
+  ],
+  "top_features": [
+    {
+      "feature": "sma_20",
+      "importance": 8
+    },
+    {
+      "feature": "time_cos",
+      "importance": 8
+    },
+    {
+      "feature": "atr_14",
+      "importance": 5
+    },
+    {
+      "feature": "volume_sma_20",
+      "importance": 5
+    },
+    {
+      "feature": "return_15",
+      "importance": 4
+    },
+    {
+      "feature": "sma_60",
+      "importance": 4
+    },
+    {
+      "feature": "dist_from_high",
+      "importance": 3
+    },
+    {
+      "feature": "dist_from_low",
+      "importance": 3
+    },
+    {
+      "feature": "body",
+      "importance": 2
+    },
+    {
+      "feature": "atr_5",
+      "importance": 2
+    },
+    {
+      "feature": "dist_from_sma20",
+      "importance": 2
+    },
+    {
+      "feature": "time_sin",
+      "importance": 2
+    },
+    {
+      "feature": "body_ratio",
+      "importance": 1
+    },
+    {
+      "feature": "upper_wick_ratio",
+      "importance": 1
+    },
+    {
+      "feature": "lower_wick_ratio",
+      "importance": 1
+    }
+  ],
+  "backtest": {
+    "threshold": 0.6,
+    "total_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate": 0.0,
+    "cost_per_trade_pts": 1.5,
+    "gross_points": 0.0,
+    "net_points": 0.0,
+    "net_points_per_trade": 0.0
+  },
+  "feature_names": [
+    "body",
+    "upper_wick",
+    "lower_wick",
+    "range",
+    "body_ratio",
+    "upper_wick_ratio",
+    "lower_wick_ratio",
+    "close_position",
+    "direction",
+    "return_1",
+    "return_5",
+    "return_15",
+    "return_30",
+    "atr_14",
+    "atr_5",
+    "volatility_ratio",
+    "range_zscore",
+    "sma_20",
+    "sma_60",
+    "dist_from_sma20",
+    "dist_from_sma60",
+    "zscore_20",
+    "session_high",
+    "session_low",
+    "dist_from_high",
+    "dist_from_low",
+    "hammer",
+    "shooting_star",
+    "strong_candle",
+    "doji",
+    "time_sin",
+    "time_cos",
+    "volume_sma_20",
+    "volume_ratio"
+  ]
+}

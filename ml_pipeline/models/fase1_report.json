@@ -1,0 +1,293 @@
+{
+  "total_candles_raw": 24583,
+  "total_candles_rth": 7038,
+  "valid_candles_binary": 6823,
+  "target_distribution_all": {
+    "0": 4656,
+    "1": 2167,
+    "-1": 215
+  },
+  "target_distribution_binary": {
+    "0": 4656,
+    "1": 2167
+  },
+  "split": {
+    "train_size": 4776,
+    "val_size": 1023,
+    "test_size": 1024
+  },
+  "auc_val": 0.5731516896908608,
+  "auc_test": 0.6293504876907491,
+  "metrics_by_threshold": {
+    "0.35": {
+      "threshold": 0.35,
+      "num_signals": 181,
+      "signal_pct": 0.1767578125,
+      "precision": 0.5082872928176796,
+      "recall": 0.2996742671009772,
+      "f1_score": 0.3770491803278688,
+      "accuracy": 0.703125
+    },
+    "0.4": {
+      "threshold": 0.4,
+      "num_signals": 76,
+      "signal_pct": 0.07421875,
+      "precision": 0.7763157894736842,
+      "recall": 0.19218241042345277,
+      "f1_score": 0.30809399477806787,
+      "accuracy": 0.7412109375
+    },
+    "0.45": {
+      "threshold": 0.45,
+      "num_signals": 38,
+      "signal_pct": 0.037109375,
+      "precision": 0.9210526315789473,
+      "recall": 0.11400651465798045,
+      "f1_score": 0.2028985507246377,
+      "accuracy": 0.7314453125
+    },
+    "0.5": {
+      "threshold": 0.5,
+      "num_signals": 36,
+      "signal_pct": 0.03515625,
+      "precision": 0.9166666666666666,
+      "recall": 0.10749185667752444,
+      "f1_score": 0.1924198250728863,
+      "accuracy": 0.7294921875
+    },
+    "0.55": {
+      "threshold": 0.55,
+      "num_signals": 28,
+      "signal_pct": 0.02734375,
+      "precision": 1.0,
+      "recall": 0.09120521172638436,
+      "f1_score": 0.16716417910447762,
+      "accuracy": 0.7275390625
+    },
+    "0.6": {
+      "threshold": 0.6,
+      "num_signals": 11,
+      "signal_pct": 0.0107421875,
+      "precision": 1.0,
+      "recall": 0.035830618892508145,
+      "f1_score": 0.06918238993710692,
+      "accuracy": 0.7109375
+    }
+  },
+  "confusion_matrix_40": [
+    [
+      700,
+      17
+    ],
+    [
+      248,
+      59
+    ]
+  ],
+  "confusion_matrix_50": [
+    [
+      714,
+      3
+    ],
+    [
+      274,
+      33
+    ]
+  ],
+  "top_features": [
+    {
+      "feature": "volume_sma_20",
+      "importance": 57
+    },
+    {
+      "feature": "dist_from_low",
+      "importance": 50
+    },
+    {
+      "feature": "time_cos",
+      "importance": 41
+    },
+    {
+      "feature": "time_sin",
+      "importance": 38
+    },
+    {
+      "feature": "dist_from_high",
+      "importance": 37
+    },
+    {
+      "feature": "dist_from_sma60",
+      "importance": 33
+    },
+    {
+      "feature": "atr_14",
+      "importance": 18
+    },
+    {
+      "feature": "return_5",
+      "importance": 15
+    },
+    {
+      "feature": "atr_5",
+      "importance": 12
+    },
+    {
+      "feature": "volume_ratio",
+      "importance": 11
+    },
+    {
+      "feature": "zscore_20",
+      "importance": 10
+    },
+    {
+      "feature": "return_30",
+      "importance": 8
+    },
+    {
+      "feature": "body_ratio",
+      "importance": 6
+    },
+    {
+      "feature": "return_15",
+      "importance": 5
+    },
+    {
+      "feature": "dist_from_sma20",
+      "importance": 5
+    },
+    {
+      "feature": "upper_wick_ratio",
+      "importance": 3
+    },
+    {
+      "feature": "return_1",
+      "importance": 3
+    },
+    {
+      "feature": "range_zscore",
+      "importance": 1
+    },
+    {
+      "feature": "body",
+      "importance": 0
+    },
+    {
+      "feature": "upper_wick",
+      "importance": 0
+    },
+    {
+      "feature": "lower_wick",
+      "importance": 0
+    },
+    {
+      "feature": "range",
+      "importance": 0
+    },
+    {
+      "feature": "lower_wick_ratio",
+      "importance": 0
+    },
+    {
+      "feature": "close_position",
+      "importance": 0
+    },
+    {
+      "feature": "direction",
+      "importance": 0
+    },
+    {
+      "feature": "volatility_ratio",
+      "importance": 0
+    },
+    {
+      "feature": "hammer",
+      "importance": 0
+    },
+    {
+      "feature": "shooting_star",
+      "importance": 0
+    },
+    {
+      "feature": "strong_candle",
+      "importance": 0
+    },
+    {
+      "feature": "doji",
+      "importance": 0
+    }
+  ],
+  "backtests": {
+    "0.4": {
+      "threshold": 0.4,
+      "total_trades": 76,
+      "wins": 59,
+      "losses": 17,
+      "win_rate": 0.7763157894736842,
+      "gross_points": 1271.0,
+      "net_points": 1157.0,
+      "pts_per_trade": 15.223684210526315
+    },
+    "0.45": {
+      "threshold": 0.45,
+      "total_trades": 38,
+      "wins": 35,
+      "losses": 3,
+      "win_rate": 0.9210526315789473,
+      "gross_points": 839.0,
+      "net_points": 782.0,
+      "pts_per_trade": 20.57894736842105
+    },
+    "0.5": {
+      "threshold": 0.5,
+      "total_trades": 36,
+      "wins": 33,
+      "losses": 3,
+      "win_rate": 0.9166666666666666,
+      "gross_points": 789.0,
+      "net_points": 735.0,
+      "pts_per_trade": 20.416666666666668
+    },
+    "0.55": {
+      "threshold": 0.55,
+      "total_trades": 28,
+      "wins": 28,
+      "losses": 0,
+      "win_rate": 1.0,
+      "gross_points": 700.0,
+      "net_points": 658.0,
+      "pts_per_trade": 23.5
+    }
+  },
+  "feature_names": [
+    "body",
+    "upper_wick",
+    "lower_wick",
+    "range",
+    "body_ratio",
+    "upper_wick_ratio",
+    "lower_wick_ratio",
+    "close_position",
+    "direction",
+    "return_1",
+    "return_5",
+    "return_15",
+    "return_30",
+    "atr_14",
+    "atr_5",
+    "volatility_ratio",
+    "range_zscore",
+    "dist_from_sma20",
+    "dist_from_sma60",
+    "zscore_20",
+    "dist_from_high",
+    "dist_from_low",
+    "hammer",
+    "shooting_star",
+    "strong_candle",
+    "doji",
+    "time_sin",
+    "time_cos",
+    "volume_sma_20",
+    "volume_ratio"
+  ]
+}

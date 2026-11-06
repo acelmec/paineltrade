@@ -1,26 +1,61 @@
 {
   "name": "vortexweb",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "start": "vite preview --host 0.0.0.0 --port 80",
+    "serve": "vite preview",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cap:sync": "npm run build && npx cap sync",
+    "apk": "npm run build && npx cap sync && cd android && export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 && export ANDROID_HOME=/home/andre/Android/Sdk && ./gradlew --stop && ./gradlew assembleDebug",
+    "apk:release": "node scripts/buildApk.cjs",
+    "ios": "npm run build && npx cap sync && npx cap open ios",
+    "electron:dev": "cross-env NODE_ENV=development concurrently \"vite\" \"wait-on http://localhost:8080 && electron .\"",
+    "electron:build": "npm run build && npx -y electron-builder",
+    "win:build": "npm run build && npx -y electron-builder --win nsis Portable zip",
+    "tauri:dev": "npx tauri dev",
+    "tauri:build": "npx tauri build",
+    "exe:build": "npm run build && dotnet publish src-csharp/Vortex.Desktop/Vortex.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish-output",
+    "win:exe": "npm run build && dotnet publish src-csharp/Vortex.Desktop/Vortex.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish-output",
+    "installer:build": "npm run exe:build && dotnet publish src-csharp/Axion.Installer/Axion.Installer.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish-output",
+    "build:all": "npm run installer:build",
+    "release:bundle": "node scripts/build_release_bundle.cjs",
+    "hub": "node server/websocket_hub.cjs",
+    "pack:addons": "node scripts/pack_addon.cjs",
+    "easypanel:pack": "node scripts/packEasypanel.cjs",
+    "postinstall": "node scripts/patchLightweightCharts.cjs",
+    "patch:charts": "node scripts/patchLightweightCharts.cjs"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^7.6.8",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0",
+    "@capacitor/local-notifications": "^7.0.7",
     "@supabase/supabase-js": "^2.108.2",
+    "lightweight-charts": "^5.2.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^24.12.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.5.0",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "34.0.0",
+    "electron-builder": "^25.1.8",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
@@ -29,6 +64,30 @@
     "tailwindcss": "^3.4.19",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "wait-on": "^8.0.2"
+  },
+  "build": {
+    "appId": "com.vortexweb.app",
+    "productName": "VortexWeb Desktop",
+    "electronVersion": "34.0.0",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "src/backgroundWorker.js"
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "nsis",
+        "zip",
+        "dir"
+      ],
+      "sign": false,
+      "forceCodeSigning": false
+    }
   }
 }

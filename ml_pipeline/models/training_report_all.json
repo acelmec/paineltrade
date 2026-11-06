@@ -1,0 +1,198 @@
+{
+  "filter_rth": false,
+  "total_candles": 24524,
+  "valid_candles": 22196,
+  "target_distribution_all": {
+    "0": 15154,
+    "1": 7042,
+    "-1": 2328
+  },
+  "target_distribution_binary": {
+    "0": 15154,
+    "1": 7042
+  },
+  "split": {
+    "train_size": 15537,
+    "val_size": 3329,
+    "test_size": 3330
+  },
+  "scale_pos_weight": 2.1572851046535257,
+  "auc_val": 0.4173874733234172,
+  "auc_test": 0.5032056822524834,
+  "metrics_by_threshold": {
+    "0.5": {
+      "threshold": 0.5,
+      "num_signals": 0,
+      "signal_pct": 0.0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1_score": 0.0,
+      "accuracy": 0.0
+    },
+    "0.55": {
+      "threshold": 0.55,
+      "num_signals": 0,
+      "signal_pct": 0.0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1_score": 0.0,
+      "accuracy": 0.0
+    },
+    "0.6": {
+      "threshold": 0.6,
+      "num_signals": 0,
+      "signal_pct": 0.0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1_score": 0.0,
+      "accuracy": 0.0
+    },
+    "0.65": {
+      "threshold": 0.65,
+      "num_signals": 0,
+      "signal_pct": 0.0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1_score": 0.0,
+      "accuracy": 0.0
+    },
+    "0.7": {
+      "threshold": 0.7,
+      "num_signals": 0,
+      "signal_pct": 0.0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1_score": 0.0,
+      "accuracy": 0.0
+    }
+  },
+  "confusion_matrix_50": [
+    [
+      2329,
+      0
+    ],
+    [
+      1001,
+      0
+    ]
+  ],
+  "confusion_matrix_60": [
+    [
+      2329,
+      0
+    ],
+    [
+      1001,
+      0
+    ]
+  ],
+  "top_features": [
+    {
+      "feature": "dist_from_low",
+      "importance": 8
+    },
+    {
+      "feature": "time_cos",
+      "importance": 7
+    },
+    {
+      "feature": "dist_from_high",
+      "importance": 4
+    },
+    {
+      "feature": "sma_20",
+      "importance": 3
+    },
+    {
+      "feature": "session_high",
+      "importance": 2
+    },
+    {
+      "feature": "volume_sma_20",
+      "importance": 2
+    },
+    {
+      "feature": "sma_60",
+      "importance": 1
+    },
+    {
+      "feature": "dist_from_sma20",
+      "importance": 1
+    },
+    {
+      "feature": "zscore_20",
+      "importance": 1
+    },
+    {
+      "feature": "session_low",
+      "importance": 1
+    },
+    {
+      "feature": "body",
+      "importance": 0
+    },
+    {
+      "feature": "upper_wick",
+      "importance": 0
+    },
+    {
+      "feature": "lower_wick",
+      "importance": 0
+    },
+    {
+      "feature": "range",
+      "importance": 0
+    },
+    {
+      "feature": "body_ratio",
+      "importance": 0
+    }
+  ],
+  "backtest": {
+    "threshold": 0.6,
+    "total_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate": 0.0,
+    "cost_per_trade_pts": 1.5,
+    "gross_points": 0.0,
+    "net_points": 0.0,
+    "net_points_per_trade": 0.0
+  },
+  "feature_names": [
+    "body",
+    "upper_wick",
+    "lower_wick",
+    "range",
+    "body_ratio",
+    "upper_wick_ratio",
+    "lower_wick_ratio",
+    "close_position",
+    "direction",
+    "return_1",
+    "return_5",
+    "return_15",
+    "return_30",
+    "atr_14",
+    "atr_5",
+    "volatility_ratio",
+    "range_zscore",
+    "sma_20",
+    "sma_60",
+    "dist_from_sma20",
+    "dist_from_sma60",
+    "zscore_20",
+    "session_high",
+    "session_low",
+    "dist_from_high",
+    "dist_from_low",
+    "hammer",
+    "shooting_star",
+    "strong_candle",
+    "doji",
+    "time_sin",
+    "time_cos",
+    "volume_sma_20",
+    "volume_ratio"
+  ]
+}

@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Navegando o Nasdaq com Gamma Levels</title>
+    <!-- Google Fonts for Modern Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-gradient: linear-gradient(135deg, #090d16 0%, #0f172a 100%);
+            --glass-bg: rgba(15, 23, 42, 0.65);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --primary: #3b82f6;
+            --primary-glow: rgba(59, 130, 246, 0.35);
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-yellow: #f59e0b;
+            --accent-cyan: #06b6d4;
+            --accent-purple: #8b5cf6;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-gradient);
+            color: var(--text-primary);
+            overflow-x: hidden;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        /* Top Progress Bar indicator */
+        .progress-bar-container {
+            width: 100%;
+            height: 5px;
+            background: rgba(255, 255, 255, 0.05);
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 1001;
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 12.5%;
+            background: linear-gradient(90deg, var(--primary), var(--accent-cyan));
+            box-shadow: 0 0 10px var(--primary-glow);
+            transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .presentation {
+            max-width: 1100px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 40px 20px 100px 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .slide {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            display: none;
+            animation: slideIn 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .slide.active {
+            display: block;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(30px) scale(0.98);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        h1 {
+            font-size: 2.2rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #ffffff 30%, #a5b4fc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 25px;
+            text-align: center;
+            letter-spacing: -0.02em;
+        }
+
+        h2 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        h3 {
+            color: #f1f5f9;
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin: 20px 0 10px 0;
+        }
+
+        .chart-container {
+            background: rgba(8, 13, 24, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 14px;
+            padding: 24px;
+            margin: 25px 0;
+            text-align: center;
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .chart-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 20px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        svg {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+
+        .checklist {
+            background: rgba(30, 41, 59, 0.4);
+            border-left: 4px solid var(--primary);
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+
+        .checklist-item {
+            padding: 12px;
+            margin: 8px 0;
+            background: rgba(15, 23, 42, 0.4);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            color: var(--text-primary);
+        }
+
+        .checklist-item:before {
+            content: "✓";
+            color: var(--primary);
+            font-weight: bold;
+            font-size: 1.1rem;
+            line-height: 1;
+        }
+
+        .highlight-green {
+            background: rgba(16, 185, 129, 0.1);
+            border-left: 4px solid var(--accent-green);
+            color: #a7f3d0;
+            padding: 16px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        .highlight-red {
+            background: rgba(239, 68, 68, 0.1);
+            border-left: 4px solid var(--accent-red);
+            color: #fca5a5;
+            padding: 16px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        .highlight-blue {
+            background: rgba(59, 130, 246, 0.1);
+            border-left: 4px solid var(--primary);
+            color: #bfdbfe;
+            padding: 16px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        /* Floating Pill Navigation */
+        .navigation-wrap {
+            position: fixed;
+            bottom: 24px;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: center;
+            z-index: 1000;
+            pointer-events: none;
+        }
+
+        .navigation-pill {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 50px;
+            padding: 8px 16px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+            pointer-events: auto;
+        }
+
+        .nav-btn {
+            background: transparent;
+            color: var(--text-primary);
+            border: none;
+            padding: 8px 18px;
+            border-radius: 50px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: all 0.25s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .nav-btn:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+        }
+
+        .nav-btn.primary-btn {
+            background: var(--primary);
+            color: #ffffff;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+
+        .nav-btn.primary-btn:hover:not(:disabled) {
+            background: #2563eb;
+            box-shadow: 0 4px 16px rgba(59, 130, 246, 0.45);
+            transform: translateY(-1px);
+        }
+
+        .nav-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .slide-counter {
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--text-secondary);
+            font-family: 'JetBrains Mono', monospace;
+            padding: 0 8px;
+        }
+
+        .concept-box {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
+            margin: 25px 0;
+        }
+
+        .concept-card {
+            background: rgba(30, 41, 59, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            color: var(--text-primary);
+            padding: 20px;
+            border-radius: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .concept-card:hover {
+            transform: translateY(-3px);
+            border-color: rgba(255, 255, 255, 0.1);
+            background: rgba(30, 41, 59, 0.7);
+        }
+
+        .concept-card h4 {
+            font-size: 1.05rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .concept-card p {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        ul {
+            margin-left: 20px;
+            line-height: 1.8;
+            color: var(--text-secondary);
+        }
+
+        li {
+            margin: 8px 0;
+        }
+
+        .strong-text {
+            font-weight: bold;
+            color: #ffffff;
+        }
+
+        @media (max-width: 768px) {
+            .slide {
+                padding: 20px;
+            }
+            h1 {
+                font-size: 1.6rem;
+            }
+            h2 {
+                font-size: 1.3rem;
+            }
+            .navigation-pill {
+                padding: 6px 12px;
+                gap: 8px;
+            }
+            .nav-btn {
+                padding: 6px 12px;
+                font-size: 0.8rem;
+            }
+        }
+
+        @media print {
+            .slide {
+                display: block !important;
+                page-break-after: always;
+                box-shadow: none;
+                background: white !important;
+                color: #333 !important;
+                border: none;
+            }
+            .navigation-wrap, .progress-bar-container {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Top indicator -->
+    <div class="progress-bar-container">
+        <div class="progress-bar" id="progressBar"></div>
+    </div>
+
+    <div class="presentation">
+        <!-- Slide 1 -->
+        <div class="slide active" id="slide1">
+            <h1>📊 Navegando o Nasdaq com Gamma Levels</h1>
+            <h2 style="text-align: center; border: none; color: var(--text-secondary); font-size: 1.25rem; font-weight: 400; margin-top: -15px; margin-bottom: 30px;">
+                O Mapa do Mercado Institucional
+            </h2>
+            
+            <div class="chart-container">
+                <div class="chart-title">Como o Mercado Realmente se Move</div>
+                <svg viewBox="0 0 800 400" style="max-width: 800px; width: 100%;">
+                    <!-- Background -->
+                    <rect width="800" height="400" fill="#0b0f19" rx="14" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+                    
+                    <!-- Grid Lines for Visual Depth -->
+                    <line x1="50" y1="200" x2="750" y2="200" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+                    <line x1="400" y1="50" x2="400" y2="350" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+                    
+                    <!-- Market Makers Box -->
+                    <rect x="50" y="60" width="200" height="130" fill="url(#blueGrad)" rx="10"/>
+                    <text x="150" y="105" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="16" font-weight="800" letter-spacing="0.05em">MARKET</text>
+                    <text x="150" y="130" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="16" font-weight="800" letter-spacing="0.05em">MAKERS</text>
+                    <text x="150" y="155" text-anchor="middle" fill="#93c5fd" font-family="'Outfit', sans-serif" font-size="12">(Grandes Bancos)</text>
+                    
+                    <!-- Arrows to Options -->
+                    <path d="M 250 95 L 320 85" stroke="#60a5fa" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+                    <path d="M 250 155 L 320 235" stroke="#60a5fa" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+                    
+                    <!-- Options Box -->
+                    <rect x="320" y="50" width="150" height="60" fill="url(#pinkGrad)" rx="8"/>
+                    <text x="395" y="86" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="15" font-weight="700">CALLS</text>
+                    
+                    <rect x="320" y="210" width="150" height="60" fill="url(#cyanGrad)" rx="8"/>
+                    <text x="395" y="246" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="15" font-weight="700">PUTS</text>
+                    
+                    <!-- Hedge Arrow -->
+                    <path d="M 470 80 Q 550 80, 550 140 L 550 200" stroke="#f43f5e" stroke-width="2.5" fill="none" stroke-dasharray="5,3" marker-end="url(#arrowheadRed)"/>
+                    <text x="565" y="145" fill="#f43f5e" font-family="'Outfit', sans-serif" font-size="11" font-weight="700">HEDGE</text>
+                    
+                    <path d="M 470 240 Q 550 240, 550 180 L 550 140" stroke="#10b981" stroke-width="2.5" fill="none" stroke-dasharray="5,3" marker-end="url(#arrowheadGreen)"/>
+                    
+                    <!-- Futures Market -->
+                    <rect x="600" y="100" width="160" height="110" fill="url(#purpleGrad)" rx="10"/>
+                    <text x="680" y="140" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="16" font-weight="800">FUTURES</text>
+                    <text x="680" y="165" text-anchor="middle" fill="#e9d5ff" font-family="'Outfit', sans-serif" font-size="14" font-weight="600">NASDAQ</text>
+                    <text x="680" y="190" text-anchor="middle" fill="#c084fc" font-family="'Outfit', sans-serif" font-size="11">(Preço se move)</text>
+                    
+                    <!-- Definition -->
+                    <rect x="50" y="295" width="710" height="85" fill="#1e293b" rx="10" stroke="rgba(245, 158, 11, 0.3)" stroke-width="1.5"/>
+                    <text x="75" y="325" fill="#fbbf24" font-family="'Outfit', sans-serif" font-size="13" font-weight="700">💡 CONCEITO CHAVE:</text>
+                    <text x="75" y="347" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="12">Os Market Makers são OBRIGADOS a se proteger (fazer hedge) quando vendem opções de índices.</text>
+                    <text x="75" y="365" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="12">Essa proteção cria barreiras invisíveis de compra/venda que nós rastreamos para surfar com os robôs!</text>
+                    
+                    <!-- Gradients and markers -->
+                    <defs>
+                        <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#3b82f6" />
+                            <stop offset="100%" stop-color="#1d4ed8" />
+                        </linearGradient>
+                        <linearGradient id="pinkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#ec4899" />
+                            <stop offset="100%" stop-color="#db2777" />
+                        </linearGradient>
+                        <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#06b6d4" />
+                            <stop offset="100%" stop-color="#0891b2" />
+                        </linearGradient>
+                        <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#8b5cf6" />
+                            <stop offset="100%" stop-color="#6d28d9" />
+                        </linearGradient>
+                        
+                        <marker id="arrowhead" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                            <polygon points="0 0, 6 3, 0 6" fill="#60a5fa"/>
+                        </marker>
+                        <marker id="arrowheadRed" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                            <polygon points="0 0, 6 3, 0 6" fill="#f43f5e"/>
+                        </marker>
+                        <marker id="arrowheadGreen" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                            <polygon points="0 0, 6 3, 0 6" fill="#10b981"/>
+                        </marker>
+                    </defs>
+                </svg>
+            </div>
+ 
+            <div class="highlight-blue">
+                <strong>Nossa Vantagem:</strong> Não tentamos adivinhar para onde o preço vai. Nós enxergamos exatamente os patamares de preço onde os robôs dos grandes bancos são forçados a comprar ou vender!
+            </div>
+        </div>
+ 
+        <!-- Slide 2 -->
+        <div class="slide" id="slide2">
+            <h2>🗺️ Onde o Gama nos Mostra o Caminho</h2>
+            
+            <div class="chart-container">
+                <div class="chart-title">Níveis de Gama: Do Papel ao Concreto Armado</div>
+                <svg viewBox="0 0 900 420" style="width: 100%;">
+                    <!-- Background -->
+                    <rect width="900" height="420" fill="#0b0f19" rx="14" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+                    
+                    <!-- Horizontal Level Lines (Faded grid lines) -->
+                    <line x1="50" y1="60" x2="850" y2="60" stroke="rgba(255,255,255,0.05)" stroke-width="1" stroke-dasharray="4,4"/>
+                    <line x1="50" y1="180" x2="850" y2="180" stroke="rgba(255,255,255,0.05)" stroke-width="1" stroke-dasharray="4,4"/>
+                    <line x1="50" y1="300" x2="850" y2="300" stroke="rgba(255,255,255,0.05)" stroke-width="1" stroke-dasharray="4,4"/>
+                    
+                    <!-- Price Chart Simulation -->
+                    <path d="M 50 340 Q 150 280, 250 310 T 450 240 T 650 200 T 850 140" 
+                          stroke="#3b82f6" stroke-width="3.5" fill="none" opacity="0.85"/>
+                    
+                    <!-- Weak Levels (1-4) (Amber labels) -->
+                    <g opacity="0.8">
+                        <rect x="180" y="295" width="110" height="24" fill="#fbbf24" rx="4"/>
+                        <text x="235" y="311" text-anchor="middle" fill="#1e293b" font-family="'Outfit', sans-serif" font-size="11" font-weight="700">BL 3 (Papel)</text>
+                        
+                        <rect x="380" y="225" width="110" height="24" fill="#fbbf24" rx="4"/>
+                        <text x="435" y="241" text-anchor="middle" fill="#1e293b" font-family="'Outfit', sans-serif" font-size="11" font-weight="700">GEX 2 (Papel)</text>
+                    </g>
+                    
+                    <!-- Strong Levels (7-10) (Solid red/cyan boundaries) -->
+                    <g>
+                        <rect x="580" y="185" width="120" height="28" fill="#ef4444" rx="4"/>
+                        <text x="640" y="203" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="11" font-weight="800">BL 9 (Concreto)</text>
+                        
+                        <rect x="730" y="125" width="120" height="28" fill="#ef4444" rx="4"/>
+                        <text x="790" y="143" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="11" font-weight="800">GEX 10 (Concreto)</text>
+                    </g>
+                    
+                    <!-- 0DTE Zones (Vertical highlights on borders) -->
+                    <rect x="60" y="335" width="130" height="50" fill="rgba(16, 185, 129, 0.15)" rx="6" stroke="#10b981" stroke-width="1.5"/>
+                    <text x="125" y="355" text-anchor="middle" fill="#10b981" font-family="'Outfit', sans-serif" font-size="12" font-weight="800">PUT 0DTE</text>
+                    <text x="125" y="372" text-anchor="middle" fill="#6ee7b7" font-family="'Outfit', sans-serif" font-size="10">(Suporte Diário)</text>
+                    
+                    <rect x="710" y="20" width="140" height="50" fill="rgba(236, 72, 153, 0.15)" rx="6" stroke="#ec4899" stroke-width="1.5"/>
+                    <text x="780" y="40" text-anchor="middle" fill="#ec4899" font-family="'Outfit', sans-serif" font-size="12" font-weight="800">CALL 0DTE</text>
+                    <text x="780" y="57" text-anchor="middle" fill="#f472b6" font-family="'Outfit', sans-serif" font-size="10">(Resistência Diária)</text>
+                    
+                    <!-- HVL Zone -->
+                    <rect x="420" y="325" width="130" height="60" fill="rgba(6, 182, 212, 0.15)" rx="6" stroke="#06b6d4" stroke-width="1.5" stroke-dasharray="4,2"/>
+                    <text x="485" y="350" text-anchor="middle" fill="#06b6d4" font-family="'Outfit', sans-serif" font-size="13" font-weight="800">HVL</text>
+                    <text x="485" y="368" text-anchor="middle" fill="#67e8f9" font-family="'Outfit', sans-serif" font-size="10">(Alta Liquidez)</text>
+                    
+                    <!-- Annotations for bounces -->
+                    <circle cx="640" cy="200" r="6" fill="#ef4444" stroke="#ffffff" stroke-width="2"/>
+                    <path d="M 645 200 L 700 175" stroke="#ef4444" stroke-width="1.5"/>
+                    <text x="705" y="173" fill="#fca5a5" font-family="'Outfit', sans-serif" font-size="11" font-weight="700">PREÇO RETRASA/DEFENDE</text>
+                    
+                    <circle cx="235" cy="309" r="5" fill="#fbbf24" stroke="#ffffff" stroke-width="1.5"/>
+                    <path d="M 239 309 L 280 335" stroke="#fbbf24" stroke-width="1.5"/>
+                    <text x="285" y="347" fill="#fde047" font-family="'Outfit', sans-serif" font-size="11">ROMPIMENTO FÁCIL</text>
+                </svg>
+            </div>
+ 
+            <div class="concept-box">
+                <div class="concept-card">
+                    <h4>📍 BL & GEX 1-4</h4>
+                    <p>Níveis fracos baseados em poucos contratos. O preço costuma furar sem dificuldades. Não compre ou venda neles.</p>
+                </div>
+                <div class="concept-card">
+                    <h4>🧱 BL & GEX 7-10</h4>
+                    <p>Barreiras reais ("concreto armado"). Regiões com grande acúmulo de proteção dos bancos. São os alvos perfeitos para as operações.</p>
+                </div>
+                <div class="concept-card">
+                    <h4>⚡ Zonas 0DTE</h4>
+                    <p>Opções que vencem no próprio dia. Geram defesas brutais e rápidas para segurar o preço antes do fechamento do mercado.</p>
+                </div>
+                <div class="concept-card">
+                    <h4>🌊 HVL</h4>
+                    <p>High Volume Level (Preço Histórico de Volume). Funciona como um imã de liquidez que desacelera a velocidade do preço.</p>
+                </div>
+            </div>
+        </div>
+ 
+        <!-- Slide 3 -->
+        <div class="slide" id="slide3">
+            <h2>🌍 O Filtro Macro - A "Gravidade" do Mercado</h2>
+            
+            <div class="chart-container">
+                <div class="chart-title">Correlações que Movem o Nasdaq</div>
+                <svg viewBox="0 0 900 500" style="width: 100%;">
+                    <!-- Background -->
+                    <rect width="900" height="500" fill="#0b0f19" rx="14" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+                    
+                    <!-- Central Nasdaq Core -->
+                    <circle cx="450" cy="250" r="75" fill="url(#blueGrad)" stroke="rgba(255,255,255,0.2)" stroke-width="2"/>
+                    <text x="450" y="245" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="18" font-weight="800" letter-spacing="0.05em">NASDAQ</text>
+                    <text x="450" y="265" text-anchor="middle" fill="#93c5fd" font-family="'Outfit', sans-serif" font-size="13" font-weight="600">(QQQ)</text>
+                    
+                    <!-- VIX - Inverse Correlation -->
+                    <circle cx="200" cy="120" r="60" fill="url(#redGrad)" />
+                    <text x="200" y="115" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="18" font-weight="800">VIX</text>
+                    <text x="200" y="135" text-anchor="middle" fill="#fca5a5" font-family="'Outfit', sans-serif" font-size="12">Termômetro do Medo</text>
+                    
+                    <path d="M 250 145 Q 350 185, 385 220" stroke="#ef4444" stroke-width="3" fill="none" marker-end="url(#arrowheadRed)"/>
+                    <text x="295" y="165" fill="#fca5a5" font-family="'Outfit', sans-serif" font-size="11" font-weight="700">CORRELAÇÃO INVERSA</text>
+                    <text x="295" y="180" fill="#ef4444" font-family="'JetBrains Mono', monospace" font-size="10">VIX ↑ = NASDAQ ↓</text>
+                    
+                    <!-- DXY - Inverse -->
+                    <circle cx="200" cy="380" r="60" fill="url(#amberGrad)" />
+                    <text x="200" y="375" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="18" font-weight="800">DXY</text>
+                    <text x="200" y="395" text-anchor="middle" fill="#fde047" font-family="'Outfit', sans-serif" font-size="12">Índice do Dólar</text>
+                    
+                    <path d="M 255 355 Q 350 315, 385 275" stroke="#f59e0b" stroke-width="3" fill="none" marker-end="url(#arrowheadAmber)"/>
+                    <text x="290" y="335" fill="#fde047" font-family="'Outfit', sans-serif" font-size="11" font-weight="700">INVERSO (Dólar Forte)</text>
+                    
+                    <!-- SP500 - Direct -->
+                    <circle cx="700" cy="120" r="60" fill="url(#greenGrad)" />
+                    <text x="700" y="115" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="16" font-weight="800">S&P 500</text>
+                    <text x="700" y="135" text-anchor="middle" fill="#a7f3d0" font-family="'Outfit', sans-serif" font-size="12">(SPY)</text>
+                    
+                    <path d="M 645 145 Q 550 185, 515 220" stroke="#10b981" stroke-width="3" fill="none" marker-end="url(#arrowheadGreen)"/>
+                    <text x="560" y="165" fill="#a7f3d0" font-family="'Outfit', sans-serif" font-size="11" font-weight="700">ALINHAMENTO DIRETO</text>
+                    <text x="560" y="180" fill="#10b981" font-family="'JetBrains Mono', monospace" font-size="10">SPY ↑ = QQQ ↑</text>
+                    
+                    <!-- Magnificent 7 -->
+                    <rect x="620" y="315" width="220" height="135" fill="#1e293b" stroke="rgba(255,255,255,0.08)" stroke-width="1.5" rx="10"/>
+                    <text x="730" y="340" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="14" font-weight="800" letter-spacing="0.05em">MOTORES (MAGNÍFICAS 7)</text>
+                    
+                    <!-- Stock nodes -->
+                    <g transform="translate(635, 355)">
+                        <rect width="50" height="24" fill="rgba(255,255,255,0.06)" rx="4"/>
+                        <text x="25" y="16" text-anchor="middle" fill="white" font-family="'JetBrains Mono', monospace" font-size="10">NVDA</text>
+                    </g>
+                    <g transform="translate(695, 355)">
+                        <rect width="50" height="24" fill="rgba(255,255,255,0.06)" rx="4"/>
+                        <text x="25" y="16" text-anchor="middle" fill="white" font-family="'JetBrains Mono', monospace" font-size="10">AAPL</text>
+                    </g>
+                    <g transform="translate(755, 355)">
+                        <rect width="50" height="24" fill="rgba(255,255,255,0.06)" rx="4"/>
+                        <text x="25" y="16" text-anchor="middle" fill="white" font-family="'JetBrains Mono', monospace" font-size="10">MSFT</text>
+                    </g>
+                    <g transform="translate(665, 395)">
+                        <rect width="55" height="24" fill="rgba(255,255,255,0.06)" rx="4"/>
+                        <text x="27" y="16" text-anchor="middle" fill="white" font-family="'JetBrains Mono', monospace" font-size="10">AMZN</text>
+                    </g>
+                    <g transform="translate(730, 395)">
+                        <rect width="55" height="24" fill="rgba(255,255,255,0.06)" rx="4"/>
+                        <text x="27" y="16" text-anchor="middle" fill="white" font-family="'JetBrains Mono', monospace" font-size="10">META</text>
+                    </g>
+                    
+                    <path d="M 730 315 L 730 280 Q 730 262, 690 258" stroke="#60a5fa" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+                    <text x="645" y="290" fill="#93c5fd" font-family="'Outfit', sans-serif" font-size="11" font-weight="700">PESO MÁXIMO</text>
+                    
+                    <!-- Key Rules Box -->
+                    <rect x="50" y="470" width="800" height="25" fill="#1e1b4b" rx="5" stroke="rgba(99, 102, 241, 0.3)" stroke-width="1"/>
+                    <text x="450" y="487" text-anchor="middle" fill="#c7d2fe" font-family="'Outfit', sans-serif" font-size="11">
+                        ⚠️ REGRA CRÍTICA: Se VIX subir +3% e NVDA cair -2%, suportes de Gama são ignorados (mercado em queda livre)!
+                    </text>
+                    
+                    <defs>
+                        <linearGradient id="redGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#ef4444" />
+                            <stop offset="100%" stop-color="#b91c1c" />
+                        </linearGradient>
+                        <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#10b981" />
+                            <stop offset="100%" stop-color="#047857" />
+                        </linearGradient>
+                        <linearGradient id="amberGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#f59e0b" />
+                            <stop offset="100%" stop-color="#b45309" />
+                        </linearGradient>
+                        <marker id="arrowheadAmber" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                            <polygon points="0 0, 6 3, 0 6" fill="#f59e0b"/>
+                        </marker>
+                    </defs>
+                </svg>
+            </div>
+ 
+            <div class="highlight-red">
+                <strong>VIX Disparando:</strong> A gravidade puxa para BAIXO. Qualquer tentativa de compra em suportes de Gama vira armadilha, pois a liquidez evapora. Fique de fora ou venda!
+            </div>
+            <div class="highlight-green">
+                <strong>VIX Estável/Queda + Magníficas 7 Verdes:</strong> A gravidade joga para CIMA. O ambiente operacional torna-se altamente confiável para comprar suportes de Gama e surfar as retlações.
+            </div>
+        </div>
+ 
+        <!-- Slide 4 -->
+        <div class="slide" id="slide4">
+            <h2>✅ Checklist Inicial (Antes de Qualquer Operação)</h2>
+            
+            <div class="chart-container">
+                <div class="chart-title">Fluxo de Decisão</div>
+                <svg viewBox="0 0 900 400" style="width: 100%;">
+                    <!-- Background -->
+                    <rect width="900" height="400" fill="#0b0f19" rx="14" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+                    
+                    <!-- Start -->
+                    <rect x="300" y="20" width="300" height="60" fill="url(#blueGrad)" rx="30"/>
+                    <text x="450" y="45" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="15" font-weight="800" letter-spacing="0.05em">NOVA OPERAÇÃO</text>
+                    <text x="450" y="65" text-anchor="middle" fill="#93c5fd" font-family="'Outfit', sans-serif" font-size="11">Fluxo de Triangulação</text>
+                    
+                    <!-- Arrow -->
+                    <path d="M 450 80 L 450 110" stroke="#3b82f6" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+                    
+                    <!-- Question 1 -->
+                    <rect x="40" y="120" width="180" height="85" fill="#1e293b" rx="10" stroke="rgba(96, 165, 250, 0.4)" stroke-width="1.5"/>
+                    <text x="130" y="145" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="13" font-weight="700">1. GAMMA WoW</text>
+                    <text x="130" y="168" text-anchor="middle" fill="var(--text-secondary)" font-family="'Outfit', sans-serif" font-size="11">Preço acima/abaixo?</text>
+                    <text x="130" y="185" text-anchor="middle" fill="var(--text-secondary)" font-family="'Outfit', sans-serif" font-size="11">Alinhamento semanal</text>
+                    
+                    <!-- Question 2 -->
+                    <rect x="250" y="120" width="180" height="85" fill="#1e293b" rx="10" stroke="rgba(244, 63, 94, 0.4)" stroke-width="1.5"/>
+                    <text x="340" y="145" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="13" font-weight="700">2. VIX & DXY</text>
+                    <text x="340" y="168" text-anchor="middle" fill="var(--text-secondary)" font-family="'Outfit', sans-serif" font-size="11">Estão calmos ou</text>
+                    <text x="340" y="185" text-anchor="middle" fill="var(--text-secondary)" font-family="'Outfit', sans-serif" font-size="11">explodindo em alta?</text>
+                    
+                    <!-- Question 3 -->
+                    <rect x="460" y="120" width="180" height="85" fill="#1e293b" rx="10" stroke="rgba(16, 185, 129, 0.4)" stroke-width="1.5"/>
+                    <text x="550" y="145" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="13" font-weight="700">3. MAGNÍFICAS 7</text>
+                    <text x="550" y="168" text-anchor="middle" fill="var(--text-secondary)" font-family="'Outfit', sans-serif" font-size="11">Mínimo 4 alinhadas?</text>
+                    <text x="550" y="185" text-anchor="middle" fill="var(--text-secondary)" font-family="'Outfit', sans-serif" font-size="11">NVDA está a favor?</text>
+                    
+                    <!-- Question 4 -->
+                    <rect x="670" y="120" width="190" height="85" fill="#1e293b" rx="10" stroke="rgba(168, 85, 247, 0.4)" stroke-width="1.5"/>
+                    <text x="765" y="145" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="13" font-weight="700">4. REGEX DE NÍVEL</text>
+                    <text x="765" y="168" text-anchor="middle" fill="var(--text-secondary)" font-family="'Outfit', sans-serif" font-size="11">Primeiro toque (forte)?</text>
+                    <text x="765" y="185" text-anchor="middle" fill="var(--text-secondary)" font-family="'Outfit', sans-serif" font-size="11">Nível 7-10?</text>
+                    
+                    <!-- Arrow down -->
+                    <path d="M 450 205 L 450 235" stroke="#3b82f6" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+                    
+                    <!-- Decision -->
+                    <rect x="250" y="245" width="400" height="70" fill="url(#amberGrad)" rx="10"/>
+                    <text x="450" y="275" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="14" font-weight="800" letter-spacing="0.05em">CONVERGÊNCIA TOTAL?</text>
+                    <text x="450" y="297" text-anchor="middle" fill="#fef3c7" font-family="'Outfit', sans-serif" font-size="12">Mínimo de 3 critérios favoráveis = Entrada Autorizada</text>
+                    
+                    <!-- Arrow down -->
+                    <path d="M 450 315 L 450 345" stroke="#10b981" stroke-width="3" fill="none" marker-end="url(#arrowheadGreen)"/>
+                    
+                    <!-- Result -->
+                    <rect x="275" y="350" width="350" height="40" fill="url(#greenGrad)" rx="20"/>
+                    <text x="450" y="375" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="14" font-weight="800" letter-spacing="0.05em">✅ CONFIGURAÇÃO AUTORIZADA</text>
+                </svg>
+            </div>
+ 
+            <div class="checklist">
+                <div class="checklist-item"><strong>Gamma WoW:</strong> Identifique se o preço está trabalhando acima ou abaixo da base de fluxo semanal institucional.</div>
+                <div class="checklist-item"><strong>VIX e DXY:</strong> O medo macro deve estar controlado. Alta acentuada do VIX derrete posições longs.</div>
+                <div class="checklist-item"><strong>Confluência Magníficas:</strong> Robôs dependem do peso das 7 gigantes. Verifique se estão majoritariamente alinhadas na mesma direção.</div>
+                <div class="checklist-item"><strong>Qualidade do Nível:</strong> Dê preferência absoluta a níveis do dia (0DTE) e de concreto (níveis 7 a 10).</div>
+            </div>
+ 
+            <div class="highlight-blue">
+                <strong>Regra de Ouro:</strong> Se a triangulação do checklist não bater, a melhor atitude é a inércia. Proteger o caixa é o que gera lucro no longo prazo!
+            </div>
+        </div>
+ 
+        <!-- Slide 5 -->
+        <div class="slide" id="slide5">
+            <h2>🟢 Checklist de COMPRAS e Rompimento ACIMA</h2>
+            
+            <div class="chart-container">
+                <div class="chart-title">Setup Ideal de Compra</div>
+                <svg viewBox="0 0 900 450" style="width: 100%;">
+                    <!-- Background -->
+                    <rect width="900" height="450" fill="#0b0f19" rx="14" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+                    
+                    <!-- Horizontal Levels -->
+                    <line x1="50" y1="360" x2="850" y2="360" stroke="rgba(16, 185, 129, 0.2)" stroke-width="2"/>
+                    <text x="70" y="350" fill="#10b981" font-family="'JetBrains Mono', monospace" font-size="11" font-weight="bold">SUPORTE: PUT 0DTE (BL 9-10)</text>
+                    
+                    <line x1="50" y1="120" x2="850" y2="120" stroke="rgba(236, 72, 153, 0.2)" stroke-width="2"/>
+                    <text x="70" y="110" fill="#ec4899" font-family="'JetBrains Mono', monospace" font-size="11" font-weight="bold">RESISTÊNCIA: CALL 0DTE (ALVO)</text>
+                    
+                    <!-- Price Path -->
+                    <path d="M 100 220 Q 200 240, 250 310 L 350 360 L 400 360 Q 420 310, 480 250 T 650 170 L 750 120" 
+                          stroke="rgba(255, 255, 255, 0.4)" stroke-width="2.5" fill="none" stroke-dasharray="6,4"/>
+                    
+                    <path d="M 350 360 L 400 360 Q 420 310, 480 250 T 650 170 L 750 120" 
+                          stroke="#10b981" stroke-width="4.5" fill="none"/>
+                    
+                    <!-- First Touch point -->
+                    <circle cx="350" cy="360" r="8" fill="#fbbf24" stroke="white" stroke-width="2.5"/>
+                    <text x="350" y="340" text-anchor="middle" fill="#fbbf24" font-family="'Outfit', sans-serif" font-weight="800" font-size="11">1º TOQUE (REJEIÇÃO)</text>
+                    
+                    <!-- Rejection Candle visualization -->
+                    <g transform="translate(420, 280)">
+                        <line x1="10" y1="0" x2="10" y2="70" stroke="#10b981" stroke-width="2"/>
+                        <rect x="0" y="15" width="20" height="35" fill="#10b981" rx="2"/>
+                        <text x="30" y="38" fill="#10b981" font-family="'Outfit', sans-serif" font-weight="700" font-size="12">GATILHO COMPRA</text>
+                    </g>
+                    
+                    <!-- Stop loss indication -->
+                    <line x1="300" y1="395" x2="450" y2="395" stroke="#ef4444" stroke-width="2" stroke-dasharray="4,4"/>
+                    <text x="375" y="415" text-anchor="middle" fill="#ef4444" font-family="'Outfit', sans-serif" font-size="11">STOP LOSS (Abaixo da Mínima)</text>
+                    
+                    <!-- Target Point -->
+                    <circle cx="750" cy="120" r="8" fill="#06b6d4" stroke="white" stroke-width="2.5"/>
+                    <text x="750" y="98" text-anchor="middle" fill="#22d3ee" font-family="'Outfit', sans-serif" font-weight="800" font-size="11">TAKE PROFIT (ALVO)</text>
+                    
+                    <!-- Conditions Box -->
+                    <rect x="50" y="20" width="240" height="75" fill="rgba(16, 185, 129, 0.08)" rx="8" stroke="rgba(16, 185, 129, 0.2)" stroke-width="1"/>
+                    <text x="65" y="42" fill="#a7f3d0" font-family="'Outfit', sans-serif" font-size="12" font-weight="800">CENÁRIO IDEAL:</text>
+                    <text x="65" y="60" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="10.5">✓ VIX estável ou em queda</text>
+                    <text x="65" y="75" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="10.5">✓ Ações de Peso (M7) em alta</text>
+                </svg>
+            </div>
+ 
+            <div class="highlight-green">
+                <strong>Gatilho de Operação:</strong> Aguarde o preço testar o nível forte, segurar, e mostrar rejeição clara no fechamento do candle de 5 min (deixando pavio inferior longo ou um candle comprador forte).
+            </div>
+ 
+            <div class="checklist">
+                <div class="checklist-item"><strong>Posicionamento de Stop:</strong> Posicionado logo abaixo do pavio de teste ou 5-10 pontos abaixo do nível forte de Gama.</div>
+                <div class="checklist-item"><strong>Alvo de Saída:</strong> Realize saídas parciais ou totais na próxima região relevante de resistência (Call 0DTE) ou HVL acima.</div>
+            </div>
+        </div>
+ 
+        <!-- Slide 6 -->
+        <div class="slide" id="slide6">
+            <h2>🔴 Checklist de VENDAS e Rompimento ABAIXO</h2>
+            
+            <div class="chart-container">
+                <div class="chart-title">Setup Ideal de Venda</div>
+                <svg viewBox="0 0 900 450" style="width: 100%;">
+                    <!-- Background -->
+                    <rect width="900" height="450" fill="#0b0f19" rx="14" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+                    
+                    <!-- Horizontal Levels -->
+                    <line x1="50" y1="130" x2="850" y2="130" stroke="rgba(236, 72, 153, 0.2)" stroke-width="2"/>
+                    <text x="70" y="120" fill="#ec4899" font-family="'JetBrains Mono', monospace" font-size="11" font-weight="bold">RESISTÊNCIA: CALL 0DTE</text>
+                    
+                    <line x1="50" y1="260" x2="850" y2="260" stroke="rgba(239, 68, 68, 0.2)" stroke-width="2"/>
+                    <text x="70" y="250" fill="#ef4444" font-family="'JetBrains Mono', monospace" font-size="11" font-weight="bold">SUPORTE TESTADO: PUT 0DTE (2º TOQUE = FRÁGIL)</text>
+                    
+                    <!-- Price Path -->
+                    <path d="M 80 180 Q 150 150, 200 130 L 250 130 Q 300 200, 360 260 L 400 260 L 450 290 Q 520 330, 600 380" 
+                          stroke="rgba(255, 255, 255, 0.4)" stroke-width="2.5" fill="none" stroke-dasharray="6,4"/>
+                    
+                    <path d="M 360 260 L 400 260 L 450 290 Q 520 330, 600 380" 
+                          stroke="#ef4444" stroke-width="4.5" fill="none"/>
+                    
+                    <!-- Warning/Danger Area (Away from text/lines to prevent overlapping) -->
+                    <g transform="translate(250, 290)">
+                        <rect width="110" height="40" fill="rgba(245, 158, 11, 0.15)" rx="6" stroke="#f59e0b" stroke-width="1.5"/>
+                        <text x="55" y="24" text-anchor="middle" fill="#f59e0b" font-family="'Outfit', sans-serif" font-weight="800" font-size="11">PAREDE FRÁGIL</text>
+                    </g>
+                    
+                    <!-- Breakdown Point -->
+                    <circle cx="400" cy="260" r="8" fill="#fbbf24" stroke="white" stroke-width="2.5"/>
+                    <text x="400" y="240" text-anchor="middle" fill="#fbbf24" font-family="'Outfit', sans-serif" font-weight="800" font-size="11">ROMPIMENTO (ENTRY)</text>
+                    
+                    <!-- Acceleration -->
+                    <path d="M 450 290 L 530 340" stroke="#ef4444" stroke-width="3.5" fill="none" marker-end="url(#arrowheadRed)"/>
+                    <text x="525" y="325" fill="#fca5a5" font-family="'Outfit', sans-serif" font-weight="800" font-size="13">CACHOEIRA</text>
+                    
+                    <!-- Next Target Support -->
+                    <rect x="600" y="360" width="180" height="50" fill="url(#purpleGrad)" rx="8"/>
+                    <text x="690" y="383" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="12" font-weight="800">BL/GEX 9-10</text>
+                    <text x="690" y="398" text-anchor="middle" fill="#e9d5ff" font-family="'Outfit', sans-serif" font-size="10">(PRÓXIMA DEFESA)</text>
+                    
+                    <!-- Stop Loss Line (Clean, moved away from warnings to prevent overlaps) -->
+                    <line x1="300" y1="180" x2="420" y2="180" stroke="#10b981" stroke-width="2" stroke-dasharray="4,4"/>
+                    <text x="360" y="170" text-anchor="middle" fill="#10b981" font-family="'Outfit', sans-serif" font-size="11">STOP LOSS (Abaixo da Resistência)</text>
+                    
+                    <!-- Conditions Box -->
+                    <rect x="50" y="20" width="240" height="75" fill="rgba(239, 68, 68, 0.08)" rx="8" stroke="rgba(239, 68, 68, 0.2)" stroke-width="1"/>
+                    <text x="65" y="42" fill="#fca5a5" font-family="'Outfit', sans-serif" font-size="12" font-weight="800">CENÁRIO IDEAL:</text>
+                    <text x="65" y="60" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="10.5">✓ VIX em forte alta (+3% ou mais)</text>
+                    <text x="65" y="75" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="10.5">✓ Pesos Pesados (NVDA/AAPL) caindo</text>
+                </svg>
+            </div>
+ 
+            <div class="highlight-red">
+                <strong>A Armadilha do 2º Toque:</strong> Níveis de suporte/resistência de 0DTE tocados repetidas vezes sofrem desgaste rápido porque a proteção do market maker é consumida. Ao romper, geram acelerações violentas de preço.
+            </div>
+ 
+            <div class="checklist">
+                <div class="checklist-item"><strong>Gatilho de Venda:</strong> Entrada após o fechamento do candle de 5 minutos perder e fechar abaixo do nível de Put 0DTE.</div>
+                <div class="checklist-item"><strong>Alvo Final:</strong> Próxima barreira estrutural importante (BL ou GEX 7 a 10 de compra) marcada no fluxo.</div>
+            </div>
+        </div>
+ 
+        <!-- Slide 7 -->
+        <div class="slide" id="slide7">
+            <h2>🏆 As 3 Regras de Ouro da Sobrevivência</h2>
+            
+            <div class="concept-box" style="grid-template-columns: 1fr;">
+                <div class="concept-card" style="background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(185, 28, 28, 0.15) 100%); border-color: rgba(239, 68, 68, 0.3); padding: 25px;">
+                    <h4 style="color: #fca5a5; font-size: 1.25rem;"><span style="color: var(--accent-red)">⚡</span> Regra #1: Nível Tocado é Nível Queimado</h4>
+                    <p style="font-size: 0.95rem; margin-top: 8px;">
+                        Evite operar o segundo ou terceiro rebate no mesmo patamar de 0DTE. O primeiro toque oferece a maior taxa de acerto. A partir do segundo toque o nível enfraquece, abrindo caminho para rompimentos direcionais extremamente fortes.
+                    </p>
+                </div>
+                
+                <div class="concept-card" style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(29, 78, 216, 0.15) 100%); border-color: rgba(59, 130, 246, 0.3); padding: 25px;">
+                    <h4 style="color: #bfdbfe; font-size: 1.25rem;"><span style="color: var(--primary)">⚡</span> Regra #2: Nunca opere o "ONDE" sem checar o "SE"</h4>
+                    <p style="font-size: 0.95rem; margin-top: 8px;">
+                        De nada adianta o preço tocar em um suporte de Gama Nível 10 se o VIX está subindo mais de 3% e a NVDA cai mais de 2%. O sentimento e a gravidade macro do mercado sempre vencem os níveis micro. Alinhe os dois!
+                    </p>
+                </div>
+                
+                <div class="concept-card" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(4, 120, 87, 0.15) 100%); border-color: rgba(16, 185, 129, 0.3); padding: 25px;">
+                    <h4 style="color: #a7f3d0; font-size: 1.25rem;"><span style="color: var(--accent-green)">⚡</span> Regra #3: A Inércia também é Operação</h4>
+                    <p style="font-size: 0.95rem; margin-top: 8px;">
+                        Se a matriz de dados apresentar divergências (ex: VIX caindo mas Nasdaq sem força, ou ações pesadas mistas), a melhor operação é ficar de fora. Preservar o caixa operacional é a chave da consistência matemática.
+                    </p>
+                </div>
+            </div>
+ 
+            <div class="chart-container" style="margin-top: 30px;">
+                <div class="chart-title">Quando Operar vs. Quando Esperar</div>
+                <svg viewBox="0 0 900 280" style="width: 100%;">
+                    <!-- Background -->
+                    <rect width="900" height="280" fill="#0b0f19" rx="14" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+                    
+                    <!-- DO Column -->
+                    <rect x="30" y="20" width="400" height="240" fill="rgba(16, 185, 129, 0.05)" rx="8" stroke="rgba(16, 185, 129, 0.2)" stroke-width="1.5"/>
+                    <text x="230" y="52" text-anchor="middle" fill="#10b981" font-family="'Outfit', sans-serif" font-size="16" font-weight="800">✅ OPERE QUANDO:</text>
+                    
+                    <text x="60" y="88" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="12.5">✓ VIX estável ou em queda livre</text>
+                    <text x="60" y="112" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="12.5">✓ Magníficas 7 alinhadas (mínimo 4 verdes)</text>
+                    <text x="60" y="136" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="12.5">✓ Primeiro toque da região no dia</text>
+                    <text x="60" y="160" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="12.5">✓ Preço trabalhando a favor da tendência WoW</text>
+                    <text x="60" y="184" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="12.5">✓ Rejeição visual no gráfico de velas de 5 min</text>
+                    <text x="60" y="208" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="12.5">✓ Mínimo 3 critérios confirmados no checklist</text>
+                    
+                    <!-- DONT Column -->
+                    <rect x="470" y="20" width="400" height="240" fill="rgba(239, 68, 68, 0.05)" rx="8" stroke="rgba(239, 68, 68, 0.2)" stroke-width="1.5"/>
+                    <text x="670" y="52" text-anchor="middle" fill="#ef4444" font-family="'Outfit', sans-serif" font-size="16" font-weight="800">⚠️ EVITE OPERAR SE:</text>
+                    
+                    <text x="500" y="88" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="12.5">✗ VIX explodindo (variação de +3% ou maior)</text>
+                    <text x="500" y="112" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="12.5">✗ Ações líderes (NVDA/AAPL) caindo forte</text>
+                    <text x="500" y="136" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="12.5">✗ Nível já testado múltiplas vezes no dia</text>
+                    <text x="500" y="160" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="12.5">✗ Sinais mistos ou fluxo institucional travado</text>
+                    <text x="500" y="184" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="12.5">✗ Sem sinal claro de rejeição ou reversão</text>
+                    <text x="500" y="208" fill="#cbd5e1" font-family="'Outfit', sans-serif" font-size="12.5">✗ Menos de 3 confluências no checklist diário</text>
+                    
+                    <!-- Vertical Divider -->
+                    <line x1="450" y1="30" x2="450" y2="250" stroke="rgba(255,255,255,0.06)" stroke-width="1.5" stroke-dasharray="4,4"/>
+                </svg>
+            </div>
+        </div>
+ 
+        <!-- Slide 8 -->
+        <div class="slide" id="slide8">
+            <h2>📋 Rotina Diária de Análise Operacional</h2>
+            
+            <div class="chart-container">
+                <div class="chart-title">Passo a Passo de Execução</div>
+                <!-- Fixed Height viewBox and elements positions to prevent overlapping and clipping at the bottom -->
+                <svg viewBox="0 0 900 560" style="width: 100%;">
+                    <!-- Background -->
+                    <rect width="900" height="560" fill="#0b0f19" rx="14" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+                    
+                    <!-- Step 1 -->
+                    <rect x="50" y="30" width="800" height="75" fill="url(#blueGrad)" rx="8"/>
+                    <text x="80" y="60" fill="white" font-family="'Outfit', sans-serif" font-size="14" font-weight="800">1️⃣ VERIFICAÇÃO DE ABERTURA E FILTROS MACRO</text>
+                    <text x="80" y="85" fill="#bfdbfe" font-family="'Outfit', sans-serif" font-size="12">Avalie o viés de fluxo semanal (Gamma WoW) e consulte o comportamento do VIX e das Ações Líderes.</text>
+                    
+                    <!-- Arrow -->
+                    <path d="M 450 105 L 450 125" stroke="#3b82f6" stroke-width="2.5" fill="none" marker-end="url(#arrowhead)"/>
+                    
+                    <!-- Step 2 -->
+                    <rect x="50" y="135" width="800" height="75" fill="#1e293b" stroke="rgba(255,255,255,0.05)" stroke-width="1" rx="8"/>
+                    <text x="80" y="165" fill="white" font-family="'Outfit', sans-serif" font-size="14" font-weight="800">2️⃣ MAPEAMENTO DAS ZONAS DE LIQUIDEZ E GAMA</text>
+                    <text x="80" y="190" fill="var(--text-secondary)" font-family="'Outfit', sans-serif" font-size="12">Identifique suportes (Put 0DTE), resistências (Call 0DTE), níveis de concreto (GEX 7-10) e zonas HVL.</text>
+                    
+                    <!-- Arrow -->
+                    <path d="M 450 210 L 450 230" stroke="#3b82f6" stroke-width="2.5" fill="none" marker-end="url(#arrowhead)"/>
+                    
+                    <!-- Step 3 -->
+                    <rect x="50" y="240" width="800" height="75" fill="#1e293b" stroke="rgba(255,255,255,0.05)" stroke-width="1" rx="8"/>
+                    <text x="80" y="270" fill="white" font-family="'Outfit', sans-serif" font-size="14" font-weight="800">3️⃣ ESPERE PELA CHEGADA DO PREÇO NAS ZONAS</text>
+                    <text x="80" y="295" fill="var(--text-secondary)" font-family="'Outfit', sans-serif" font-size="12">Evite operar fora dos níveis marcados. A paciência garante que você compre barato e venda caro.</text>
+                    
+                    <!-- Arrow -->
+                    <path d="M 450 315 L 450 335" stroke="#3b82f6" stroke-width="2.5" fill="none" marker-end="url(#arrowhead)"/>
+                    
+                    <!-- Step 4 -->
+                    <rect x="50" y="345" width="800" height="75" fill="#1e293b" stroke="rgba(255,255,255,0.05)" stroke-width="1" rx="8"/>
+                    <text x="80" y="375" fill="white" font-family="'Outfit', sans-serif" font-size="14" font-weight="800">4️⃣ IDENTIFIQUE A CONFIRMAÇÃO DO GATILHO</text>
+                    <text x="80" y="400" fill="var(--text-secondary)" font-family="'Outfit', sans-serif" font-size="12">Aguarde sinais gráficos de rejeição no tempo de 5 ou 15 min (pavios, engolfos ou barras direcionais).</text>
+                    
+                    <!-- Arrow -->
+                    <path d="M 450 420 L 450 440" stroke="#10b981" stroke-width="2.5" fill="none" marker-end="url(#arrowheadGreen)"/>
+                    
+                    <!-- Step 5 (Now fully visible within the adjusted viewBox height) -->
+                    <rect x="150" y="455" width="600" height="65" fill="url(#greenGrad)" rx="30"/>
+                    <text x="450" y="485" text-anchor="middle" fill="white" font-family="'Outfit', sans-serif" font-size="15" font-weight="800" letter-spacing="0.05em">5️⃣ ENTRADA AUTORIZADA COM STOP E ALVO FIXOS</text>
+                    <text x="450" y="505" text-anchor="middle" fill="#a7f3d0" font-family="'Outfit', sans-serif" font-size="11">Configure o gerenciamento de risco e deixe a estatística matemática trabalhar.</text>
+                </svg>
+            </div>
+ 
+            <div class="highlight-blue">
+                <strong>Dica do Vortex:</strong> Mantenha esse checklist impresso ou visível na sua mesa de operações. Consultar esses parâmetros antes de cada clique ajudará a blindar a sua disciplina!
+            </div>
+        </div>
+    </div>
+ 
+    <!-- Floating Pill Navigation controls -->
+    <div class="navigation-wrap">
+        <div class="navigation-pill">
+            <button id="prevBtn" class="nav-btn" onclick="changeSlide(-1)" disabled>◀ Anterior</button>
+            <div class="slide-counter">
+                SLIDE <span id="currentSlide">1</span>/<span id="totalSlides">8</span>
+            </div>
+            <button id="nextBtn" class="nav-btn primary-btn" onclick="changeSlide(1)">Próximo ▶</button>
+        </div>
+    </div>
+ 
+    <script>
+        let currentSlide = 1;
+        const totalSlides = 8;
+        const progressBar = document.getElementById('progressBar');
+ 
+        function showSlide(n) {
+            // Hide all slides
+            const slides = document.querySelectorAll('.slide');
+            slides.forEach(slide => slide.classList.remove('active'));
+            
+            // Show current active slide
+            document.getElementById(`slide${n}`).classList.add('active');
+            
+            // Update counter texts
+            document.getElementById('currentSlide').textContent = n;
+            document.getElementById('totalSlides').textContent = totalSlides;
+            
+            // Update buttons state
+            document.getElementById('prevBtn').disabled = n === 1;
+            document.getElementById('nextBtn').disabled = n === totalSlides;
+
+            // Update top progress bar width
+            const pct = (n / totalSlides) * 100;
+            progressBar.style.width = pct + '%';
+            
+            // Smoothly scroll back to top of document on slide change
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+ 
+        function changeSlide(n) {
+            currentSlide += n;
+            if (currentSlide < 1) currentSlide = 1;
+            if (currentSlide > totalSlides) currentSlide = totalSlides;
+            showSlide(currentSlide);
+        }
+ 
+        // Keyboard arrow navigation
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowRight' || e.key === ' ') {
+                e.preventDefault();
+                if (currentSlide < totalSlides) changeSlide(1);
+            } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                if (currentSlide > 1) changeSlide(-1);
+            }
+        });
+
+        // Touch Swipe Gestures support for mobile devices
+        let touchstartX = 0;
+        let touchendX = 0;
+        
+        function checkDirection() {
+            if (touchendX < touchstartX - 70) {
+                // Swiped Left -> next slide
+                if (currentSlide < totalSlides) changeSlide(1);
+            }
+            if (touchendX > touchstartX + 70) {
+                // Swiped Right -> previous slide
+                if (currentSlide > 1) changeSlide(-1);
+            }
+        }
+        
+        document.addEventListener('touchstart', e => {
+            touchstartX = e.changedTouches[0].screenX;
+        });
+        
+        document.addEventListener('touchend', e => {
+            touchendX = e.changedTouches[0].screenX;
+            checkDirection();
+        });
+ 
+        // Initialize slideshow
+        showSlide(1);
+    </script>
+</body>
+</html>

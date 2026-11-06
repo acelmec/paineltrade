@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>Axion.Installer</RootNamespace>
+    <AssemblyName>Instalador_AxionTradeStation</AssemblyName>
+    
+    <!-- Configurações para Instalador 100% Único, Standalone e Auto-Contido -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <PublishTrimmed>false</PublishTrimmed>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    
+    <!-- Metadados do Executável -->
+    <Company>VM Trader</Company>
+    <Product>Axion TradeStation</Product>
+    <Version>1.0.0</Version>
+    <FileVersion>1.0.0.0</FileVersion>
+    <InformationalVersion>1.0.0 (by VM Trader)</InformationalVersion>
+    <Copyright>Copyright © 2026 VM Trader. Todos os direitos reservados.</Copyright>
+    <Description>Instalador Oficial do Axion TradeStation desenvolvido por VM Trader</Description>
+  </PropertyGroup>
+
+  <!-- Incorpora a Logo Oficial e o Executavel Principal -->
+  <ItemGroup>
+    <Resource Include="..\..\public\Picture\logo_vm_trader.png" Link="logo_vm_trader.png" />
+    <EmbeddedResource Include="..\..\publish-output\AxionTradeStation.exe" Link="Payload\AxionTradeStation.exe" Condition="Exists('..\..\publish-output\AxionTradeStation.exe')" />
+  </ItemGroup>
+
+</Project>

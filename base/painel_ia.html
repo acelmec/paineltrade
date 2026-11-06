@@ -368,11 +368,10 @@ Janela: <span id="windowLabel">Acumulado</span>
 <div class="grid grid-cols-12 gap-3 mb-3">
 <div class="col-span-5">
 <div class="glass p-3 rounded-lg">
-<div class="flex justify-between items-center mb-2"><div class="text-xs font-bold text-blue-400 uppercase">📸 Gráfico (Captura NT8)</div><span class="text-xs text-slate-500" id="screenshotStatus">Aguardando...</span></div>
+<div class="flex justify-between items-center mb-2"><div class="text-xs font-bold text-blue-400 uppercase">📸 GRÁFICO</div><span class="text-xs text-slate-500" id="screenshotStatus">Aguardando...</span></div>
 <div class="bg-slate-900 rounded-lg overflow-hidden h-64 flex items-center justify-center border border-slate-800">
 <img id="chartImage" src="" alt="Gráfico" class="max-h-full max-w-full object-contain hidden" ondblclick="abrirModalImagem()" style="cursor: zoom-in;" title="Duplo clique para ampliar"><span id="chartPlaceholder" class="text-slate-600 text-sm">Nenhuma captura disponível</span>
 </div>
-<div class="text-[10px] text-slate-500 mt-1 text-center">💡 Dê um <strong>duplo clique</strong> na imagem para ampliar</div>
 </div>
 </div>
 <div class="col-span-3">
@@ -385,9 +384,9 @@ Janela: <span id="windowLabel">Acumulado</span>
 <div class="col-span-4">
 <div class="glass p-3 rounded-lg h-full flex flex-col" style="min-height: 320px; max-height: 320px;">
 <div class="flex justify-between items-center mb-2">
-<div class="text-xs font-bold text-orange-400 uppercase">📜 Log do Sistema</div>
+<div class="text-xs font-bold text-orange-400 uppercase">📜 MENSAGENS</div>
 <div class="flex gap-1">
-<button class="log-tab-btn active" onclick="switchLogTab('mensagens', this)">💬 MENSAGENS</button>
+<button class="log-tab-btn active" onclick="switchLogTab('mensagens', this)">💬 SISTEMA</button>
 <button class="log-tab-btn" onclick="switchLogTab('noticias', this)">📰 NOTÍCIAS</button>
 </div>
 </div>
@@ -441,10 +440,17 @@ Janela: <span id="windowLabel">Acumulado</span>
 </div>
 <!-- INTERVALO DO CICLO -->
 <div>
-<h3 class="text-sm font-bold text-slate-300 mb-3">⏱️ Intervalo do Ciclo de Análise</h3>
-<div class="grid grid-cols-2 gap-4">
+<h3 class="text-sm font-bold text-slate-300 mb-3">⏱️ Acionamento e Ciclo de Análise</h3>
+<div class="grid grid-cols-3 gap-4">
 <div>
-<label class="text-xs text-slate-400 uppercase">Ciclo de análise da IA</label>
+<label class="text-xs text-slate-400 uppercase">Modo Acionamento</label>
+<select id="aiTriggerMode" class="bg-slate-900 border border-slate-700 p-2 rounded text-xs w-full" onchange="toggleTriggerMode()">
+<option value="tempo" selected>⏱️ Cíclico Tempo</option>
+<option value="alerta">🚨 Reativo Alerta</option>
+</select>
+</div>
+<div>
+<label class="text-xs text-slate-400 uppercase" id="lblIntervalo">Intervalo de Ciclo</label>
 <select id="intervalo" class="bg-slate-900 border border-slate-700 p-2 rounded text-xs w-full">
 <option value="30000" selected>30 segundos</option>
 <option value="60000">60 segundos</option>
@@ -454,9 +460,14 @@ Janela: <span id="windowLabel">Acumulado</span>
 <div>
 <label class="text-xs text-slate-400 uppercase">Modelo IA Principal</label>
 <select id="groqModel" class="bg-slate-900 border border-slate-700 p-2 rounded text-xs w-full">
-<option value="meta-llama/llama-4-scout-17b-16e-instruct" selected>️ Llama 4 Scout (visão)</option>
-<option value="llama-3.3-70b-versatile"> Llama 3.3 70B</option>
-<option value="llama3-70b-8192">🧠 Llama 3 70B</option>
+<option value="qwen/qwen3.6-27b" selected>Qwen 3.6 27B (Processa Imagem)</option>
+<option value="qwen/qwen3-32b">Qwen 3 32B</option>
+<option value="openai/gpt-oss-120b">GPT OSS 120B</option>
+<option value="openai/gpt-oss-20b">GPT OSS 20B</option>
+<option value="openai/gpt-oss-safeguard-20b">GPT OSS Safeguard 20B</option>
+<option value="meta-llama/llama-prompt-guard-2-22m">Llama Prompt Guard 2 22M</option>
+<option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
+<option value="llama3-70b-8192">Llama 3 70B</option>
 </select>
 </div>
 </div>
@@ -1011,7 +1022,7 @@ async function fetchNewsFromSupabase() {
 // ================================================================
 let dataUpdateInterval = null, analysisCycleInterval = null, latestMarketData = null, analisesRecentes = [], blockTradesHistory = [], forcasData = {}, dadosRodando = false, iaRodando = false, cycleRunning = false, cicloNum = 0, ai1BackoffUntil = 0, currentTemplateName = "Padrão";
 let windowMinutes = Infinity, windowBaseline = null, windowTimer = null, rawBuyVol = 0, rawSellVol = 0;
-const MODELOS_COM_VISAO = ['meta-llama/llama-4-scout-17b-16e-instruct', 'meta-llama/llama-4-maverick-17b-128e-instruct'];
+const MODELOS_COM_VISAO = ['qwen/qwen3.6-27b', 'meta-llama/llama-4-scout-17b-16e-instruct', 'meta-llama/llama-4-maverick-17b-128e-instruct'];
 const forcasConfig = [{ id: 'nasdaq_impulso', nome: 'Nasdaq', ativo: false }, { id: 'sp500_impulso', nome: 'S&P 500', ativo: false }, { id: 'vix_impulso', nome: 'VIX', ativo: false }, { id: 'usdindex_impulso', nome: 'USDIndex', ativo: false }, { id: 'nvidia_impulso', nome: 'NVIDIA', ativo: false }, { id: 'microsoft_impulso', nome: 'Microsoft', ativo: false }, { id: 'apple_impulso', nome: 'Apple', ativo: false }, { id: 'meta_impulso', nome: 'Meta', ativo: false }, { id: 'amazon_impulso', nome: 'Amazon', ativo: false }, { id: 'alphabet_impulso', nome: 'Alphabet', ativo: false }, { id: 'tesla_impulso', nome: 'Tesla', ativo: false }];
 let alertConfig = {
 sent: { ativo: false, max: 55, min: 45, cooldown: 5, telegram: false },
@@ -1969,18 +1980,18 @@ function updateMapaNiveis(data) {
     const rawMin = Math.min(...vals), rawMax = Math.max(...vals), rawRange = rawMax - rawMin || 20;
     const margem = rawRange * 0.10, tMin = rawMin - margem, tMax = rawMax + margem, range = tMax - tMin;
     
-    document.getElementById('mapaMax').innerText = rawMax.toFixed(2);
-    document.getElementById('mapaMin').innerText = rawMin.toFixed(2);
+    document.getElementById('mapaMax').innerText = rawMin.toFixed(2);
+    document.getElementById('mapaMin').innerText = rawMax.toFixed(2);
     
     let html = '';
     niveis.forEach(n => { 
-        const pct = 100 - ((n.valor - tMin) / range) * 100; 
+        const pct = ((n.valor - tMin) / range) * 100; 
         html += `<div class="nivel-linha ${n.tipo}" style="left:${pct.toFixed(2)}%">
             <div class="nivel-label" style="background:${getCorFundo(n.tipo)};color:#fff">${n.label}</div>
         </div>`; 
     });
     
-    const pricePct = 100 - ((price - tMin) / range) * 100;
+    const pricePct = ((price - tMin) / range) * 100;
     html += `<div class="preco-marker" style="left:${pricePct.toFixed(2)}%"></div>`;
     
     document.getElementById('mapaTrack').innerHTML = html;
@@ -2059,8 +2070,9 @@ const container = document.getElementById('forcasContainer');
 container.innerHTML = forcasConfig.map(f => { const d = forcasData[f.id] || { compra: 0, venda: 0 }; const cls = f.ativo ? 'ativo' : 'inativo'; const tick = f.ativo ? '✓' : ''; const compra = Math.max(0, Math.min(100, Math.round(d.compra || 0))); const venda = Math.max(0, Math.min(100, 100 - compra)); return `<div class="forca-item ${cls}" onclick="toggleForca('${f.id}')"><div class="forca-toggle">${tick}</div><div class="forca-nome">${f.nome}</div><div class="forca-barra-container"><div class="forca-barra-compra" style="width:${compra}%"></div><div class="forca-barra-venda" style="width:${venda}%"></div></div><div class="forca-percentual-compra">${compra}%</div><div class="forca-percentual-venda">${venda}%</div></div>`; }).join('');
 }
 function toggleForca(id) { const f = forcasConfig.find(f => f.id === id); if (f) { f.ativo = !f.ativo; renderizarForcas(); } }
-function salvarConfiguracoes() { const config = { groqKey: document.getElementById('groqKey').value, intervalo: document.getElementById('intervalo').value, groqModel: document.getElementById('groqModel').value, enviarImagemIA1: document.getElementById('enviarImagemIA1').checked }; localStorage.setItem('vortexConfig', JSON.stringify(config)); addSystemLog('sistema', '✅ Configurações gerais salvas'); alert('✅ Salvo!'); }
-function carregarConfiguracoes() { const saved = localStorage.getItem('vortexConfig'); if (saved) { const c = JSON.parse(saved); document.getElementById('groqKey').value = c.groqKey || ''; document.getElementById('intervalo').value = c.intervalo || '30000'; document.getElementById('groqModel').value = c.groqModel || 'meta-llama/llama-4-scout-17b-16e-instruct'; document.getElementById('enviarImagemIA1').checked = c.enviarImagemIA1 !== false; } document.getElementById('systemPrompt').value = localStorage.getItem('vortexPromptPrincipal') || defaultPromptPrincipal; }
+function toggleTriggerMode() { const mode = document.getElementById('aiTriggerMode').value; const intSel = document.getElementById('intervalo'); if (mode === 'alerta') { intSel.disabled = true; intSel.style.opacity = '0.4'; } else { intSel.disabled = false; intSel.style.opacity = '1.0'; } }
+function salvarConfiguracoes() { const config = { groqKey: document.getElementById('groqKey').value, intervalo: document.getElementById('intervalo').value, groqModel: document.getElementById('groqModel').value, enviarImagemIA1: document.getElementById('enviarImagemIA1').checked, aiTriggerMode: document.getElementById('aiTriggerMode').value }; localStorage.setItem('vortexConfig', JSON.stringify(config)); addSystemLog('sistema', '✅ Configurações gerais salvas'); alert('✅ Salvo!'); }
+function carregarConfiguracoes() { const saved = localStorage.getItem('vortexConfig'); if (saved) { const c = JSON.parse(saved); document.getElementById('groqKey').value = c.groqKey || ''; document.getElementById('intervalo').value = c.intervalo || '30000'; document.getElementById('groqModel').value = c.groqModel || 'qwen/qwen3.6-27b'; document.getElementById('enviarImagemIA1').checked = c.enviarImagemIA1 !== false; document.getElementById('aiTriggerMode').value = c.aiTriggerMode || 'tempo'; toggleTriggerMode(); } document.getElementById('systemPrompt').value = localStorage.getItem('vortexPromptPrincipal') || defaultPromptPrincipal; }
 function salvarPrompt(id) { localStorage.setItem('vortexPromptPrincipal', document.getElementById(id).value); addSystemLog('sistema', '✅ Prompt salvo'); alert('✅ Salvo!'); }
 function carregarPrompt(id) { const input = document.createElement('input'); input.type = 'file'; input.accept = '.txt'; input.onchange = e => { const file = e.target.files[0]; const reader = new FileReader(); reader.onload = ev => { document.getElementById(id).value = ev.target.result; addSystemLog('sistema', '📂 Prompt carregado: ' + file.name); alert('✅ Carregado: ' + file.name); }; reader.readAsText(file); }; input.click(); }
 function aplicarPrompt(id) { addSystemLog('sistema', '✅ Prompt aplicado'); alert('✅ Aplicado!'); }

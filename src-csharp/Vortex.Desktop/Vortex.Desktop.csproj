@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>Vortex.Desktop</RootNamespace>
+    <AssemblyName>AxionTradeStation</AssemblyName>
+    <!-- Configurações para Executável 100% Único, Standalone e Auto-Contido (Zero Dependências Externas) -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <PublishTrimmed>false</PublishTrimmed>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Vortex.Core\Vortex.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Recurso embutido: pacote compactado dos arquivos web da interface -->
+  <ItemGroup>
+    <EmbeddedResource Include="wwwroot.zip">
+      <LogicalName>Vortex.Desktop.wwwroot.zip</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <!-- Garante que wwwroot.zip esteja atualizado antes do build -->
+  <Target Name="ZipDist" BeforeTargets="BeforeBuild">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;Compress-Archive -Path '$(MSBuildProjectDirectory)\..\..\dist\*' -DestinationPath '$(MSBuildProjectDirectory)\wwwroot.zip' -Force&quot;" Condition="Exists('$(MSBuildProjectDirectory)\..\..\dist\index.html')" />
+  </Target>
+
+</Project>

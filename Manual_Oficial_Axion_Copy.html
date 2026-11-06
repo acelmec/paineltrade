@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Manual Oficial do Usuário: AXION COPY &amp; VORTEX ECOSYSTEM</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+    :root {
+      --primary: #0284c7;
+      --primary-dark: #0369a1;
+      --primary-light: #e0f2fe;
+      --accent: #10b981;
+      --accent-dark: #047857;
+      --accent-light: #d1fae5;
+      --warning: #f59e0b;
+      --warning-light: #fef3c7;
+      --danger: #ef4444;
+      --danger-light: #fee2e2;
+      --slate-900: #0f172a;
+      --slate-800: #1e293b;
+      --slate-700: #334155;
+      --slate-600: #475569;
+      --slate-500: #64748b;
+      --slate-200: #e2e8f0;
+      --slate-100: #f1f5f9;
+      --slate-50: #f8fafc;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--slate-800);
+      background-color: #ffffff;
+      line-height: 1.6;
+      font-size: 13.5px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    @page {
+      size: A4;
+      margin: 18mm 16mm 18mm 16mm;
+      @bottom-right {
+        content: counter(page);
+        font-family: 'Inter', sans-serif;
+        font-size: 9pt;
+        color: #94a3b8;
+      }
+    }
+
+    @page :first {
+      margin: 0;
+    }
+
+    /* CAPA */
+    .cover-page {
+      page-break-after: always;
+      height: 100vh;
+      min-height: 297mm;
+      background: linear-gradient(135deg, #090d16 0%, #0f172a 50%, #1e293b 100%);
+      color: #ffffff;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 30mm 24mm 24mm 24mm;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cover-page::before {
+      content: "";
+      position: absolute;
+      top: -100px;
+      right: -100px;
+      width: 450px;
+      height: 450px;
+      background: radial-gradient(circle, rgba(2, 132, 199, 0.25) 0%, rgba(2, 132, 199, 0) 70%);
+      border-radius: 50%;
+    }
+
+    .cover-page::after {
+      content: "";
+      position: absolute;
+      bottom: -100px;
+      left: -100px;
+      width: 450px;
+      height: 450px;
+      background: radial-gradient(circle, rgba(16, 185, 129, 0.2) 0%, rgba(16, 185, 129, 0) 70%);
+      border-radius: 50%;
+    }
+
+    .cover-header {
+      position: relative;
+      z-index: 2;
+    }
+
+    .brand-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 6px 16px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: #38bdf8;
+      backdrop-filter: blur(10px);
+    }
+
+    .brand-badge-dot {
+      width: 8px;
+      height: 8px;
+      background-color: var(--accent);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    .cover-main {
+      position: relative;
+      z-index: 2;
+      margin-top: 40px;
+    }
+
+    .cover-title {
+      font-size: 34px;
+      font-weight: 800;
+      line-height: 1.2;
+      color: #ffffff;
+      letter-spacing: -0.8px;
+      margin-bottom: 18px;
+    }
+
+    .cover-title span {
+      background: linear-gradient(90deg, #38bdf8 0%, #34d399 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .cover-subtitle {
+      font-size: 16px;
+      font-weight: 400;
+      color: #cbd5e1;
+      max-width: 580px;
+      line-height: 1.55;
+      margin-bottom: 28px;
+    }
+
+    .cover-features {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      max-width: 620px;
+    }
+
+    .feature-chip {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 11.5px;
+      color: #e2e8f0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .feature-chip-icon {
+      font-size: 14px;
+      color: #38bdf8;
+    }
+
+    .cover-footer {
+      position: relative;
+      z-index: 2;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      padding-top: 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      font-size: 11px;
+      color: #94a3b8;
+    }
+
+    .cover-meta strong {
+      color: #f1f5f9;
+      display: block;
+      font-size: 12px;
+      margin-bottom: 3px;
+    }
+
+    /* CONTEÚDO */
+    .content-wrapper {
+      padding: 0;
+    }
+
+    .page-break {
+      page-break-before: always;
+    }
+
+    h1, h2, h3, h4 {
+      color: var(--slate-900);
+      font-weight: 700;
+      break-after: avoid;
+    }
+
+    h1 {
+      font-size: 18px;
+      border-bottom: 2px solid var(--slate-200);
+      padding-bottom: 8px;
+      margin-top: 26px;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--primary-dark);
+    }
+
+    h1:first-of-type {
+      margin-top: 0;
+    }
+
+    h2 {
+      font-size: 14.5px;
+      margin-top: 18px;
+      margin-bottom: 10px;
+      color: var(--slate-800);
+    }
+
+    h3 {
+      font-size: 13.5px;
+      margin-top: 14px;
+      margin-bottom: 6px;
+      color: var(--slate-700);
+    }
+
+    p {
+      margin-bottom: 10px;
+      color: var(--slate-700);
+      text-align: justify;
+    }
+
+    ul, ol {
+      margin-left: 20px;
+      margin-bottom: 12px;
+      color: var(--slate-700);
+    }
+
+    li {
+      margin-bottom: 5px;
+      padding-left: 3px;
+    }
+
+    strong {
+      color: var(--slate-900);
+      font-weight: 600;
+    }
+
+    /* SUMÁRIO */
+    .toc-card {
+      background: var(--slate-50);
+      border: 1px solid var(--slate-200);
+      border-radius: 10px;
+      padding: 18px 22px;
+      margin-bottom: 24px;
+      break-inside: avoid;
+    }
+
+    .toc-title {
+      font-size: 14.5px;
+      font-weight: 700;
+      color: var(--slate-900);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--slate-200);
+      padding-bottom: 8px;
+    }
+
+    .toc-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 20px;
+      font-size: 12px;
+    }
+
+    .toc-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--slate-700);
+      font-weight: 500;
+    }
+
+    .toc-num {
+      width: 20px;
+      height: 20px;
+      background: var(--primary-light);
+      color: var(--primary-dark);
+      font-size: 10px;
+      font-weight: 700;
+      border-radius: 4px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    /* BOXES E ALERTAS */
+    .alert-box {
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin: 14px 0;
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      break-inside: avoid;
+      font-size: 12.5px;
+    }
+
+    .alert-important {
+      background-color: var(--warning-light);
+      border-left: 4px solid var(--warning);
+      color: #92400e;
+    }
+
+    .alert-important strong {
+      color: #78350f;
+    }
+
+    .alert-danger {
+      background-color: var(--danger-light);
+      border-left: 4px solid var(--danger);
+      color: #991b1b;
+    }
+
+    .alert-info {
+      background-color: var(--primary-light);
+      border-left: 4px solid var(--primary);
+      color: var(--primary-dark);
+    }
+
+    .alert-icon {
+      font-size: 16px;
+      flex-shrink: 0;
+      line-height: 1.2;
+    }
+
+    /* TABELAS */
+    table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      margin: 14px 0;
+      border: 1px solid var(--slate-200);
+      border-radius: 8px;
+      overflow: hidden;
+      font-size: 12px;
+      break-inside: avoid;
+    }
+
+    thead {
+      background: var(--slate-100);
+    }
+
+    th {
+      padding: 9px 12px;
+      text-align: left;
+      font-weight: 600;
+      color: var(--slate-800);
+      border-bottom: 1px solid var(--slate-200);
+    }
+
+    td {
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--slate-200);
+      color: var(--slate-700);
+      vertical-align: top;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr:nth-child(even) td {
+      background: var(--slate-50);
+    }
+
+    /* DIAGRAMA DE ABAS */
+    .tabs-diagram {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 10px;
+      padding: 14px;
+      margin: 14px 0;
+      color: #f8fafc;
+      break-inside: avoid;
+    }
+
+    .tabs-diagram-header {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #94a3b8;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .tabs-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+
+    .tab-item {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 7px 10px;
+      font-size: 11.5px;
+      font-weight: 500;
+      color: #e2e8f0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .tab-item.active {
+      border-color: var(--primary);
+      background: rgba(2, 132, 199, 0.2);
+      color: #38bdf8;
+    }
+
+    /* CODE & CHIPS */
+    code, .code-chip {
+      font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+      font-size: 11.5px;
+      background-color: var(--slate-100);
+      color: #0369a1;
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--slate-200);
+    }
+
+    /* CHECKLIST */
+    .checklist {
+      list-style: none;
+      margin-left: 0;
+    }
+
+    .checklist-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 7px 10px;
+      background: var(--slate-50);
+      border: 1px solid var(--slate-200);
+      border-radius: 6px;
+      margin-bottom: 6px;
+      font-size: 12px;
+      break-inside: avoid;
+    }
+
+    .checklist-check {
+      width: 16px;
+      height: 16px;
+      background: #ffffff;
+      border: 2px solid var(--accent);
+      border-radius: 4px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      font-weight: bold;
+      font-size: 11px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    /* FAQ */
+    .faq-card {
+      background: var(--slate-50);
+      border: 1px solid var(--slate-200);
+      border-left: 4px solid var(--primary);
+      border-radius: 6px;
+      padding: 10px 14px;
+      margin-bottom: 10px;
+      break-inside: avoid;
+    }
+
+    .faq-q {
+      font-weight: 700;
+      font-size: 12.5px;
+      color: var(--slate-900);
+      margin-bottom: 4px;
+    }
+
+    .faq-a {
+      font-size: 12px;
+      color: var(--slate-700);
+      margin-bottom: 0;
+    }
+
+    .faq-a ul {
+      margin-bottom: 0;
+      margin-top: 4px;
+      font-size: 11.5px;
+    }
+
+    .header-pill {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      background: var(--slate-200);
+      color: var(--slate-700);
+      margin-left: 8px;
+      vertical-align: middle;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- CAPA -->
+  <div class="cover-page">
+    <div class="cover-header">
+      <div class="brand-badge">
+        <div class="brand-badge-dot"></div>
+        VORTEX ECOSYSTEM &bull; ENTERPRISE MANUAL
+      </div>
+    </div>
+
+    <div class="cover-main">
+      <h1 class="cover-title">
+        📘 Manual Oficial do Usuário<br>
+        <span>AXION COPY &amp; VORTEX</span>
+      </h1>
+      <p class="cover-subtitle">
+        Guia Definitivo de Instalação, Sincronização Híbrida, Governança de Risco e Análise de Performance para NinjaTrader 8.
+      </p>
+
+      <div class="cover-features">
+        <div class="feature-chip">
+          <span class="feature-chip-icon">⚡</span>
+          <span>Ultra-Baixa Latência (&lt; 1ms local)</span>
+        </div>
+        <div class="feature-chip">
+          <span class="feature-chip-icon">🛡️</span>
+          <span>Governança Rígida de Risco &amp; Trava MaxLots</span>
+        </div>
+        <div class="feature-chip">
+          <span class="feature-chip-icon">🌐</span>
+          <span>Túnel Nuvem WebSocket Ponto-a-Ponto (VPS)</span>
+        </div>
+        <div class="feature-chip">
+          <span class="feature-chip-icon">📱</span>
+          <span>Notificações em Tempo Real via Telegram Bot</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="cover-footer">
+      <div class="cover-meta">
+        <strong>VORTEX TRADESTATION &bull; AXION GATEWAY</strong>
+        Documento Técnico de Referência &bull; Versão 2.4 Enterprise
+      </div>
+      <div class="cover-meta" style="text-align: right;">
+        <strong>COMPATIBILIDADE</strong>
+        NinjaTrader 8 &bull; Rithmic &bull; CQG &bull; Prop Firms
+      </div>
+    </div>
+  </div>
+
+  <!-- CONTEÚDO PRINCIPAL -->
+  <div class="content-wrapper">
+
+    <!-- SUMÁRIO EXECUTIVO -->
+    <div class="toc-card">
+      <div class="toc-title">
+        📑 Sumário Executivo
+      </div>
+      <div class="toc-grid">
+        <div class="toc-item"><span class="toc-num">1</span> 1. Visão Geral &amp; Arquitetura do Axion Copy</div>
+        <div class="toc-item"><span class="toc-num">2</span> 2. Instalação do Add-On no NT8 e Licenciamento</div>
+        <div class="toc-item"><span class="toc-num">3</span> 3. Modos de Sincronização: Local vs. Nuvem</div>
+        <div class="toc-item"><span class="toc-num">4</span> 4. Governança e Regras das Contas (Master/Slave)</div>
+        <div class="toc-item"><span class="toc-num">5</span> 5. Constituição Operacional &amp; Regras de Risco</div>
+        <div class="toc-item"><span class="toc-num">6</span> 6. Painel do Add-On no NinjaTrader 8</div>
+        <div class="toc-item"><span class="toc-num">7</span> 7. Painel Web (Axion Copy Dashboard)</div>
+        <div class="toc-item"><span class="toc-num">8</span> 8. Configuração do Bot do Telegram</div>
+        <div class="toc-item"><span class="toc-num">9</span> 9. Análise de Desempenho &amp; Históricos</div>
+        <div class="toc-item"><span class="toc-num">10</span> 10. Resolução de Problemas &amp; Checklist Diário</div>
+      </div>
+    </div>
+
+    <!-- SEÇÃO 1 -->
+    <h1>1. Visão Geral &amp; Arquitetura do Axion Copy</h1>
+    <p>
+      O <strong>AXION COPY</strong> é um sistema profissional de espelhamento e gestão de risco para contas no <strong>NinjaTrader 8</strong> (contas de avaliação de Mesas Proprietárias, contas financiadas Funded/PA, contas Reais de corretora e contas Simulação).
+    </p>
+    <p>
+      Ele opera em modelo híbrido de ultra-baixa latência (<strong>&lt; 1ms localmente</strong>), combinando:
+    </p>
+    <ul>
+      <li><strong>Core de Execução C# no NinjaTrader 8 (AxionGatewayAddOn):</strong> Monitora eventos de preenchimento, submissão de ordens ATM, movimentação dinâmica de níveis de proteção e aplicação de travas em nível de milissegundos.</li>
+      <li><strong>Painel Web Vortex TradeStation:</strong> Interface gráfica moderna para configuração remota, visualização de posições em tempo real, auditoria de rejeições e emissão de ordens de emergência (<em>Panic Button / Flatten All</em>).</li>
+      <li><strong>Hub Relay WebSocket (Túnel Ponto-a-Ponto):</strong> Permite controle remoto de instâncias rodando em VPS ou desktops a partir de qualquer navegador web ou dispositivo móvel com isolamento seguro via Token.</li>
+    </ul>
+
+    <!-- SEÇÃO 2 -->
+    <h1>2. Instalação do Add-On no NinjaTrader 8 e Licenciamento</h1>
+
+    <h2>2.1. Instalação do Pacote NinjaScript</h2>
+    <ol>
+      <li>Abra o <strong>NinjaTrader 8</strong>.</li>
+      <li>Na janela principal (Control Center), clique no menu <code>Tools ➔ Import ➔ NinjaScript Add-On...</code></li>
+      <li>Selecione o arquivo <code>AxionGatewayAddOn.zip</code> fornecido na sua área de membros.</li>
+      <li>Caso o NinjaTrader exiba um aviso sobre código de terceiros, clique em <strong>Sim / Yes</strong>.</li>
+      <li>Ao concluir, uma mensagem confirmará o sucesso da importação. Reinicie o NinjaTrader 8 para que o servidor local e as bibliotecas sejam inicializados corretamente.</li>
+    </ol>
+
+    <div class="alert-box alert-important">
+      <div class="alert-icon">⚠️</div>
+      <div>
+        <strong>IMPORTANT:</strong> Certifique-se de que o NinjaTrader 8 esteja conectado a uma fonte de dados ativa (<code>Connections ➔ Selecionar sua corretora, Rithmic, CQG ou Kinetick</code>).
+      </div>
+    </div>
+
+    <h2>2.2. Acesso à Interface do Add-On</h2>
+    <ol>
+      <li>No menu principal do NinjaTrader 8, clique em <strong>New</strong> (ou <strong>Ferramentas</strong>).</li>
+      <li>Localize e clique em <strong>Axion Gateway AddOn</strong>.</li>
+      <li>A janela central do Axion Gateway será aberta exibindo suas 8 abas de controle.</li>
+    </ol>
+
+    <h2>2.3. Ativação de Licença</h2>
+    <ol>
+      <li>Na janela do Add-On, clique na aba <strong>🏢 Sobre &amp; Licença</strong>.</li>
+      <li>O sistema identificará automaticamente o seu <strong>Machine ID</strong> (Hardware ID) exclusivo.</li>
+      <li>No campo <em>ID da Assinatura / Número do Pedido</em>, insira o código fornecido no momento da sua compra (ex: número da assinatura WooCommerce).</li>
+      <li>Clique no botão <strong>Validar Licença</strong>.</li>
+      <li>O status passará para <strong>Licença Ativa e Autorizada</strong> (indicador verde). A partir deste momento, todos os módulos de cópia, travas de risco e conectores estarão totalmente liberados.</li>
+    </ol>
+
+    <!-- SEÇÃO 3 -->
+    <div class="page-break"></div>
+    <h1>3. Modos de Sincronização: Local vs. Túnel Nuvem (Relay Hub)</h1>
+    <p>
+      O Axion Copy suporta 3 modos de transporte, garantindo que você nunca perca a conexão, esteja operando no mesmo computador ou gerenciando um VPS à distância.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 22%;">Modo de Conexão</th>
+          <th style="width: 28%;">Como Funciona</th>
+          <th style="width: 25%;">Quando Utilizar</th>
+          <th style="width: 25%;">Vantagens</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Local (HTTP :8001)</strong></td>
+          <td>Conexão direta via <code>http://localhost:8001</code> dentro do mesmo PC.</td>
+          <td>Quando você opera o NinjaTrader e o painel Web no mesmo computador físico.</td>
+          <td>Latência ultrabaixa (&lt; 1ms), consumo zero de internet para comunicação interna.</td>
+        </tr>
+        <tr>
+          <td><strong>Túnel Nuvem (Cloud)</strong></td>
+          <td>Conexão criptografada através do WebSocket Relay Hub usando um <em>Pairing Token</em>.</td>
+          <td>Quando o NinjaTrader roda em um VPS ou PC em casa e você acessa pelo celular/notebook fora de casa.</td>
+          <td>Não necessita abrir portas no roteador (port forwarding), nem IP fixo, nem ngrok.</td>
+        </tr>
+        <tr>
+          <td><strong>Automático (Auto)</strong></td>
+          <td>Prioriza a rota local; se falhar, chaveia imediatamente para o Túnel Nuvem sem travar a tela.</td>
+          <td>Recomendado para todos os usuários.</td>
+          <td>Resiliência total contra desconexões ou alternância entre redes.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>3.1. Configuração do Modo Local</h2>
+    <ol>
+      <li>No painel Web do Vortex, abra o menu de sincronização clicando no ícone do NinjaTrader ou no botão <strong>Conectar NinjaTrader</strong>.</li>
+      <li>Selecione <strong>Modo de Conexão: Local</strong>.</li>
+      <li>A URL padrão é mantida como <code>http://localhost:8001</code>.</li>
+      <li>Clique em <strong>Testar Conexão</strong>. O status exibirá a latência em tempo real.</li>
+    </ol>
+
+    <h2>3.2. Configuração do Modo Túnel Nuvem (Acesso Remoto / VPS)</h2>
+    <p>Para controlar seu NinjaTrader à distância sem depender da mesma rede:</p>
+    <ol>
+      <li>No painel Web, abra o modal de conexão e clique em <strong>Gerar Novo Token</strong>.</li>
+      <li>O sistema gera uma chave blindada de uso exclusivo, atrelada à sua conta (ex: <code>vtx_usr_a1b2c3d4_89ef</code>).</li>
+      <li>Copie o token gerado.</li>
+      <li>No NinjaTrader 8, abra o <strong>Axion Gateway AddOn ➔ aba 🌐 Gateway</strong>.</li>
+      <li>Marque a caixa <strong>Habilitar Túnel Nuvem (Relay Hub)</strong>.</li>
+      <li>Cole o <em>Pairing Token</em> no campo correspondente e clique em <strong>Salvar Configurações</strong>.</li>
+      <li>No painel Web, selecione <strong>Modo: Nuvem (Túnel)</strong> (ou <strong>Auto</strong>).</li>
+      <li>Em menos de 2 segundos, o status mudará para <em>Conectado via Nuvem</em>, permitindo visualizar e enviar comandos para o NinjaTrader de qualquer lugar do mundo.</li>
+    </ol>
+
+    <!-- SEÇÃO 4 -->
+    <h1>4. Governança e Configuração de Regras das Contas (Master &amp; Slaves)</h1>
+
+    <h2>4.1. Conceito: Conta Master vs. Conta Slave</h2>
+    <ul>
+      <li><strong>Conta Master (Emissora):</strong> A conta principal onde você clica para abrir operações manualmente, através de robôs ou via gráfico/SuperDOM.</li>
+      <li><strong>Conta Slave (Seguidora):</strong> A conta que replica automaticamente os sinais da Master de acordo com as regras estabelecidas (multiplicador de lote, restrição de ativos e limites individuais).</li>
+    </ul>
+
+    <h2>4.2. Passo a Passo: Criando uma Regra de Cópia no Painel Web</h2>
+    <ol>
+      <li>Acesse o <strong>Copy Trading Dashboard</strong> no painel Web.</li>
+      <li>Na aba <strong>Regras de Cópia (Rules)</strong>, clique em <strong>Nova Regra de Copy</strong>.</li>
+      <li>Configure os parâmetros da regra:
+        <ul style="margin-top: 6px;">
+          <li><strong>Conta Master:</strong> Selecione a conta emissora da lista (ex: <code>Sim101</code> ou <code>PA-APEX-12345</code>).</li>
+          <li><strong>Contas Slaves:</strong> Marque uma ou mais contas que receberão as ordens espelhadas.</li>
+          <li><strong>Multiplicador de Lote (LotMultiplier):</strong>
+            <br>&bull; <code>1.0x</code>: Abre exatamente o mesmo número de contratos confirmados da Master.
+            <br>&bull; <code>2.0x</code>: Dobra a quantidade de contratos (ex: Master entra com 1, Slave entra com 2).
+            <br>&bull; <code>0.5x</code>: Reduz a quantidade pela metade (arredondado).
+          </li>
+          <li><strong>Filtro de Ativos Permitidos (AllowedSymbols):</strong> Deixe em branco para permitir todos, ou liste os ativos separados por vírgula (ex: <code>NQ, MNQ, ES</code>).</li>
+          <li><strong>Copiar Estratégia ATM (Copy ATM Strategy):</strong> Mantém as ordens OCO de Stop Loss e Take Profit sincronizadas.</li>
+          <li><strong>Fechar Slaves no Fechamento da Master (Close Slaves on Master Close):</strong> Garante que ao zerar a Master, todas as Slaves associadas sejam imediatamente zeradas a mercado.</li>
+          <li><strong>Cancelar Ordens Órfãs (Cancel Orphan Orders):</strong> Cancela ordens pendentes residuais se a operação for encerrada.</li>
+        </ul>
+      </li>
+      <li>Clique em <strong>Salvar Regra</strong>. A regra é sincronizada instantaneamente com o Add-On do NinjaTrader.</li>
+    </ol>
+
+    <!-- SEÇÃO 5 -->
+    <div class="page-break"></div>
+    <h1>5. Constituição Operacional &amp; Regras Invioláveis de Risco</h1>
+    <p>
+      O motor do Axion Copy foi desenvolvido com regras rígidas de segurança para proteger o capital do trader e as regras de mesas proprietárias.
+    </p>
+
+    <h2>5.1. Gestão Estrita de Lote Máximo (MaxLots)</h2>
+    <ul>
+      <li><strong>Na Master:</strong> Se a conta Master abrir lote superior ao limite configurado (ex: limite 2, abriu 3), o sistema encerra imediatamente o contrato excedente a mercado, reduz as ordens de Stop Loss e Take Profit da Master para 2 contratos e <em>somente após a confirmação do lote correto na Master replica a ordem para as Slaves</em>.</li>
+      <li><strong>Na Slave:</strong> Se o lote calculado pelo multiplicador ultrapassar o limite máximo da Slave (<code>MaxLots</code>), a ordem na Slave já é aberta diretamente no valor limite máximo, sem nunca expor a Slave a contratos excedentes.</li>
+    </ul>
+
+    <h2>5.2. Proibição Absoluta de Cópia sem Stop Loss e Take Profit</h2>
+    <p>
+      Operações abertas na Master sem Stop Loss ou sem Take Profit <strong>NÃO são copiadas</strong> para as contas Slaves.
+    </p>
+    <p>
+      O sistema possui tolerância de alguns milissegundos para permitir que o motor de ATM do NinjaTrader registre as ordens OCO. Se confirmadas, a cópia ocorre; se a operação permanecer desprotegida, a cópia é rejeitada e registrada na aba <em>Mensagens / Rejeições</em>.
+    </p>
+
+    <h2>5.3. Movimentação Dinâmica de Stops e Takes</h2>
+    <p>
+      Toda vez que o Stop Loss ou Take Profit for movido na conta Master (arrastando a linha no gráfico, SuperDOM, Break-Even ou Trailing Stop), as ordens correspondentes em todas as Slaves são movidas em tempo real, mantendo o alinhamento de preço com precisão de tick.
+    </p>
+
+    <h2>5.4. Zeragem Total e Fechamento Parcial Proporcional</h2>
+    <ul>
+      <li><strong>Zeragem Total (Zerar Tudo / Posição Flat na Master):</strong> O sistema consulta a quantidade real aberta na Slave (ex: 4 contratos quando a Master abriu 2 com multiplicador 2x) e envia o fechamento para 100% dos contratos da Slave, cancelando todas as ordens pendentes de proteção.</li>
+      <li><strong>Fechamento Parcial:</strong> Ao reduzir contratos na Master (ex: de 2 para 1), a Slave calcula a proporção restante esperada e encerra a fração correspondente, ajustando a quantidade dos Stops remanescentes.</li>
+    </ul>
+
+    <h2>5.5. Guardião de Segurança de 5 Segundos</h2>
+    <ul>
+      <li><strong>Ordens Órfãs:</strong> Se a posição a mercado for zerada e restarem ordens de Stop ou Limit sozinhas no mercado por 5 segundos, o guardião as cancela automaticamente.</li>
+      <li><strong>Posição Aberta sem Stop:</strong> Se uma posição ficar no mercado sem ordem de Stop Loss ativa por 5 segundos, o sistema encerra a posição imediatamente a mercado para evitar liquidação descontrolada.</li>
+    </ul>
+
+    <!-- SEÇÃO 6 -->
+    <h1>6. Painel do Add-On no NinjaTrader 8: Recursos e Telas</h1>
+    <p>A janela do <strong>Axion Gateway AddOn</strong> é organizada em 8 abas funcionais:</p>
+
+    <div class="tabs-diagram">
+      <div class="tabs-diagram-header">Estrutura das 8 Abas do Axion Gateway Add-On</div>
+      <div class="tabs-bar">
+        <div class="tab-item active">🌐 Gateway</div>
+        <div class="tab-item">👥 Copy Trading</div>
+        <div class="tab-item">📊 Posições</div>
+        <div class="tab-item">🛡️ Gestão de Risco</div>
+        <div class="tab-item">📱 Telegram</div>
+        <div class="tab-item">📊 Relatórios</div>
+        <div class="tab-item">📜 Logs &amp; Auditoria</div>
+        <div class="tab-item">🏢 Sobre &amp; Licença</div>
+      </div>
+    </div>
+
+    <ul>
+      <li><strong>🌐 Gateway:</strong> Status da porta HTTP local (8001) e do listener interno. Ativação do Túnel Nuvem (Relay Hub), inserção do Pairing Token e latência da conexão.</li>
+      <li><strong>👥 Copy Trading:</strong> Ativação geral do motor de espelhamento. Lista resumida das regras ativas (Master ➔ Slaves, multiplicadores e contadores de ordens processadas).</li>
+      <li><strong>📊 Posições Abertas:</strong> Painel multi-contas em tempo real com instrumentos abertos, lado (Buy/Sell), quantidade de contratos, preço médio e PnL flutuante unificado. Botão <em>Zerar Posição</em> individual por ativo e conta.</li>
+      <li><strong>🛡️ Gestão de Risco:</strong> Configuração de Trava de Stop Diário ($), Meta de Ganho Diário ($), Limite de Trades por Sessão e Limite de Lotes (MaxLots). Janelas de horários permitidos para operar.</li>
+      <li><strong>📱 Telegram:</strong> Configurações do bot (Bot Token, Chat ID e Título das mensagens). Caixas de seleção para alertas de: Abertura de Trade, Resultado/Fechamento, Alteração de Ordens e Queda de Conexão.</li>
+      <li><strong>📊 Relatórios:</strong> Configuração de relatórios automáticos de balanço enviados ao Telegram (por intervalo de minutos ou em horários fixos como 09:00 e 18:00).</li>
+      <li><strong>📜 Logs &amp; Auditoria:</strong> Terminal de texto com registro detalhado de cada comando HTTP/WebSocket recebido, ordens submetidas, latência em microssegundos e avisos de rejeição.</li>
+      <li><strong>🏢 Sobre &amp; Licença:</strong> Exibição do Machine ID exclusivo da máquina, inserção da chave de ativação/pedido e validação com o servidor de licenciamento.</li>
+    </ul>
+
+    <!-- SEÇÃO 7 -->
+    <div class="page-break"></div>
+    <h1>7. Painel Web (Axion Copy Dashboard): Monitoramento e Controle</h1>
+    <p>Acessível em qualquer navegador via plataforma <strong>VortexWeb</strong>:</p>
+
+    <h2>7.1. Abas de Navegação Principal</h2>
+    <ul>
+      <li><strong>Regras de Cópia (Rules):</strong> Gerenciamento visual com cards agrupados por Conta Master. Permite pausar/reativar qualquer Slave com 1 clique, editar multiplicadores e acionar "Zerar Tudo" para uma Master específica.</li>
+      <li><strong>Posições e Ordens de Trabalho (Positions):</strong> Monitoramento contínuo de todas as ordens abertas a mercado e ordens OCO aguardando execução nas corretoras.</li>
+      <li><strong>Performance das Contas (Performance):</strong> Métricas consolidadas de PnL Realizado, PnL Flutuante, Saldo (Cash Value), Margem e tabela de trades fechados.</li>
+      <li><strong>Mensagens &amp; Auditoria (Messages):</strong> Histórico completo de eventos de cópia com filtros por <code>COPIADO</code>, <code>REJEITADO</code> ou <code>ALERTA</code>. Qualquer ordem bloqueada por regras de risco exibe aqui o motivo exato (ex: <em>"Bloqueado: Master sem Stop Loss"</em> ou <em>"Excedeu Limite de Lotes"</em>).</li>
+    </ul>
+
+    <h2>7.2. Botão de Pânico Geral (Flatten All)</h2>
+    <p>Localizado no topo superior direito do painel:</p>
+    <div class="alert-box alert-danger">
+      <div class="alert-icon">🛑</div>
+      <div>
+        <strong>Ação Imediata do Flatten All:</strong> Ao ser acionado com confirmação, envia comando emergencial para o NinjaTrader que:
+        <ul style="margin-top: 4px; margin-bottom: 0;">
+          <li>Encerra imediatamente a mercado todas as posições abertas em todas as contas conectadas.</li>
+          <li>Cancela todas as ordens pendentes (Stop, Limit, ATM) no mercado.</li>
+          <li>Pausa temporariamente novas entradas até que você libere o sistema.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- SEÇÃO 8 -->
+    <h1>8. Configuração do Bot do Telegram &amp; Canais de Notificação</h1>
+    <p>Receba notificações em tempo real no seu smartphone sobre cada trade executado, lucro diário e alertas de risco.</p>
+
+    <h2>8.1. Criando seu Bot no Telegram</h2>
+    <ol>
+      <li>No aplicativo do Telegram, procure pelo usuário oficial <code>@BotFather</code>.</li>
+      <li>Envie o comando <code>/newbot</code>.</li>
+      <li>Escolha um nome para seu bot (ex: <em>Meu Trade Copier</em>) e um username terminando em <code>bot</code> (ex: <code>meu_axion_trade_bot</code>).</li>
+      <li>O BotFather fornecerá o <strong>HTTP API Token</strong> (uma sequência longa como <code>7123456789:AAFlkjw98...</code>). Copie esse token.</li>
+    </ol>
+
+    <h2>8.2. Obtendo seu Chat ID</h2>
+    <ol>
+      <li>Procure no Telegram pelo bot <code>@userinfobot</code> ou adicione o seu bot recém-criado em um canal/grupo.</li>
+      <li>Envie qualquer mensagem para o bot.</li>
+      <li>O bot responderá com o seu <strong>Id numérico</strong> (ex: <code>123456789</code>). Se for um grupo ou canal, o ID começará com sinal negativo (ex: <code>-1001987654321</code>).</li>
+    </ol>
+
+    <h2>8.3. Vinculando ao Axion Gateway AddOn</h2>
+    <ol>
+      <li>No NinjaTrader 8, abra o <strong>Add-On ➔ aba 📱 Telegram</strong>.</li>
+      <li>Preencha os campos:
+        <ul style="margin-top: 4px;">
+          <li><strong>Token do Bot:</strong> Cole o token recebido do @BotFather.</li>
+          <li><strong>Chat ID:</strong> Insira o número do seu chat ou grupo.</li>
+          <li><strong>Título das Mensagens:</strong> Nome da sua mesa ou operação (ex: <em>Axion VIP Traders</em>).</li>
+        </ul>
+      </li>
+      <li>Ative os alertas desejados:
+        <ul style="margin-top: 4px;">
+          <li>☑️ Notificar Abertura de Posição</li>
+          <li>☑️ Notificar Fechamento e Resultado ($ e pontos)</li>
+          <li>☑️ Notificar Intervenções de Risco (Stop Diário / Violações)</li>
+          <li>☑️ Enviar Relatório Periódico de Saldo</li>
+        </ul>
+      </li>
+      <li>Clique em <strong>Testar Envio</strong>. Uma mensagem de confirmação deverá chegar imediatamente no seu Telegram.</li>
+      <li>Clique em <strong>Salvar Configurações</strong>.</li>
+    </ol>
+
+    <!-- SEÇÃO 9 -->
+    <div class="page-break"></div>
+    <h1>9. Análise de Desempenho &amp; Sincronização de Históricos</h1>
+    <p>O Axion Copy permite auditar a performance real gerada pelas execuções no NinjaTrader 8 e consolidá-la em relatórios estatísticos completos.</p>
+
+    <h2>9.1. Sincronização de Desempenho em Tempo Real (Aba Performance)</h2>
+    <p>No Copy Trading Dashboard, clique na aba <strong>📊 Performance das Contas</strong>. O sistema consulta diretamente o motor do NinjaTrader e exibe para cada conta:</p>
+    <ul>
+      <li>Saldo Atual (<em>Cash Value</em>) e Poder de Compra (<em>Buying Power</em>).</li>
+      <li>PnL Realizado do Dia e PnL Flutuante (Não Realizado).</li>
+      <li>Total de Trades Executados.</li>
+      <li>Histórico detalhado de operações finalizadas: Horário de Entrada, Horário de Saída, Ativo, Lado (BUY/SELL), Quantidade, Preço de Entrada, Preço de Saída, Lucro Líquido ($) e Resultado em Pontos/Ticks.</li>
+    </ul>
+    <p>Clique em <strong>🔄 Atualizar Relatório</strong> sempre que desejar forçar a leitura imediata da memória do NinjaTrader.</p>
+
+    <h2>9.2. Sincronização de Históricos Longos no Relatório Avançado (Strategy Report)</h2>
+    <p>Para importar semanas ou meses de trades e analisar curvas de consistência:</p>
+    <ol>
+      <li>No menu principal do VortexWeb, acesse <strong>Relatório de Desempenho (Strategy Report)</strong>.</li>
+      <li>No topo da tela, clique em <strong>Sincronizar NinjaTrader</strong>.</li>
+      <li>Escolha o modo de importação:
+        <ul style="margin-top: 4px;">
+          <li><strong>Modo Dia (day):</strong> Importa as execuções da sessão atual e do dia anterior.</li>
+          <li><strong>Modo Histórico (history):</strong> Permite selecionar uma data inicial (<code>startDate</code>) e data final (<code>endDate</code>) ou realizar uma sincronização delta incremental automática (<em>Delta Sync</em>).</li>
+        </ul>
+      </li>
+    </ol>
+    <p>O sistema processa as ordens salvas no banco de dados local do NinjaTrader, calcula comissões e consolida os seguintes KPIs:</p>
+    <ul>
+      <li><strong>Win Rate</strong> (% de Acerto)</li>
+      <li><strong>Fator de Lucro</strong> (Profit Factor)</li>
+      <li><strong>Payoff Ratio</strong> (Média de Ganho / Média de Perda)</li>
+      <li><strong>Drawdown Máximo</strong> Absoluto e Relativo</li>
+      <li><strong>Gráfico Interativo</strong> da Curva de Capital (<em>Equity Curve</em>)</li>
+    </ul>
+
+    <!-- SEÇÃO 10 -->
+    <h1>10. Resolução de Problemas (Troubleshooting) &amp; Checklist Diário</h1>
+
+    <h2>10.1. Checklist de Início de Sessão (Rotina Diária Recomendada)</h2>
+    <p>Antes da abertura do mercado:</p>
+    <div class="checklist">
+      <div class="checklist-item">
+        <div class="checklist-check">✓</div>
+        <div>O <strong>NinjaTrader 8 está aberto</strong> e com a conexão da corretora/mesa ativa (bolinha verde no canto inferior esquerdo do NT8).</div>
+      </div>
+      <div class="checklist-item">
+        <div class="checklist-check">✓</div>
+        <div>A <strong>janela do Axion Gateway AddOn foi aberta</strong> e o status da licença exibe <em>Licença Ativa e Autorizada</em>.</div>
+      </div>
+      <div class="checklist-item">
+        <div class="checklist-check">✓</div>
+        <div>No painel Web, o <strong>indicador de status do NinjaTrader exibe Online</strong> (com latência em milissegundos).</div>
+      </div>
+      <div class="checklist-item">
+        <div class="checklist-check">✓</div>
+        <div>As <strong>regras de cópia da Master para as Slaves estão com o status Ativo</strong> (ícone verde de Play).</div>
+      </div>
+      <div class="checklist-item">
+        <div class="checklist-check">✓</div>
+        <div>As <strong>contas no NinjaTrader possuem suas estratégias ATM configuradas</strong> com Stop Loss e Take Profit padrão.</div>
+      </div>
+    </div>
+
+    <h2>10.2. Perguntas Frequentes &amp; Diagnóstico de Erros</h2>
+
+    <div class="faq-card">
+      <div class="faq-q">P1: A Master abriu a operação, mas as Slaves não copiaram. O que verificar?</div>
+      <div class="faq-a">
+        Acesse a aba <strong>Mensagens / Auditoria</strong> no painel Web e verifique se há uma mensagem de <code>REJEITADO</code>:
+        <ul>
+          <li><strong>Se o motivo for "Falta de Stop Loss ou Take Profit":</strong> Verifique se sua boleta ou gráfico na Master enviou ordens de proteção ATM junto com a entrada.</li>
+          <li><strong>Se o motivo for "Fora do Horário Permitido":</strong> Verifique a janela de horários configurada na gestão de risco da Slave.</li>
+          <li><strong>Se o motivo for "Limite Diário de Trades / Stop Atingido":</strong> A conta atingiu o limite de segurança da mesa ou do usuário e está bloqueada para novas entradas.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="faq-card">
+      <div class="faq-q">P2: O painel Web indica "NinjaTrader Offline". Como restabelecer?</div>
+      <div class="faq-a">
+        <ul>
+          <li><strong>Se estiver utilizando Modo Local:</strong> Verifique se o NinjaTrader 8 está aberto no mesmo computador. Certifique-se de que a porta <code>8001</code> não está bloqueada pelo Firewall do Windows (crie uma regra de permissão para conexões de entrada na porta TCP 8001).</li>
+          <li><strong>Se estiver utilizando Modo Túnel Nuvem:</strong> Confirme se o <em>Pairing Token</em> configurado na aba Gateway do Add-On é exatamente o mesmo inserido no painel Web. Verifique se a caixa <em>Habilitar Túnel Nuvem</em> está marcada no Add-On.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="faq-card">
+      <div class="faq-q">P3: Ao arrastar o Stop Loss na Master, a Slave não acompanha. O que fazer?</div>
+      <div class="faq-a">
+        Certifique-se de que a opção <strong>Copiar Estratégia ATM (Copy ATM Strategy)</strong> está ativada nas configurações da regra de cópia.
+      </div>
+    </div>
+
+    <div class="faq-card">
+      <div class="faq-q">P4: Como agir em caso de emergência ou notícia inesperada de mercado?</div>
+      <div class="faq-a">
+        Clique no botão <strong>Pânico Geral (Flatten All)</strong> no canto superior direito do painel Web para liquidar instantaneamente todas as posições e cancelar todas as ordens pendentes em todas as contas conectadas.
+      </div>
+    </div>
+
+  </div>
+
+</body>
+</html>

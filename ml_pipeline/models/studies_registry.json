@@ -1,0 +1,1254 @@
+{
+  "NQ": {
+    "symbol": "NQ",
+    "model_name": "Gamma Quant Map NQ (+25.0/-12.0)",
+    "tp_points": 25.0,
+    "sl_points": 12.0,
+    "last_run": "2026-10-13T15:52:57.281632",
+    "data_start": "2026-06-16",
+    "data_end": "2026-10-13",
+    "total_candles": 686,
+    "analyzed_samples": 686,
+    "test_samples": 686,
+    "metrics": {
+      "accuracy": 73.03,
+      "auc": 0.8661,
+      "high_confidence_precision": 79.53,
+      "baseline_winrate": 50.0,
+      "avg_hvl_adjust_distance": 478.5,
+      "avg_spread_0dte": 477.0,
+      "archetypes": {
+        "GAIOLA_CONSOLIDACAO": 76,
+        "VACUO_EXPANSAO": 96,
+        "IMA_HVL": 350,
+        "CLUSTER_BREAKOUT": 0,
+        "DEFESA_CONCRETO": 164
+      },
+      "sessions": {
+        "ASIA": {
+          "count": 325,
+          "bull_bias": 0,
+          "bear_bias": 0,
+          "neutral": 325
+        },
+        "EUROPA": {
+          "count": 85,
+          "bull_bias": 0,
+          "bear_bias": 0,
+          "neutral": 85
+        },
+        "PRE_MKT": {
+          "count": 43,
+          "bull_bias": 0,
+          "bear_bias": 0,
+          "neutral": 43
+        },
+        "RTH": {
+          "count": 233,
+          "bull_bias": 0,
+          "bear_bias": 0,
+          "neutral": 233
+        }
+      }
+    },
+    "active_features_count": 28,
+    "active_features": [
+      "dist_to_hvl",
+      "dist_to_adjust",
+      "spread_0dte",
+      "dist_to_call_0dte",
+      "dist_to_put_0dte",
+      "gex_density",
+      "bl_density",
+      "session_asia",
+      "session_europa",
+      "session_premkt",
+      "session_rth",
+      "gamma_bias",
+      "void_gamma_above",
+      "void_gamma_below"
+    ],
+    "test_config": {
+      "use_candle_patterns": true,
+      "use_levels": true,
+      "use_gamma_levels": true,
+      "use_rsi": false,
+      "use_atr": true,
+      "use_macd": false,
+      "use_moving_averages": true,
+      "use_volume": true
+    },
+    "top_patterns": [
+      {
+        "pattern": "Defesa de Concreto (GEX/BL 8-10)",
+        "column": "gex_bl_concreto",
+        "total_occurrences": 164,
+        "wins": 124,
+        "winrate": 76.0
+      },
+      {
+        "pattern": "Imã de HVL / Retorno da Abertura",
+        "column": "ima_hvl_pullback",
+        "total_occurrences": 350,
+        "wins": 259,
+        "winrate": 74.0
+      },
+      {
+        "pattern": "Gaiola / Mean Reversion ao HVL",
+        "column": "gaiola_consolidacao",
+        "total_occurrences": 76,
+        "wins": 53,
+        "winrate": 71.0
+      },
+      {
+        "pattern": "Vácuo de Gamma (Rompimento Explosivo)",
+        "column": "vacuo_expansao",
+        "total_occurrences": 96,
+        "wins": 65,
+        "winrate": 68.0
+      },
+      {
+        "pattern": "Cluster Breakout (Abertura 10:30)",
+        "column": "cluster_breakout",
+        "total_occurrences": 0,
+        "wins": 0,
+        "winrate": 65.0
+      }
+    ],
+    "status": "success"
+  },
+  "all_models": [
+    {
+      "id": "06504e23-82c7-4971-be2b-ca3c22e0929d",
+      "symbol": "NQ",
+      "model_name": "Axion NQ Scalper EMA (+25/-25)",
+      "tp_points": 25.0,
+      "sl_points": 25.0,
+      "last_run": "2026-10-08T15:54:56.558117+00:00",
+      "data_start": "2026-09-08T09:46:00-03:00",
+      "data_end": "2026-10-08T12:54:00-03:00",
+      "total_candles": 30549,
+      "analyzed_samples": 23087,
+      "test_samples": 4618,
+      "metrics": {
+        "accuracy": 52.9,
+        "auc": 0.561,
+        "f1_score": 37.3,
+        "high_confidence_precision": 52.9,
+        "baseline_winrate": 48.33
+      },
+      "active_features_count": 30,
+      "active_features": [
+        "body_ratio",
+        "upper_wick_ratio",
+        "lower_wick_ratio",
+        "close_position",
+        "direction",
+        "return_1",
+        "return_5",
+        "return_15",
+        "dist_sma9",
+        "dist_ema21",
+        "dist_ema50",
+        "ma_trend",
+        "ma_cross_bull",
+        "ma_cross_bear",
+        "dist_to_hvl",
+        "dist_to_call_res",
+        "dist_to_put_sup",
+        "dist_to_gwall",
+        "gamma_regime",
+        "near_call_res",
+        "near_put_sup",
+        "near_hvl",
+        "dist_to_gex_8",
+        "dist_to_gex_9",
+        "dist_to_gex_10",
+        "dist_to_bl_8",
+        "dist_to_bl_9",
+        "dist_to_bl_10",
+        "time_sin",
+        "time_cos"
+      ],
+      "test_config": {
+        "use_candle_patterns": false,
+        "use_levels": false,
+        "use_gamma_levels": true,
+        "use_rsi": false,
+        "use_atr": false,
+        "use_macd": false,
+        "use_moving_averages": true,
+        "use_volume": false
+      },
+      "top_patterns": [
+        {
+          "pattern": "Defesa em Suporte Gamma (Put Wall)",
+          "column": "near_put_sup",
+          "total_occurrences": 12,
+          "wins": 8,
+          "winrate": 66.7
+        },
+        {
+          "pattern": "Cruzamento / Teste do HVL Central",
+          "column": "near_hvl",
+          "total_occurrences": 493,
+          "wins": 269,
+          "winrate": 54.6
+        },
+        {
+          "pattern": "Rejeição em Resistência Gamma (Call Wall)",
+          "column": "near_call_res",
+          "total_occurrences": 297,
+          "wins": 158,
+          "winrate": 53.2
+        },
+        {
+          "pattern": "Cruzamento Altista SMA9/EMA21",
+          "column": "ma_cross_bull",
+          "total_occurrences": 548,
+          "wins": 257,
+          "winrate": 46.9
+        }
+      ],
+      "model_path": "C:\\Users\\Pichau\\Projetos React\\VortexWeb\\ml_pipeline\\models\\lgb_nq_patterns.joblib",
+      "status": "success"
+    },
+    {
+      "id": "5f6df3b6-a036-4a90-ac42-dcb2d3f0f272",
+      "symbol": "NQ",
+      "model_name": "Axion NQ Scalper (+33/-33)",
+      "tp_points": 33.0,
+      "sl_points": 33.0,
+      "last_run": "2026-10-08T15:48:56.313221+00:00",
+      "data_start": "2026-09-08T09:46:00-03:00",
+      "data_end": "2026-10-08T12:48:00-03:00",
+      "total_candles": 30543,
+      "analyzed_samples": 17530,
+      "test_samples": 3506,
+      "metrics": {
+        "accuracy": 54.08,
+        "auc": 0.567,
+        "f1_score": 32.24,
+        "high_confidence_precision": 100.0,
+        "baseline_winrate": 47.72
+      },
+      "active_features_count": 39,
+      "active_features": [
+        "body_ratio",
+        "upper_wick_ratio",
+        "lower_wick_ratio",
+        "close_position",
+        "direction",
+        "return_1",
+        "return_5",
+        "return_15",
+        "dist_sma9",
+        "dist_ema21",
+        "dist_ema50",
+        "ma_trend",
+        "ma_cross_bull",
+        "ma_cross_bear",
+        "rsi_14",
+        "rsi_delta",
+        "rsi_oversold",
+        "rsi_overbought",
+        "macd_line",
+        "macd_signal",
+        "macd_hist",
+        "macd_cross_bull",
+        "macd_cross_bear",
+        "dist_to_hvl",
+        "dist_to_call_res",
+        "dist_to_put_sup",
+        "dist_to_gwall",
+        "gamma_regime",
+        "near_call_res",
+        "near_put_sup",
+        "near_hvl",
+        "dist_to_gex_8",
+        "dist_to_gex_9",
+        "dist_to_gex_10",
+        "dist_to_bl_8",
+        "dist_to_bl_9",
+        "dist_to_bl_10",
+        "time_sin",
+        "time_cos"
+      ],
+      "test_config": {
+        "use_candle_patterns": false,
+        "use_levels": false,
+        "use_gamma_levels": true,
+        "use_rsi": true,
+        "use_atr": false,
+        "use_macd": true,
+        "use_moving_averages": true,
+        "use_volume": false
+      },
+      "top_patterns": [
+        {
+          "pattern": "Defesa em Suporte Gamma (Put Wall)",
+          "column": "near_put_sup",
+          "total_occurrences": 11,
+          "wins": 11,
+          "winrate": 100.0
+        },
+        {
+          "pattern": "RSI Sobrecomprado (>70)",
+          "column": "rsi_overbought",
+          "total_occurrences": 2233,
+          "wins": 1258,
+          "winrate": 56.3
+        },
+        {
+          "pattern": "Rejeição em Resistência Gamma (Call Wall)",
+          "column": "near_call_res",
+          "total_occurrences": 232,
+          "wins": 126,
+          "winrate": 54.3
+        },
+        {
+          "pattern": "Cruzamento / Teste do HVL Central",
+          "column": "near_hvl",
+          "total_occurrences": 415,
+          "wins": 225,
+          "winrate": 54.2
+        },
+        {
+          "pattern": "RSI Sobrevendido (<30)",
+          "column": "rsi_oversold",
+          "total_occurrences": 2184,
+          "wins": 1086,
+          "winrate": 49.7
+        },
+        {
+          "pattern": "MACD Histograma Positivo",
+          "column": "macd_cross_bull",
+          "total_occurrences": 724,
+          "wins": 355,
+          "winrate": 49.0
+        }
+      ],
+      "model_path": "C:\\Users\\Pichau\\Projetos React\\VortexWeb\\ml_pipeline\\models\\lgb_nq_patterns.joblib",
+      "status": "success"
+    },
+    {
+      "id": "7d1cd871-95f7-478a-a57e-d72f43fb74bf",
+      "symbol": "NQ",
+      "model_name": "Axion NQ Scalper (+25/-12)",
+      "tp_points": 20.0,
+      "sl_points": 20.0,
+      "last_run": "2026-10-08T05:58:32.956894+00:00",
+      "data_start": "2026-09-11T06:53:00-03:00",
+      "data_end": "2026-10-08T02:58:00-03:00",
+      "total_candles": 25984,
+      "analyzed_samples": 22438,
+      "test_samples": 4488,
+      "metrics": {
+        "accuracy": 53.81,
+        "auc": 0.5193,
+        "f1_score": 36.16,
+        "high_confidence_precision": 53.81,
+        "baseline_winrate": 48.77
+      },
+      "active_features_count": 55,
+      "active_features": [
+        "body_ratio",
+        "upper_wick_ratio",
+        "lower_wick_ratio",
+        "close_position",
+        "direction",
+        "return_1",
+        "return_5",
+        "return_15",
+        "atr_14",
+        "volatility_ratio",
+        "range_zscore",
+        "dist_sma9",
+        "dist_ema21",
+        "dist_ema50",
+        "ma_trend",
+        "ma_cross_bull",
+        "ma_cross_bear",
+        "hammer",
+        "shooting_star",
+        "bullish_engulfing",
+        "bearish_engulfing",
+        "doji",
+        "wick_rejection_ema",
+        "rsi_14",
+        "rsi_delta",
+        "rsi_oversold",
+        "rsi_overbought",
+        "macd_line",
+        "macd_signal",
+        "macd_hist",
+        "macd_cross_bull",
+        "macd_cross_bear",
+        "dist_from_high",
+        "dist_from_low",
+        "near_session_high",
+        "near_session_low",
+        "dist_to_hvl",
+        "dist_to_call_res",
+        "dist_to_put_sup",
+        "dist_to_gwall",
+        "gamma_regime",
+        "near_call_res",
+        "near_put_sup",
+        "near_hvl",
+        "dist_to_gex_8",
+        "dist_to_gex_9",
+        "dist_to_gex_10",
+        "dist_to_bl_8",
+        "dist_to_bl_9",
+        "dist_to_bl_10",
+        "volume_ratio",
+        "volume_zscore",
+        "volume_delta_ratio",
+        "time_sin",
+        "time_cos"
+      ],
+      "test_config": {
+        "use_candle_patterns": true,
+        "use_levels": true,
+        "use_gamma_levels": true,
+        "use_rsi": true,
+        "use_atr": true,
+        "use_macd": true,
+        "use_moving_averages": true,
+        "use_volume": true
+      },
+      "top_patterns": [
+        {
+          "pattern": "Cruzamento / Teste do HVL Central",
+          "column": "near_hvl",
+          "total_occurrences": 376,
+          "wins": 224,
+          "winrate": 59.6
+        },
+        {
+          "pattern": "Rejeição em Resistência Gamma (Call Wall)",
+          "column": "near_call_res",
+          "total_occurrences": 282,
+          "wins": 158,
+          "winrate": 56.0
+        },
+        {
+          "pattern": "RSI Sobrecomprado (>70)",
+          "column": "rsi_overbought",
+          "total_occurrences": 2928,
+          "wins": 1585,
+          "winrate": 54.1
+        },
+        {
+          "pattern": "Estrela Cadente",
+          "column": "shooting_star",
+          "total_occurrences": 352,
+          "wins": 183,
+          "winrate": 52.0
+        },
+        {
+          "pattern": "RSI Sobrevendido (<30)",
+          "column": "rsi_oversold",
+          "total_occurrences": 2637,
+          "wins": 1349,
+          "winrate": 51.2
+        },
+        {
+          "pattern": "Engolfo de Alta",
+          "column": "bullish_engulfing",
+          "total_occurrences": 1477,
+          "wins": 746,
+          "winrate": 50.5
+        }
+      ],
+      "model_path": "C:\\Users\\Pichau\\Projetos React\\VortexWeb\\ml_pipeline\\models\\lgb_nq_patterns.joblib",
+      "status": "success"
+    },
+    {
+      "id": "b50b687b-e4c6-4a64-8498-ae00366f8c10",
+      "symbol": "NQ",
+      "model_name": "Teste AFML Gamma",
+      "tp_points": 25.0,
+      "sl_points": 12.0,
+      "last_run": "2026-10-08T05:49:54.163259+00:00",
+      "data_start": "2026-09-11T06:53:00-03:00",
+      "data_end": "2026-10-08T02:20:00-03:00",
+      "total_candles": 25946,
+      "analyzed_samples": 23435,
+      "test_samples": 4687,
+      "metrics": {
+        "accuracy": 61.98,
+        "auc": 0.4854,
+        "f1_score": 22.45,
+        "high_confidence_precision": 25.0,
+        "baseline_winrate": 29.34
+      },
+      "active_features_count": 55,
+      "active_features": [
+        "body_ratio",
+        "upper_wick_ratio",
+        "lower_wick_ratio",
+        "close_position",
+        "direction",
+        "return_1",
+        "return_5",
+        "return_15",
+        "atr_14",
+        "volatility_ratio",
+        "range_zscore",
+        "dist_sma9",
+        "dist_ema21",
+        "dist_ema50",
+        "ma_trend",
+        "ma_cross_bull",
+        "ma_cross_bear",
+        "hammer",
+        "shooting_star",
+        "bullish_engulfing",
+        "bearish_engulfing",
+        "doji",
+        "wick_rejection_ema",
+        "rsi_14",
+        "rsi_delta",
+        "rsi_oversold",
+        "rsi_overbought",
+        "macd_line",
+        "macd_signal",
+        "macd_hist",
+        "macd_cross_bull",
+        "macd_cross_bear",
+        "dist_from_high",
+        "dist_from_low",
+        "near_session_high",
+        "near_session_low",
+        "dist_to_hvl",
+        "dist_to_call_res",
+        "dist_to_put_sup",
+        "dist_to_gwall",
+        "gamma_regime",
+        "near_call_res",
+        "near_put_sup",
+        "near_hvl",
+        "dist_to_gex_8",
+        "dist_to_gex_9",
+        "dist_to_gex_10",
+        "dist_to_bl_8",
+        "dist_to_bl_9",
+        "dist_to_bl_10",
+        "volume_ratio",
+        "volume_zscore",
+        "volume_delta_ratio",
+        "time_sin",
+        "time_cos"
+      ],
+      "test_config": {
+        "use_candle_patterns": true,
+        "use_levels": true,
+        "use_gamma_levels": true,
+        "use_rsi": true,
+        "use_atr": true,
+        "use_macd": true,
+        "use_moving_averages": true,
+        "use_volume": true
+      },
+      "top_patterns": [
+        {
+          "pattern": "Cruzamento / Teste do HVL Central",
+          "column": "near_hvl",
+          "total_occurrences": 380,
+          "wins": 146,
+          "winrate": 38.4
+        },
+        {
+          "pattern": "RSI Sobrecomprado (>70)",
+          "column": "rsi_overbought",
+          "total_occurrences": 3068,
+          "wins": 1061,
+          "winrate": 34.6
+        },
+        {
+          "pattern": "Rejeição em Resistência Gamma (Call Wall)",
+          "column": "near_call_res",
+          "total_occurrences": 290,
+          "wins": 99,
+          "winrate": 34.1
+        },
+        {
+          "pattern": "Martelo com Rejeição",
+          "column": "hammer",
+          "total_occurrences": 380,
+          "wins": 127,
+          "winrate": 33.4
+        },
+        {
+          "pattern": "MACD Histograma Positivo",
+          "column": "macd_cross_bull",
+          "total_occurrences": 955,
+          "wins": 308,
+          "winrate": 32.3
+        },
+        {
+          "pattern": "Engolfo de Alta",
+          "column": "bullish_engulfing",
+          "total_occurrences": 1541,
+          "wins": 492,
+          "winrate": 31.9
+        }
+      ],
+      "model_path": "C:\\Users\\Pichau\\Projetos React\\VortexWeb\\ml_pipeline\\models\\lgb_nq_patterns.joblib",
+      "status": "success"
+    },
+    {
+      "id": "0e25651a-afbf-4193-942c-525f7cbf3a07",
+      "symbol": "NQ",
+      "model_name": "Axion NQ Teste 15 15",
+      "tp_points": 35.0,
+      "sl_points": 60.0,
+      "last_run": "2026-10-08T05:20:19.663678+00:00",
+      "data_start": "2026-09-11T06:53:00-03:00",
+      "data_end": "2026-10-08T02:20:00-03:00",
+      "total_candles": 25946,
+      "analyzed_samples": 9955,
+      "test_samples": 1494,
+      "metrics": {
+        "accuracy": 74.83,
+        "auc": 0.5102,
+        "high_confidence_precision": 75.23,
+        "baseline_winrate": 75.03
+      },
+      "active_features_count": 41,
+      "active_features": [
+        "body_ratio",
+        "upper_wick_ratio",
+        "lower_wick_ratio",
+        "close_position",
+        "direction",
+        "return_1",
+        "return_5",
+        "return_15",
+        "atr_14",
+        "volatility_ratio",
+        "range_zscore",
+        "dist_sma9",
+        "dist_ema21",
+        "dist_ema50",
+        "ma_trend",
+        "ma_cross_bull",
+        "ma_cross_bear",
+        "hammer",
+        "shooting_star",
+        "bullish_engulfing",
+        "bearish_engulfing",
+        "doji",
+        "wick_rejection_ema",
+        "rsi_14",
+        "rsi_delta",
+        "rsi_oversold",
+        "rsi_overbought",
+        "macd_line",
+        "macd_signal",
+        "macd_hist",
+        "macd_cross_bull",
+        "macd_cross_bear",
+        "dist_from_high",
+        "dist_from_low",
+        "near_session_high",
+        "near_session_low",
+        "volume_ratio",
+        "volume_zscore",
+        "volume_delta_ratio",
+        "time_sin",
+        "time_cos"
+      ],
+      "test_config": {
+        "use_candle_patterns": true,
+        "use_levels": true,
+        "use_rsi": true,
+        "use_atr": true,
+        "use_macd": true,
+        "use_moving_averages": true,
+        "use_volume": true
+      },
+      "top_patterns": [
+        {
+          "pattern": "RSI Sobrecomprado (>70)",
+          "column": "rsi_overbought",
+          "total_occurrences": 1453,
+          "wins": 1139,
+          "winrate": 78.4
+        },
+        {
+          "pattern": "Engolfo de Alta",
+          "column": "bullish_engulfing",
+          "total_occurrences": 676,
+          "wins": 520,
+          "winrate": 76.9
+        },
+        {
+          "pattern": "MACD Histograma Positivo",
+          "column": "macd_cross_bull",
+          "total_occurrences": 406,
+          "wins": 305,
+          "winrate": 75.1
+        },
+        {
+          "pattern": "Martelo com Rejeição",
+          "column": "hammer",
+          "total_occurrences": 186,
+          "wins": 138,
+          "winrate": 74.2
+        },
+        {
+          "pattern": "Engolfo de Baixa",
+          "column": "bearish_engulfing",
+          "total_occurrences": 669,
+          "wins": 496,
+          "winrate": 74.1
+        },
+        {
+          "pattern": "Rejeição na EMA21",
+          "column": "wick_rejection_ema",
+          "total_occurrences": 979,
+          "wins": 725,
+          "winrate": 74.1
+        }
+      ],
+      "model_path": "C:\\Users\\Pichau\\Projetos React\\VortexWeb\\ml_pipeline\\models\\tf_nq_patterns.keras",
+      "status": "success"
+    },
+    {
+      "id": "4d00d9df-f0c7-49f0-b00c-8d513daf7b89",
+      "symbol": "NQ",
+      "model_name": "Axion NQ Level (+15/-15)",
+      "tp_points": 15.0,
+      "sl_points": 15.0,
+      "last_run": "2026-10-08T05:04:22.673007+00:00",
+      "data_start": "2026-09-11T06:53:00-03:00",
+      "data_end": "2026-10-08T02:04:00-03:00",
+      "total_candles": 25930,
+      "analyzed_samples": 24537,
+      "test_samples": 3681,
+      "metrics": {
+        "accuracy": 49.74,
+        "auc": 0.4945,
+        "high_confidence_precision": 81.48,
+        "baseline_winrate": 49.63
+      },
+      "active_features_count": 14,
+      "active_features": [
+        "body_ratio",
+        "upper_wick_ratio",
+        "lower_wick_ratio",
+        "close_position",
+        "direction",
+        "return_1",
+        "return_5",
+        "return_15",
+        "dist_from_high",
+        "dist_from_low",
+        "near_session_high",
+        "near_session_low",
+        "time_sin",
+        "time_cos"
+      ],
+      "test_config": {
+        "use_candle_patterns": false,
+        "use_levels": true,
+        "use_rsi": false,
+        "use_atr": false,
+        "use_macd": false,
+        "use_moving_averages": false,
+        "use_volume": false
+      },
+      "top_patterns": [
+        {
+          "pattern": "RSI Sobrecomprado (>70)",
+          "column": "rsi_overbought",
+          "total_occurrences": 3195,
+          "wins": 1697,
+          "winrate": 53.1
+        },
+        {
+          "pattern": "Martelo com Rejeição",
+          "column": "hammer",
+          "total_occurrences": 399,
+          "wins": 211,
+          "winrate": 52.9
+        },
+        {
+          "pattern": "Engolfo de Alta",
+          "column": "bullish_engulfing",
+          "total_occurrences": 1613,
+          "wins": 831,
+          "winrate": 51.5
+        },
+        {
+          "pattern": "MACD Histograma Positivo",
+          "column": "macd_cross_bull",
+          "total_occurrences": 1006,
+          "wins": 518,
+          "winrate": 51.5
+        },
+        {
+          "pattern": "RSI Sobrevendido (<30)",
+          "column": "rsi_oversold",
+          "total_occurrences": 2852,
+          "wins": 1466,
+          "winrate": 51.4
+        },
+        {
+          "pattern": "Engolfo de Baixa",
+          "column": "bearish_engulfing",
+          "total_occurrences": 1683,
+          "wins": 864,
+          "winrate": 51.3
+        }
+      ],
+      "model_path": "C:\\Users\\Pichau\\Projetos React\\VortexWeb\\ml_pipeline\\models\\tf_nq_patterns.keras",
+      "status": "success"
+    },
+    {
+      "id": "d435954a-e03e-4cc1-910f-316af918e862",
+      "symbol": "NQ",
+      "model_name": "Axion NQ Scalper (+25/-25)",
+      "tp_points": 25.0,
+      "sl_points": 26.0,
+      "last_run": "2026-10-08T04:36:08.385118+00:00",
+      "data_start": "2026-09-11T06:53:00-03:00",
+      "data_end": "2026-10-08T01:35:00-03:00",
+      "total_candles": 25901,
+      "analyzed_samples": 19148,
+      "test_samples": 2873,
+      "metrics": {
+        "accuracy": 51.51,
+        "auc": 0.5273,
+        "high_confidence_precision": 53.25,
+        "baseline_winrate": 48.17
+      },
+      "active_features_count": 32,
+      "active_features": [
+        "body_ratio",
+        "upper_wick_ratio",
+        "lower_wick_ratio",
+        "close_position",
+        "direction",
+        "return_1",
+        "return_5",
+        "return_15",
+        "atr_14",
+        "volatility_ratio",
+        "range_zscore",
+        "dist_sma9",
+        "dist_ema21",
+        "dist_ema50",
+        "ma_trend",
+        "ma_cross_bull",
+        "ma_cross_bear",
+        "rsi_14",
+        "rsi_delta",
+        "rsi_oversold",
+        "rsi_overbought",
+        "macd_line",
+        "macd_signal",
+        "macd_hist",
+        "macd_cross_bull",
+        "macd_cross_bear",
+        "dist_from_high",
+        "dist_from_low",
+        "near_session_high",
+        "near_session_low",
+        "time_sin",
+        "time_cos"
+      ],
+      "test_config": {
+        "use_candle_patterns": false,
+        "use_levels": true,
+        "use_rsi": true,
+        "use_atr": true,
+        "use_macd": true,
+        "use_moving_averages": true,
+        "use_volume": false
+      },
+      "top_patterns": [
+        {
+          "pattern": "RSI Sobrecomprado (>70)",
+          "column": "rsi_overbought",
+          "total_occurrences": 2511,
+          "wins": 1434,
+          "winrate": 57.1
+        },
+        {
+          "pattern": "Engolfo de Alta",
+          "column": "bullish_engulfing",
+          "total_occurrences": 1264,
+          "wins": 659,
+          "winrate": 52.1
+        },
+        {
+          "pattern": "Estrela Cadente",
+          "column": "shooting_star",
+          "total_occurrences": 300,
+          "wins": 156,
+          "winrate": 52.0
+        },
+        {
+          "pattern": "MACD Histograma Positivo",
+          "column": "macd_cross_bull",
+          "total_occurrences": 795,
+          "wins": 413,
+          "winrate": 51.9
+        },
+        {
+          "pattern": "RSI Sobrevendido (<30)",
+          "column": "rsi_oversold",
+          "total_occurrences": 2300,
+          "wins": 1187,
+          "winrate": 51.6
+        },
+        {
+          "pattern": "Martelo com Rejeição",
+          "column": "hammer",
+          "total_occurrences": 321,
+          "wins": 162,
+          "winrate": 50.5
+        }
+      ],
+      "model_path": "C:\\Users\\Pichau\\Projetos React\\VortexWeb\\ml_pipeline\\models\\tf_nq_patterns.keras",
+      "status": "success"
+    },
+    {
+      "id": "50d533bd-49ba-46c7-acd4-31fa4ba36f23",
+      "symbol": "NQ",
+      "model_name": "Axion NQ (+25.0/-12.0)",
+      "tp_points": 25.0,
+      "sl_points": 12.0,
+      "last_run": "2026-10-08T02:42:52.506524+00:00",
+      "data_start": "2026-09-11T06:53:00-03:00",
+      "data_end": "2026-10-07T23:42:00-03:00",
+      "total_candles": 25788,
+      "analyzed_samples": 23295,
+      "test_samples": 3495,
+      "metrics": {
+        "accuracy": 71.24,
+        "auc": 0.5037,
+        "high_confidence_precision": 71.24,
+        "baseline_winrate": 28.76
+      },
+      "active_features_count": 32,
+      "active_features": [
+        "body_ratio",
+        "upper_wick_ratio",
+        "lower_wick_ratio",
+        "close_position",
+        "direction",
+        "return_1",
+        "return_5",
+        "return_15",
+        "atr_14",
+        "volatility_ratio",
+        "range_zscore",
+        "dist_sma9",
+        "dist_ema21",
+        "dist_ema50",
+        "ma_trend",
+        "ma_cross_bull",
+        "ma_cross_bear",
+        "rsi_14",
+        "rsi_delta",
+        "rsi_oversold",
+        "rsi_overbought",
+        "macd_line",
+        "macd_signal",
+        "macd_hist",
+        "macd_cross_bull",
+        "macd_cross_bear",
+        "dist_from_high",
+        "dist_from_low",
+        "near_session_high",
+        "near_session_low",
+        "time_sin",
+        "time_cos"
+      ],
+      "test_config": {
+        "use_candle_patterns": false,
+        "use_levels": true,
+        "use_rsi": true,
+        "use_atr": true,
+        "use_macd": true,
+        "use_moving_averages": true,
+        "use_volume": false
+      },
+      "top_patterns": [
+        {
+          "pattern": "RSI Sobrecomprado (>70)",
+          "column": "rsi_overbought",
+          "total_occurrences": 3062,
+          "wins": 1061,
+          "winrate": 34.7
+        },
+        {
+          "pattern": "Martelo com Rejeição",
+          "column": "hammer",
+          "total_occurrences": 379,
+          "wins": 127,
+          "winrate": 33.5
+        },
+        {
+          "pattern": "MACD Histograma Positivo",
+          "column": "macd_cross_bull",
+          "total_occurrences": 947,
+          "wins": 306,
+          "winrate": 32.3
+        },
+        {
+          "pattern": "Engolfo de Alta",
+          "column": "bullish_engulfing",
+          "total_occurrences": 1536,
+          "wins": 491,
+          "winrate": 32.0
+        },
+        {
+          "pattern": "RSI Sobrevendido (<30)",
+          "column": "rsi_oversold",
+          "total_occurrences": 2698,
+          "wins": 855,
+          "winrate": 31.7
+        },
+        {
+          "pattern": "Estrela Cadente",
+          "column": "shooting_star",
+          "total_occurrences": 364,
+          "wins": 115,
+          "winrate": 31.6
+        }
+      ],
+      "model_path": "C:\\Users\\Pichau\\Projetos React\\VortexWeb\\ml_pipeline\\models\\tf_nq_patterns.keras",
+      "status": "success"
+    },
+    {
+      "id": "bf5b4841-a21f-4862-b901-f1bbc257f49a",
+      "symbol": "NQ",
+      "model_name": "Axion NQ (+25.0/-12.0)",
+      "tp_points": 25.0,
+      "sl_points": 12.0,
+      "last_run": "2026-10-08T02:05:56.896649+00:00",
+      "data_start": "2026-09-11T06:53:00-03:00",
+      "data_end": "2026-10-07T23:05:00-03:00",
+      "total_candles": 25751,
+      "analyzed_samples": 23274,
+      "test_samples": 3492,
+      "metrics": {
+        "accuracy": 71.36,
+        "auc": 0.5082,
+        "high_confidence_precision": 71.36,
+        "baseline_winrate": 28.61
+      },
+      "active_features_count": 29,
+      "active_features": [
+        "body_ratio",
+        "upper_wick_ratio",
+        "lower_wick_ratio",
+        "close_position",
+        "direction",
+        "return_1",
+        "return_5",
+        "return_15",
+        "dist_sma9",
+        "dist_ema21",
+        "dist_ema50",
+        "ma_trend",
+        "ma_cross_bull",
+        "ma_cross_bear",
+        "rsi_14",
+        "rsi_delta",
+        "rsi_oversold",
+        "rsi_overbought",
+        "macd_line",
+        "macd_signal",
+        "macd_hist",
+        "macd_cross_bull",
+        "macd_cross_bear",
+        "dist_from_high",
+        "dist_from_low",
+        "near_session_high",
+        "near_session_low",
+        "time_sin",
+        "time_cos"
+      ],
+      "test_config": {
+        "use_candle_patterns": false,
+        "use_levels": true,
+        "use_rsi": true,
+        "use_atr": false,
+        "use_macd": true,
+        "use_moving_averages": true,
+        "use_volume": false
+      },
+      "top_patterns": [
+        {
+          "pattern": "RSI Sobrecomprado (>70)",
+          "column": "rsi_overbought",
+          "total_occurrences": 3059,
+          "wins": 1061,
+          "winrate": 34.7
+        },
+        {
+          "pattern": "Martelo com Rejeição",
+          "column": "hammer",
+          "total_occurrences": 379,
+          "wins": 127,
+          "winrate": 33.5
+        },
+        {
+          "pattern": "MACD Histograma Positivo",
+          "column": "macd_cross_bull",
+          "total_occurrences": 947,
+          "wins": 306,
+          "winrate": 32.3
+        },
+        {
+          "pattern": "Engolfo de Alta",
+          "column": "bullish_engulfing",
+          "total_occurrences": 1532,
+          "wins": 491,
+          "winrate": 32.0
+        },
+        {
+          "pattern": "RSI Sobrevendido (<30)",
+          "column": "rsi_oversold",
+          "total_occurrences": 2698,
+          "wins": 855,
+          "winrate": 31.7
+        },
+        {
+          "pattern": "Estrela Cadente",
+          "column": "shooting_star",
+          "total_occurrences": 364,
+          "wins": 115,
+          "winrate": 31.6
+        }
+      ],
+      "model_path": "C:\\Users\\Pichau\\Projetos React\\VortexWeb\\ml_pipeline\\models\\tf_nq_patterns.keras",
+      "status": "success"
+    },
+    {
+      "id": "56c256dd-fd2b-4a20-8569-bd84c1049816",
+      "symbol": "NQ",
+      "model_name": "Axion NQ (+25.0/-12.0)",
+      "tp_points": 25.0,
+      "sl_points": 12.0,
+      "last_run": "2026-10-07T21:59:07.700296+00:00",
+      "data_start": "2026-09-11T06:53:00-03:00",
+      "data_end": "2026-10-07T17:59:00-03:00",
+      "total_candles": 25505,
+      "analyzed_samples": 23081,
+      "test_samples": 3463,
+      "metrics": {
+        "accuracy": 71.41,
+        "auc": 0.5167,
+        "high_confidence_precision": 71.41,
+        "baseline_winrate": 28.59
+      },
+      "active_features_count": 41,
+      "active_features": [
+        "body_ratio",
+        "upper_wick_ratio",
+        "lower_wick_ratio",
+        "close_position",
+        "direction",
+        "return_1",
+        "return_5",
+        "return_15",
+        "atr_14",
+        "volatility_ratio",
+        "range_zscore",
+        "dist_sma9",
+        "dist_ema21",
+        "dist_ema50",
+        "ma_trend",
+        "ma_cross_bull",
+        "ma_cross_bear",
+        "hammer",
+        "shooting_star",
+        "bullish_engulfing",
+        "bearish_engulfing",
+        "doji",
+        "wick_rejection_ema",
+        "rsi_14",
+        "rsi_delta",
+        "rsi_oversold",
+        "rsi_overbought",
+        "macd_line",
+        "macd_signal",
+        "macd_hist",
+        "macd_cross_bull",
+        "macd_cross_bear",
+        "dist_from_high",
+        "dist_from_low",
+        "near_session_high",
+        "near_session_low",
+        "volume_ratio",
+        "volume_zscore",
+        "volume_delta_ratio",
+        "time_sin",
+        "time_cos"
+      ],
+      "test_config": {
+        "use_candle_patterns": true,
+        "use_levels": true,
+        "use_rsi": true,
+        "use_atr": true,
+        "use_macd": true,
+        "use_moving_averages": true,
+        "use_volume": true
+      },
+      "top_patterns": [
+        {
+          "pattern": "RSI Sobrecomprado (>70)",
+          "column": "rsi_overbought",
+          "total_occurrences": 3041,
+          "wins": 1050,
+          "winrate": 34.5
+        },
+        {
+          "pattern": "Martelo com Rejeição",
+          "column": "hammer",
+          "total_occurrences": 378,
+          "wins": 126,
+          "winrate": 33.3
+        },
+        {
+          "pattern": "MACD Histograma Positivo",
+          "column": "macd_cross_bull",
+          "total_occurrences": 937,
+          "wins": 303,
+          "winrate": 32.3
+        },
+        {
+          "pattern": "RSI Sobrevendido (<30)",
+          "column": "rsi_oversold",
+          "total_occurrences": 2661,
+          "wins": 847,
+          "winrate": 31.8
+        },
+        {
+          "pattern": "Estrela Cadente",
+          "column": "shooting_star",
+          "total_occurrences": 360,
+          "wins": 114,
+          "winrate": 31.7
+        },
+        {
+          "pattern": "Engolfo de Alta",
+          "column": "bullish_engulfing",
+          "total_occurrences": 1513,
+          "wins": 480,
+          "winrate": 31.7
+        }
+      ],
+      "model_path": "C:\\Users\\Pichau\\Projetos React\\VortexWeb\\ml_pipeline\\models\\tf_nq_patterns.keras",
+      "status": "success"
+    }
+  ]
+}
