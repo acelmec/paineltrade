@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { createChart, LineSeries, CandlestickSeries, HistogramSeries, createSeriesMarkers } from 'lightweight-charts';
 import type { IChartApi } from 'lightweight-charts';
 import type { Candle, GammaLevels } from '../services/db';
-import { resolvePanelTickSize, roundToTick } from '../services/db';
+import { resolvePanelTickSize, roundToTick, isSameAsset } from '../services/db';
 import { useApp, calculateFVGs } from '../context/AppContext';
 import { getAccountManualStrategyId, saveAccountStrategySupabase, updateStrategyReportLevelsSupabase } from '../services/db';
 import { getChartTimeFromDate, parseInputToDate, getTradingSessionKey, isCandleInSessionPause, getSaoPauloDate, formatSaoPauloDayMonth, formatSaoPauloTime } from '../utils/date';
@@ -19,7 +19,7 @@ import {
 } from '../utils/indicatorRegistry';
 import type { DrawingItem, DrawingToolType } from '../types/chartDrawings';
 import { evaluateDrawingTrigger } from '../utils/drawingEngine';
-import { calculateTradeManagement, calculateRangeHlLevels } from '../utils/levelPriceResolver';
+import { calculateTradeManagement, calculateRangeHlLevels, resolveLevelPrice } from '../utils/levelPriceResolver';
 import { ChartDrawingsOverlay } from './ChartDrawingsOverlay';
 import { playPatternSound } from '../utils/soundEffects';
 import { recordChartError } from '../utils/chartErrorLogger';
@@ -1793,13 +1793,15 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     if (isSimulatorMode) return null;
     const targetId = activePanel?.instance_id || instanceId || 'painel_principal';
     const activeAccountId = activeAccount?.id || null;
+    const currentAssetSymbol = activePanel?.symbol || activePanel?.name || 'NQ';
     return (reports || []).find(
       (r: any) =>
         (r.instance_id === targetId || (!r.instance_id && targetId === 'painel_principal')) &&
         r.status === 'Em Andamento' &&
-        (!activeAccountId || r.account_id === activeAccountId)
+        (!activeAccountId || r.account_id === activeAccountId) &&
+        (!r.symbol || isSameAsset(r.symbol, currentAssetSymbol))
     );
-  }, [reports, activePanel?.instance_id, instanceId, activeAccount?.id, isSimulatorMode]);
+  }, [reports, activePanel?.instance_id, instanceId, activeAccount?.id, isSimulatorMode, activePanel?.symbol, activePanel?.name]);
 
   const pointValueForPanel = activePanel?.point_value !== undefined && activePanel?.point_value !== null ? Number(activePanel.point_value) : 1.0;
 
@@ -2368,9 +2370,11 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     };
     window.addEventListener('vortex_start_marking_sltp', handleStartMarking);
     window.addEventListener('vortex_custom_sltp_updated', handleCustomSlTpUpdated);
+    window.addEventListener('vortex_reports_updated', handleCustomSlTpUpdated);
     return () => {
       window.removeEventListener('vortex_start_marking_sltp', handleStartMarking);
       window.removeEventListener('vortex_custom_sltp_updated', handleCustomSlTpUpdated);
+      window.removeEventListener('vortex_reports_updated', handleCustomSlTpUpdated);
     };
   }, []);
 
@@ -4992,10 +4996,56 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           }
         }
 
+        if (!hasRealTrades && currentStopMode === 'nivel') {
+          const refEntry = currentPriceRef.current || (chartDataRef.current.length > 0 ? chartDataRef.current[chartDataRef.current.length - 1].close : 0);
+          if (refEntry > 0) {
+            const keyNivelSide = isSimulatorMode || isSimulator ? 'vortex_replay_nivel_side' : 'vortex_nivel_side';
+            const nivelSide = typeof window !== 'undefined' ? (localStorage.getItem(keyNivelSide) || 'AMBOS') : 'AMBOS';
+            const tickSz = resolvePanelTickSize(activePanel, settings) || 0.25;
+            const ptsSl = manualSlPoints && manualSlPoints > 0 ? manualSlPoints : 50;
+            const ptsTp = manualTpPoints && manualTpPoints > 0 ? manualTpPoints : 25;
+
+            if (nivelSide === 'COMPRA' || nivelSide === 'AMBOS') {
+              const slBuy = roundToTick(resolveLevelPrice('COMPRA', 'SL', refEntry, gammaLevels, ptsSl, ptsTp), tickSz);
+              const tpBuy = roundToTick(resolveLevelPrice('COMPRA', 'TP', refEntry, gammaLevels, ptsSl, ptsTp), tickSz);
+              tradesToDraw.push({
+                id: 'nivel_marker_buy',
+                entry_price: refEntry,
+                stop_loss: slBuy,
+                take_profit: tpBuy,
+                strategy_name: 'Nível (Compra)',
+                side: 'COMPRA',
+                contrato: finalContractsToUse || 1,
+                isProposed: true,
+                isProvisionalMarker: true,
+                rangeOffset: 88
+              });
+            }
+
+            if (nivelSide === 'VENDA' || nivelSide === 'AMBOS') {
+              const slSell = roundToTick(resolveLevelPrice('VENDA', 'SL', refEntry, gammaLevels, ptsSl, ptsTp), tickSz);
+              const tpSell = roundToTick(resolveLevelPrice('VENDA', 'TP', refEntry, gammaLevels, ptsSl, ptsTp), tickSz);
+              tradesToDraw.push({
+                id: 'nivel_marker_sell',
+                entry_price: refEntry,
+                stop_loss: slSell,
+                take_profit: tpSell,
+                strategy_name: 'Nível (Venda)',
+                side: 'VENDA',
+                contrato: finalContractsToUse || 1,
+                isProposed: true,
+                isProvisionalMarker: true,
+                rangeOffset: nivelSide === 'AMBOS' ? 290 : 88
+              });
+            }
+          }
+        }
+
         tradesToDraw.forEach(tradeToDraw => {
           const tradeId = tradeToDraw.id || 'proposed';
           const isCustomMarker = tradeId === 'custom_marker';
           const isRangeMarker = tradeId === 'range_marker_buy' || tradeId === 'range_marker_sell' || tradeId === 'range_marker';
+          const isLevelMarker = tradeId === 'nivel_marker_buy' || tradeId === 'nivel_marker_sell' || tradeId === 'nivel_marker';
           const rightOffset = (tradeToDraw as any).rangeOffset || 88;
           const entryPrice = 'entry_price' in tradeToDraw ? Number((tradeToDraw as any).entry_price) : Number((tradeToDraw as any).entry);
           const rawStopLossPrice = 'stop_loss' in tradeToDraw ? Number((tradeToDraw as any).stop_loss) : Number((tradeToDraw as any).stopLoss);
@@ -5025,7 +5075,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                 ? (opt.take_profit !== null ? Number(opt.take_profit) : 0)
                 : rawTakeProfitPrice);
 
-          if (!isCustomMarker && !isRangeMarker && !isNaN(entryPrice) && entryPrice > 0) {
+          if (!isCustomMarker && !isRangeMarker && !isLevelMarker && !isNaN(entryPrice) && entryPrice > 0) {
             const y = safePriceToY(entryPrice);
             if (y !== null && !isNaN(y) && y >= -40 && y <= containerEl.clientHeight + 40) {
               const currentPriceVal = currentPriceRef.current || (chartDataRef.current.length > 0 ? chartDataRef.current[chartDataRef.current.length - 1].close : entryPrice);
@@ -5070,19 +5120,23 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                 ? 'SL MARCADO ↕' 
                 : (isRangeMarker 
                     ? `SL RANGE (${sideText}) ↕` 
-                    : (isSlGain ? 'STOP GAIN ↕' : (isSlBe ? 'BREAK-EVEN ↕' : 'STOP ↕')));
+                    : (isLevelMarker
+                        ? `SL NÍVEL (${sideText}) ↕`
+                        : (isSlGain ? 'STOP GAIN ↕' : (isSlBe ? 'BREAK-EVEN ↕' : 'STOP ↕'))));
 
               const slColor = isSlGain ? '#10b981' : (isSlBe ? '#38bdf8' : '#ef4444');
               const slBg = isDraggingSl ? (isSlGain ? '#064e3b' : (isSlBe ? '#0c4a6e' : '#7f1d1d')) : '#090d16e0';
               const slBorder = isDraggingSl ? (isSlGain ? '2px solid #34d399' : (isSlBe ? '2px solid #38bdf8' : '2px solid #f87171')) : `1.5px solid ${slColor}`;
               const slShadow = isDraggingSl ? `0 0 12px ${slColor}` : '0 1px 4px rgba(0,0,0,0.5)';
 
-              const styleSl = `position: absolute; right: ${rightOffset}px; top: ${y - 12}px; color: ${slColor}; font-size: 13px; font-family: 'JetBrains Mono', monospace; font-weight: bold; background: ${slBg}; padding: 3px 7px; border-radius: 4px; border: ${slBorder}; line-height: 1; white-space: nowrap; box-shadow: ${slShadow}; opacity: ${isProposed ? 0.9 : 1}; pointer-events: auto; cursor: ${isRangeMarker ? 'default' : 'ns-resize'}; user-select: none; touch-action: none; z-index: ${isDraggingSl ? 200 : 110};`;
+              const styleSl = `position: absolute; right: ${rightOffset}px; top: ${y - 12}px; color: ${slColor}; font-size: 13px; font-family: 'JetBrains Mono', monospace; font-weight: bold; background: ${slBg}; padding: 3px 7px; border-radius: 4px; border: ${slBorder}; line-height: 1; white-space: nowrap; box-shadow: ${slShadow}; opacity: ${isProposed ? 0.9 : 1}; pointer-events: auto; cursor: ${isRangeMarker || isLevelMarker ? 'default' : 'ns-resize'}; user-select: none; touch-action: none; z-index: ${isDraggingSl ? 200 : 110};`;
               const slTooltip = isRangeMarker
                 ? `SL Range HL (${sideText}): ${stopLossPrice.toFixed(2)} (${ptsDiffStr} | ${slUsdStr}). Baseado na ${sideText === 'COMPRA' ? 'mínima' : 'máxima'} dos candles.`
-                : `${isSlGain ? 'Stop Gain' : (isSlBe ? 'Break-Even' : 'Stop Loss')}: ${stopLossPrice.toFixed(2)} (${ptsDiffStr}). Clique e arraste para ajustar.`;
+                : (isLevelMarker
+                    ? `SL Nível (${sideText}): ${stopLossPrice.toFixed(2)} (${ptsDiffStr} | ${slUsdStr}). Baseado em níveis técnicos e gamma.`
+                    : `${isSlGain ? 'Stop Gain' : (isSlBe ? 'Break-Even' : 'Stop Loss')}: ${stopLossPrice.toFixed(2)} (${ptsDiffStr}). Clique e arraste para ajustar.`);
               const slEl = upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `trade_sl_${tradeId}`, `<span>${slTitle}${ptsLabel}</span>`, true, styleSl, slTooltip);
-              if (!isRangeMarker) {
+              if (!isRangeMarker && !isLevelMarker) {
                 (slEl as any).onpointerdown = (e: any) => startDraggingLevel(tradeId, 'stop_loss', stopLossPrice, e);
                 (slEl as any).onmousedown = (e: any) => startDraggingLevel(tradeId, 'stop_loss', stopLossPrice, e);
                 (slEl as any).ontouchstart = (e: any) => startDraggingLevel(tradeId, 'stop_loss', stopLossPrice, e);
@@ -5091,10 +5145,10 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
               const badgeBg = isDraggingSl 
                 ? (isSlGain ? '#059669' : (isSlBe ? '#0284c7' : '#b91c1c')) 
                 : (isSlGain ? '#10b981' : (isSlBe ? '#0284c7' : '#dc2626'));
-              const styleSlBadge = `position: absolute; right: 2px; top: ${y - 10}px; color: #ffffff; background: ${badgeBg}; font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: bold; padding: 2px 5px; border-radius: 2px; line-height: 1; white-space: nowrap; box-shadow: ${isDraggingSl ? `0 0 10px ${slColor}` : '0 1px 3px rgba(0,0,0,0.5)'}; z-index: ${isDraggingSl ? 200 : 110}; opacity: ${isProposed ? 0.9 : 1}; pointer-events: auto; cursor: ${isRangeMarker ? 'default' : 'ns-resize'}; user-select: none; touch-action: none;`;
-              const slBadgeTooltip = isRangeMarker ? `SL Range HL: ${stopLossPrice.toFixed(2)}` : `Clique e arraste para ajustar o ${isSlGain ? 'Stop Gain' : (isSlBe ? 'Break-Even' : 'Stop Loss')}`;
+              const styleSlBadge = `position: absolute; right: 2px; top: ${y - 10}px; color: #ffffff; background: ${badgeBg}; font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: bold; padding: 2px 5px; border-radius: 2px; line-height: 1; white-space: nowrap; box-shadow: ${isDraggingSl ? `0 0 10px ${slColor}` : '0 1px 3px rgba(0,0,0,0.5)'}; z-index: ${isDraggingSl ? 200 : 110}; opacity: ${isProposed ? 0.9 : 1}; pointer-events: auto; cursor: ${isRangeMarker || isLevelMarker ? 'default' : 'ns-resize'}; user-select: none; touch-action: none;`;
+              const slBadgeTooltip = isRangeMarker ? `SL Range HL: ${stopLossPrice.toFixed(2)}` : (isLevelMarker ? `SL Nível: ${stopLossPrice.toFixed(2)}` : `Clique e arraste para ajustar o ${isSlGain ? 'Stop Gain' : (isSlBe ? 'Break-Even' : 'Stop Loss')}`);
               const slBadgeEl = upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `trade_sl_badge_${tradeId}`, stopLossPrice.toFixed(2), false, styleSlBadge, slBadgeTooltip);
-              if (!isRangeMarker) {
+              if (!isRangeMarker && !isLevelMarker) {
                 (slBadgeEl as any).onpointerdown = (e: any) => startDraggingLevel(tradeId, 'stop_loss', stopLossPrice, e);
                 (slBadgeEl as any).onmousedown = (e: any) => startDraggingLevel(tradeId, 'stop_loss', stopLossPrice, e);
                 (slBadgeEl as any).ontouchstart = (e: any) => startDraggingLevel(tradeId, 'stop_loss', stopLossPrice, e);
@@ -5117,23 +5171,27 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                 ? 'TP MARCADO ↕' 
                 : (isRangeMarker 
                     ? `TP RANGE (${sideText}) ↕` 
-                    : `ALVO${targetNumStr} ↕`);
+                    : (isLevelMarker
+                        ? `TP NÍVEL (${sideText}) ↕`
+                        : `ALVO${targetNumStr} ↕`));
 
-              const styleTp = `position: absolute; right: ${rightOffset}px; top: ${y - 12}px; color: #22c55e; font-size: 13px; font-family: 'JetBrains Mono', monospace; font-weight: bold; background: ${isDraggingTp ? '#14532d' : '#090d16e0'}; padding: 3px 7px; border-radius: 4px; border: ${isDraggingTp ? '2px solid #4ade80' : '1.5px solid #22c55e'}; line-height: 1; white-space: nowrap; box-shadow: ${isDraggingTp ? '0 0 12px rgba(34,197,94,0.9)' : '0 1px 4px rgba(0,0,0,0.5)'}; opacity: ${isProposed ? 0.7 : 1}; pointer-events: auto; cursor: ${isRangeMarker ? 'default' : 'ns-resize'}; user-select: none; touch-action: none; z-index: ${isDraggingTp ? 200 : 110};`;
+              const styleTp = `position: absolute; right: ${rightOffset}px; top: ${y - 12}px; color: #22c55e; font-size: 13px; font-family: 'JetBrains Mono', monospace; font-weight: bold; background: ${isDraggingTp ? '#14532d' : '#090d16e0'}; padding: 3px 7px; border-radius: 4px; border: ${isDraggingTp ? '2px solid #4ade80' : '1.5px solid #22c55e'}; line-height: 1; white-space: nowrap; box-shadow: ${isDraggingTp ? '0 0 12px rgba(34,197,94,0.9)' : '0 1px 4px rgba(0,0,0,0.5)'}; opacity: ${isProposed ? 0.7 : 1}; pointer-events: auto; cursor: ${isRangeMarker || isLevelMarker ? 'default' : 'ns-resize'}; user-select: none; touch-action: none; z-index: ${isDraggingTp ? 200 : 110};`;
               const tpTooltip = isRangeMarker
                 ? `TP Range HL (${sideText}): ${takeProfitPrice.toFixed(2)} (${tpUsdStr} | ${ptsDiffStr}). Baseado no fator multiplicador.`
-                : `Take Profit: ${takeProfitPrice.toFixed(2)} (${tpUsdStr} | ${ptsDiffStr}). Clique e arraste para ajustar.`;
+                : (isLevelMarker
+                    ? `TP Nível (${sideText}): ${takeProfitPrice.toFixed(2)} (${tpUsdStr} | ${ptsDiffStr}). Baseado em níveis técnicos e gamma.`
+                    : `Take Profit: ${takeProfitPrice.toFixed(2)} (${tpUsdStr} | ${ptsDiffStr}). Clique e arraste para ajustar.`);
               const tpEl = upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `trade_tp_${tradeId}`, `<span>${tpTitle}${ptsLabel}</span>`, true, styleTp, tpTooltip);
-              if (!isRangeMarker) {
+              if (!isRangeMarker && !isLevelMarker) {
                 (tpEl as any).onpointerdown = (e: any) => startDraggingLevel(tradeId, 'take_profit', takeProfitPrice, e);
                 (tpEl as any).onmousedown = (e: any) => startDraggingLevel(tradeId, 'take_profit', takeProfitPrice, e);
                 (tpEl as any).ontouchstart = (e: any) => startDraggingLevel(tradeId, 'take_profit', takeProfitPrice, e);
               }
 
-              const styleTpBadge = `position: absolute; right: 2px; top: ${y - 10}px; color: #ffffff; background: ${isDraggingTp ? '#15803d' : '#16a34a'}; font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: bold; padding: 2px 5px; border-radius: 2px; line-height: 1; white-space: nowrap; box-shadow: ${isDraggingTp ? '0 0 10px rgba(220,38,38,0.9)' : '0 1px 3px rgba(0,0,0,0.5)'}; z-index: ${isDraggingTp ? 200 : 110}; opacity: ${isProposed ? 0.7 : 1}; pointer-events: auto; cursor: ${isRangeMarker ? 'default' : 'ns-resize'}; user-select: none; touch-action: none;`;
-              const tpBadgeTooltip = isRangeMarker ? `TP Range HL: ${takeProfitPrice.toFixed(2)}` : 'Clique e arraste para ajustar o Take Profit';
+              const styleTpBadge = `position: absolute; right: 2px; top: ${y - 10}px; color: #ffffff; background: ${isDraggingTp ? '#15803d' : '#16a34a'}; font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: bold; padding: 2px 5px; border-radius: 2px; line-height: 1; white-space: nowrap; box-shadow: ${isDraggingTp ? '0 0 10px rgba(220,38,38,0.9)' : '0 1px 3px rgba(0,0,0,0.5)'}; z-index: ${isDraggingTp ? 200 : 110}; opacity: ${isProposed ? 0.7 : 1}; pointer-events: auto; cursor: ${isRangeMarker || isLevelMarker ? 'default' : 'ns-resize'}; user-select: none; touch-action: none;`;
+              const tpBadgeTooltip = isRangeMarker ? `TP Range HL: ${takeProfitPrice.toFixed(2)}` : (isLevelMarker ? `TP Nível: ${takeProfitPrice.toFixed(2)}` : 'Clique e arraste para ajustar o Take Profit');
               const tpBadgeEl = upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `trade_tp_badge_${tradeId}`, takeProfitPrice.toFixed(2), false, styleTpBadge, tpBadgeTooltip);
-              if (!isRangeMarker) {
+              if (!isRangeMarker && !isLevelMarker) {
                 (tpBadgeEl as any).onpointerdown = (e: any) => startDraggingLevel(tradeId, 'take_profit', takeProfitPrice, e);
                 (tpBadgeEl as any).onmousedown = (e: any) => startDraggingLevel(tradeId, 'take_profit', takeProfitPrice, e);
                 (tpBadgeEl as any).ontouchstart = (e: any) => startDraggingLevel(tradeId, 'take_profit', takeProfitPrice, e);
@@ -6689,6 +6747,49 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       }
     }
 
+    if (!hasRealTrades && currentStopMode === 'nivel') {
+      const refEntry = currentPriceRef.current || (chartDataRef.current.length > 0 ? chartDataRef.current[chartDataRef.current.length - 1].close : 0);
+      if (refEntry > 0) {
+        const keyNivelSide = isSimulatorMode || isSimulator ? 'vortex_replay_nivel_side' : 'vortex_nivel_side';
+        const nivelSide = typeof window !== 'undefined' ? (localStorage.getItem(keyNivelSide) || 'AMBOS') : 'AMBOS';
+        const tickSz = resolvePanelTickSize(activePanel, settings) || 0.25;
+        const ptsSl = manualSlPoints && manualSlPoints > 0 ? manualSlPoints : 50;
+        const ptsTp = manualTpPoints && manualTpPoints > 0 ? manualTpPoints : 25;
+
+        if (nivelSide === 'COMPRA' || nivelSide === 'AMBOS') {
+          const slBuy = roundToTick(resolveLevelPrice('COMPRA', 'SL', refEntry, gammaLevels, ptsSl, ptsTp), tickSz);
+          const tpBuy = roundToTick(resolveLevelPrice('COMPRA', 'TP', refEntry, gammaLevels, ptsSl, ptsTp), tickSz);
+          tradesToDraw.push({
+            id: 'nivel_marker_buy',
+            entry_price: refEntry,
+            stop_loss: slBuy,
+            take_profit: tpBuy,
+            strategy_name: 'Nível (Compra)',
+            side: 'COMPRA',
+            contrato: finalContractsToUse || 1,
+            isProposed: true,
+            isProvisionalMarker: true
+          });
+        }
+
+        if (nivelSide === 'VENDA' || nivelSide === 'AMBOS') {
+          const slSell = roundToTick(resolveLevelPrice('VENDA', 'SL', refEntry, gammaLevels, ptsSl, ptsTp), tickSz);
+          const tpSell = roundToTick(resolveLevelPrice('VENDA', 'TP', refEntry, gammaLevels, ptsSl, ptsTp), tickSz);
+          tradesToDraw.push({
+            id: 'nivel_marker_sell',
+            entry_price: refEntry,
+            stop_loss: slSell,
+            take_profit: tpSell,
+            strategy_name: 'Nível (Venda)',
+            side: 'VENDA',
+            contrato: finalContractsToUse || 1,
+            isProposed: true,
+            isProvisionalMarker: true
+          });
+        }
+      }
+    }
+
     const keyRangeRef = isSimulatorMode || isSimulator ? 'vortex_replay_range_candle_ref' : 'vortex_range_candle_ref';
     const keyRangeMult = isSimulatorMode || isSimulator ? 'vortex_replay_range_tp_multiplier' : 'vortex_range_tp_multiplier';
     const keyRangeSide = isSimulatorMode || isSimulator ? 'vortex_replay_range_side' : 'vortex_range_side';
@@ -6698,7 +6799,11 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     const lastCloseKey = chartDataRef.current.length > 0 ? chartDataRef.current[chartDataRef.current.length - 1].close : 0;
     const rangeKey = currentStopMode === 'range' ? `_r_${candleRefKey}_${tpMultKey}_${rangeSideKey}_${lastCloseKey}` : '';
 
-    const customMarkerKey = `${currentStopMode}_${markingSlTpState}_${customSl}_${customTp}_${finalContractsToUse}${rangeKey}`;
+    const keyNivelSide = isSimulatorMode || isSimulator ? 'vortex_replay_nivel_side' : 'vortex_nivel_side';
+    const nivelSideKey = typeof window !== 'undefined' ? (localStorage.getItem(keyNivelSide) || 'AMBOS') : 'AMBOS';
+    const nivelKey = currentStopMode === 'nivel' ? `_n_${nivelSideKey}_${lastCloseKey}` : '';
+
+    const customMarkerKey = `${currentStopMode}_${markingSlTpState}_${customSl}_${customTp}_${finalContractsToUse}${rangeKey}${nivelKey}`;
     const levelsKey = `${activeAccountId || 'no_acc'}_${targetId}_${activeReportsToDraw.map((r: any) => `${r.id}_${r.stop_loss}_${r.take_profit}_${r.entry_price}_${r.contrato || (r as any).quantity || 1}`).join('|')}_${activePosition ? `${activePosition.id}_${activePosition.stop_loss ?? activePosition.stopLoss}_${activePosition.take_profit ?? activePosition.takeProfit}_${activePosition.entry_price ?? activePosition.entryPrice}_${activePosition.contrato ?? activePosition.contracts ?? 1}` : ''}_${proposedTrade ? `${proposedTrade.stopLoss}_${proposedTrade.takeProfit}_${proposedTrade.entry}_${finalContractsToUse}` : ''}_${customMarkerKey}`;
 
     const expectedTradesCount = tradesToDraw.length;
@@ -6723,6 +6828,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         const tradeId = tradeToDraw.id || 'proposed';
         const isCustomMarker = tradeId === 'custom_marker';
         const isRangeMarker = tradeId === 'range_marker_buy' || tradeId === 'range_marker_sell' || tradeId === 'range_marker';
+        const isLevelMarker = tradeId === 'nivel_marker_buy' || tradeId === 'nivel_marker_sell' || tradeId === 'nivel_marker';
         const entryPrice = 'entry_price' in tradeToDraw ? Number((tradeToDraw as any).entry_price) : Number((tradeToDraw as any).entry);
         const rawStopLossPrice = 'stop_loss' in tradeToDraw ? Number((tradeToDraw as any).stop_loss) : Number((tradeToDraw as any).stopLoss);
         const rawTakeProfitPrice = 'take_profit' in tradeToDraw ? Number((tradeToDraw as any).take_profit) : Number((tradeToDraw as any).takeProfit);
@@ -6749,7 +6855,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         let lineSl: any = null;
         let lineTp: any = null;
 
-        if (!isCustomMarker && !isRangeMarker && !isNaN(entryPrice) && entryPrice > 0) {
+        if (!isCustomMarker && !isRangeMarker && !isLevelMarker && !isNaN(entryPrice) && entryPrice > 0) {
           try {
             lineEntry = candleSeriesRef.current.createPriceLine({
               price: entryPrice,
@@ -6775,7 +6881,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
             lineSl = candleSeriesRef.current.createPriceLine({
               price: stopLossPrice,
-              color: (isCustomMarker || isRangeMarker) ? slLineColor : (isProposed ? `${slLineColor}88` : slLineColor),
+              color: (isCustomMarker || isRangeMarker || isLevelMarker) ? slLineColor : (isProposed ? `${slLineColor}88` : slLineColor),
               lineWidth: isDraggingSl ? 3 : 2,
               lineStyle: isDraggingSl ? 0 : 2,
               axisLabelVisible: false,
@@ -6791,7 +6897,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           try {
             lineTp = candleSeriesRef.current.createPriceLine({
               price: takeProfitPrice,
-              color: (isCustomMarker || isRangeMarker) ? '#22c55e' : (isProposed ? '#22c55e88' : '#22c55e'),
+              color: (isCustomMarker || isRangeMarker || isLevelMarker) ? '#22c55e' : (isProposed ? '#22c55e88' : '#22c55e'),
               lineWidth: isDraggingTp ? 3 : 2,
               lineStyle: isDraggingTp ? 0 : 2,
               axisLabelVisible: false,

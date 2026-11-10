@@ -33,6 +33,7 @@ dist-ssr
 # Large binaries and output packages (GitHub >100MB limit)
 publish-output/
 release/
+temp_test_isolate/
 src-csharp/**/bin/
 src-csharp/**/obj/
 src-csharp/bin/
@@ -40,7 +41,10 @@ src-csharp/obj/
 android/**/build/
 *.exe
 *.apk
+*.pdb
+*.dll
 easypanel-deploy.zip
 vortex-easypanel.zip
+easypanel_vortex.zip
 vortexweb-release.apk
 wwwroot.zip

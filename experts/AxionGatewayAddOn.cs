@@ -660,6 +660,7 @@ namespace NinjaTrader.NinjaScript.AddOns
         private static readonly ConcurrentDictionary<string, DateTime> _processedTelegramExecIds = new ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, DateTime> _lastReconcileAdjustmentTime = new ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, DateTime> _lastBracketSubmissionTime = new ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        private static readonly ConcurrentDictionary<string, int> _copiedLotsPerMasterOrderAndSlave = new ConcurrentDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         public static readonly ConcurrentDictionary<string, CopyTradingRule> _copyRules = new ConcurrentDictionary<string, CopyTradingRule>(StringComparer.OrdinalIgnoreCase);
 
         private static readonly ConcurrentDictionary<string, PendingBracket> _pendingBrackets = new ConcurrentDictionary<string, PendingBracket>();
@@ -1095,51 +1096,56 @@ namespace NinjaTrader.NinjaScript.AddOns
             return false;
         }
 
+        public static bool IsProtectionOrExitOrder(Order order)
+        {
+            if (order == null) return false;
+            if (!string.IsNullOrEmpty(order.Oco)) return true;
+            if (IsCopyOrder(order) || IsInternalOrder(order)) return true;
+            if (order.OrderType == OrderType.StopMarket || order.OrderType == OrderType.StopLimit) return true;
+            return IsExitOrProtectionOrderName(order.Name);
+        }
+
         public static bool IsExitOrProtectionOrderName(string orderName)
         {
             if (string.IsNullOrWhiteSpace(orderName)) return false;
             string n = orderName.Trim();
 
-            // Nunca classificar ordens de entrada (compra/venda/robôs/limit/mit/stop de entrada) como saída
+            // 1. Ordens expressamente identificadas como Stop Loss, Profit Target ou Saída / Fechamento
+            if (n.Equals("Close", StringComparison.OrdinalIgnoreCase) ||
+                n.Equals("Copy_Close", StringComparison.OrdinalIgnoreCase) ||
+                n.Equals("RiskClose", StringComparison.OrdinalIgnoreCase) ||
+                n.Equals("RiskLotCap", StringComparison.OrdinalIgnoreCase) ||
+                n.Equals("NakedClose", StringComparison.OrdinalIgnoreCase) ||
+                n.Equals("Exit", StringComparison.OrdinalIgnoreCase) ||
+                n.Equals("Zerar", StringComparison.OrdinalIgnoreCase) ||
+                n.StartsWith("Stop loss", StringComparison.OrdinalIgnoreCase) ||
+                n.StartsWith("Profit target", StringComparison.OrdinalIgnoreCase) ||
+                n.StartsWith("Axion_SL", StringComparison.OrdinalIgnoreCase) ||
+                n.StartsWith("Axion_TP", StringComparison.OrdinalIgnoreCase) ||
+                n.StartsWith("Axion_Close", StringComparison.OrdinalIgnoreCase) ||
+                n.StartsWith("Axion_Risk", StringComparison.OrdinalIgnoreCase) ||
+                n.StartsWith("Stop", StringComparison.OrdinalIgnoreCase) ||
+                n.StartsWith("Target", StringComparison.OrdinalIgnoreCase) ||
+                n.StartsWith("Profit", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // 2. Nunca classificar ordens de entrada (compra/venda/robôs/limit/mit/stop de entrada) como saída
             if (n.StartsWith("Buy", StringComparison.OrdinalIgnoreCase) ||
                 n.StartsWith("Sell", StringComparison.OrdinalIgnoreCase) ||
                 n.IndexOf("Entry", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                n.IndexOf("Limit", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 n.IndexOf("MIT", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 n.IndexOf("MarketIfTouched", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                n.IndexOf("Stop market", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                n.IndexOf("Stop limit", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 n.IndexOf("Robo", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 n.IndexOf("Robot", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 n.IndexOf("Signal", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                n.IndexOf("Sinal", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                n.IndexOf("Order", StringComparison.OrdinalIgnoreCase) >= 0)
+                n.IndexOf("Sinal", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return false;
             }
 
-            return n.Equals("Close", StringComparison.OrdinalIgnoreCase) ||
-                   n.Equals("Copy_Close", StringComparison.OrdinalIgnoreCase) ||
-                   n.Equals("RiskClose", StringComparison.OrdinalIgnoreCase) ||
-                   n.Equals("RiskLotCap", StringComparison.OrdinalIgnoreCase) ||
-                   n.Equals("NakedClose", StringComparison.OrdinalIgnoreCase) ||
-                   n.Equals("Exit", StringComparison.OrdinalIgnoreCase) ||
-                   n.Equals("Zerar", StringComparison.OrdinalIgnoreCase) ||
-                   n.StartsWith("Stop loss", StringComparison.OrdinalIgnoreCase) ||
-                   n.StartsWith("Profit target", StringComparison.OrdinalIgnoreCase) ||
-                   n.StartsWith("Axion_SL", StringComparison.OrdinalIgnoreCase) ||
-                   n.StartsWith("Axion_TP", StringComparison.OrdinalIgnoreCase) ||
-                   n.StartsWith("Axion_Close", StringComparison.OrdinalIgnoreCase) ||
-                   n.StartsWith("Axion_Risk", StringComparison.OrdinalIgnoreCase) ||
-                   n.StartsWith("Stop1", StringComparison.OrdinalIgnoreCase) ||
-                   n.StartsWith("Stop2", StringComparison.OrdinalIgnoreCase) ||
-                   n.StartsWith("Stop3", StringComparison.OrdinalIgnoreCase) ||
-                   n.StartsWith("Stop4", StringComparison.OrdinalIgnoreCase) ||
-                   n.StartsWith("Target1", StringComparison.OrdinalIgnoreCase) ||
-                   n.StartsWith("Target2", StringComparison.OrdinalIgnoreCase) ||
-                   n.StartsWith("Target3", StringComparison.OrdinalIgnoreCase) ||
-                   n.StartsWith("Target4", StringComparison.OrdinalIgnoreCase) ||
-                   n.Equals("Target", StringComparison.OrdinalIgnoreCase);
+            return false;
         }
 
         public static int ClampLotSizeForAccount(string accountName, int requestedQty)
@@ -1287,6 +1293,8 @@ namespace NinjaTrader.NinjaScript.AddOns
             return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "vortex_copy_rules.json");
         }
 
+        private static string _lastSavedRulesJson = "";
+
         public static void SaveCopyRulesToDisk()
         {
             try
@@ -1316,7 +1324,16 @@ namespace NinjaTrader.NinjaScript.AddOns
                     sb.Append("}");
                 }
                 sb.Append("]}");
-                File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
+                string jsonStr = sb.ToString();
+
+                // ⚡ Economia de I/O de disco e silenciamento de logs repetitivos: grava apenas se houve alteração real
+                if (string.Equals(jsonStr, _lastSavedRulesJson, StringComparison.Ordinal))
+                {
+                    return;
+                }
+                _lastSavedRulesJson = jsonStr;
+
+                File.WriteAllText(path, jsonStr, Encoding.UTF8);
                 Log($"💾 [COPY RULES]: {_copyRules.Count} regras salvas em disco: {path}");
             }
             catch (Exception ex)
@@ -1539,6 +1556,8 @@ namespace NinjaTrader.NinjaScript.AddOns
             return true;
         }
 
+        private static string _lastSavedAccountRisksJson = "";
+
         public static void SaveAccountRisksToDisk()
         {
             try
@@ -1563,7 +1582,15 @@ namespace NinjaTrader.NinjaScript.AddOns
                     sb.Append("}");
                 }
                 sb.Append("]}");
-                File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
+                string jsonStr = sb.ToString();
+
+                if (string.Equals(jsonStr, _lastSavedAccountRisksJson, StringComparison.Ordinal))
+                {
+                    return; // Sem alterações
+                }
+                _lastSavedAccountRisksJson = jsonStr;
+
+                File.WriteAllText(path, jsonStr, Encoding.UTF8);
             }
             catch { }
         }
@@ -2957,6 +2984,29 @@ namespace NinjaTrader.NinjaScript.AddOns
 
                                                 if (closeQty > 0)
                                                 {
+                                                    // 🧹 Limpeza preventiva de brackets parciais na Slave: cancela o alvo/stop equivalente aos contratos sendo encerrados
+                                                    if (!willBeFlat && slaveAcc.Orders != null)
+                                                    {
+                                                        try
+                                                        {
+                                                            lock (slaveAcc.Orders)
+                                                            {
+                                                                var tpsToCancel = slaveAcc.Orders.Where(o => o != null &&
+                                                                    (o.Instrument == (slavePos.Instrument ?? slaveInst) || (o.Instrument != null && (o.Instrument.FullName == (slavePos.Instrument ?? slaveInst).FullName))) &&
+                                                                    (o.OrderState == OrderState.Working || o.OrderState == OrderState.Accepted) &&
+                                                                    o.OrderType == OrderType.Limit &&
+                                                                    IsProtectionOrExitOrder(o)
+                                                                ).OrderBy(o => slavePos.MarketPosition == MarketPosition.Long ? o.LimitPrice : -o.LimitPrice).Take(1).ToList();
+
+                                                                if (tpsToCancel.Count > 0)
+                                                                {
+                                                                    SafeCancelOrders(slaveAcc, tpsToCancel.ToArray());
+                                                                }
+                                                            }
+                                                        }
+                                                        catch { }
+                                                    }
+
                                                     OrderAction closeAction = slavePos.MarketPosition == MarketPosition.Long ? OrderAction.Sell : OrderAction.Buy;
                                                     if (SafeSubmitCloseOrder(slaveAcc, slavePos.Instrument ?? slaveInst, closeAction, closeQty, "Copy_Close"))
                                                     {
@@ -3252,11 +3302,14 @@ namespace NinjaTrader.NinjaScript.AddOns
                                             continue;
                                         }
 
-                                        string slaveCopyKey = $"SLAVE_COPY_ENTRY_{execOrder.OrderId}_{slaveAcc.Name.Trim().ToLowerInvariant()}";
-                                        if (!_processedExecOrderIds.TryAdd(slaveCopyKey, DateTime.UtcNow))
+                                        string orderSlaveKey = $"{execOrder.OrderId}_{slaveAcc.Name.Trim().ToLowerInvariant()}";
+                                        int alreadyCopiedForSlave = _copiedLotsPerMasterOrderAndSlave.TryGetValue(orderSlaveKey, out int ac) ? ac : 0;
+                                        int masterFilledSoFar = execOrder.Filled > 0 ? execOrder.Filled : effectiveMasterQty;
+                                        int masterDeltaToCopy = masterFilledSoFar - alreadyCopiedForSlave;
+
+                                        if (masterDeltaToCopy <= 0)
                                         {
-                                            Log($"ℹ️ [COPY DEDUP]: Cópia da ordem {execOrder.OrderId} para Slave {slaveAcc.Name} já executada.");
-                                            continue;
+                                            continue; // Já copiado anteriormente por outro fill deste mesmo pedido
                                         }
 
                                         if (IsAccountReadyForTrading(slaveAcc))
@@ -3270,8 +3323,9 @@ namespace NinjaTrader.NinjaScript.AddOns
                                                 continue;
                                             }
 
-                                            int rawSlaveQty = Math.Max(1, (int)Math.Round(effectiveMasterQty * rule.LotMultiplier));
+                                            int rawSlaveQty = Math.Max(1, (int)Math.Round(masterDeltaToCopy * rule.LotMultiplier));
                                             int slaveQty = ClampLotSizeForAccount(slaveAcc.Name, rawSlaveQty, out _, out _);
+                                            _copiedLotsPerMasterOrderAndSlave[orderSlaveKey] = masterFilledSoFar;
 
                                             // Checar bloqueio de risco e limites diários da conta slave (Horário, Quantidade de Operações e Meta Diária de Loss/Take)
                                             if (_accountRiskStates.TryGetValue(slaveAcc.Name, out AccountRiskInfo sRisk))
@@ -3675,7 +3729,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                         // exceto se a conta estiver em comando explícito de zeragem total / pânico (IsAccountCurrentlyFlattening).
                         if (!IsAccountCurrentlyFlattening(account.Name))
                         {
-                            if (!IsExitOrProtectionOrderName(order.Name))
+                            if (!IsProtectionOrExitOrder(order))
                             {
                                 continue; // Preserva ordens pendentes de entrada no book!
                             }
@@ -4256,9 +4310,9 @@ namespace NinjaTrader.NinjaScript.AddOns
                         }
                     }
 
-                    // 🔒 Proteção Tradovate/Rithmic: Se já existirem ordens em trânsito de submissão (Submitted/Initialized), aguarda a corretora confirmar antes de reconciliar
-                    bool hasSlaveOrdersInTransit = slaveSlOrders.Any(o => o.OrderState == OrderState.Submitted || o.OrderState == OrderState.Initialized) ||
-                                                   slaveTpOrders.Any(o => o.OrderState == OrderState.Submitted || o.OrderState == OrderState.Initialized);
+                    // 🔒 Proteção Tradovate/Rithmic: Se já existirem ordens em trânsito de submissão ou cancelamento, aguarda a corretora confirmar antes de reconciliar
+                    bool hasSlaveOrdersInTransit = slaveSlOrders.Any(o => o.OrderState == OrderState.Submitted || o.OrderState == OrderState.Initialized || o.OrderState == OrderState.CancelPending || _inFlightCancellingOrders.ContainsKey(o.OrderId)) ||
+                                                   slaveTpOrders.Any(o => o.OrderState == OrderState.Submitted || o.OrderState == OrderState.Initialized || o.OrderState == OrderState.CancelPending || _inFlightCancellingOrders.ContainsKey(o.OrderId));
                     if (hasSlaveOrdersInTransit)
                     {
                         return;
@@ -4445,15 +4499,14 @@ namespace NinjaTrader.NinjaScript.AddOns
                                     }
                                     else
                                     {
-                                        // Estrutura incompatível: limpa ordens órfãs antes de recriar
-                                        var oldOrders = new List<Order>();
-                                        oldOrders.AddRange(slaveSlOrders.Where(o => o.OrderState == OrderState.Working || o.OrderState == OrderState.Accepted));
-                                        oldOrders.AddRange(slaveTpOrders.Where(o => o.OrderState == OrderState.Working || o.OrderState == OrderState.Accepted));
-                                        if (oldOrders.Count > 0)
+                                        // A Slave já possui alvos suficientes (ou excedentes) no book.
+                                        // NUNCA limpa ordens de proteção em lote! Cancela apenas alvos que porventura excedam a meta.
+                                        if (slaveTpOrders.Count > targetCount)
                                         {
-                                            SafeCancelOrders(slaveAcc, oldOrders.Distinct().ToArray());
+                                            var excessTps = slaveTpOrders.Skip(targetCount).ToList();
+                                            SafeCancelOrders(slaveAcc, excessTps.ToArray());
                                         }
-                                        startIndex = 0;
+                                        startIndex = targetCount; // Não cria novas ordens
                                     }
 
                                     // Contratos já alocados para alvos já ativos no book
@@ -5263,7 +5316,6 @@ namespace NinjaTrader.NinjaScript.AddOns
                     if (!string.IsNullOrWhiteSpace(payloadJson) && payloadJson.Length > 5)
                     {
                         UpdateCopyRulesFromJson(payloadJson);
-                        SaveCopyRulesToDisk();
                         NotifyCopyRulesUpdated();
                         NotifyRiskConfigUpdated();
                         return $"{{\"success\":true,\"count\":{_copyRules.Count}}}";
@@ -5707,7 +5759,6 @@ namespace NinjaTrader.NinjaScript.AddOns
                         {
                             string body = reader.ReadToEnd();
                             UpdateCopyRulesFromJson(body);
-                            SaveCopyRulesToDisk();
                             NotifyCopyRulesUpdated();
                             NotifyRiskConfigUpdated();
                             SendJsonResponse(response, $"{{\"success\":true,\"count\":{_copyRules.Count}}}");

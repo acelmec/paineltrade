@@ -68,6 +68,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   const [ninjaStatus, setNinjaStatus] = useState<'online' | 'offline' | 'checking'>('checking');
   const isNinjaAccount = isNinjaExecutionAccount(activeAccount);
   const [activeNinjaPosition, setActiveNinjaPosition] = useState<any | null>(null);
+  const [ninjaPositions, setNinjaPositions] = useState<any[]>([]);
 
   // Total de contas do painel sincronizadas com o NinjaTrader
   const panelNinjaAccounts = (accounts || []).filter((a: any) => isNinjaExecutionAccount(a));
@@ -99,22 +100,33 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
           try {
             const posData = await fetchNinjaPositionsAndOrders();
             if (isMounted) {
-              const myPos = (posData.positions || []).find((p: any) =>
+              const accPositions = (posData.positions || []).filter((p: any) =>
                 p.account?.trim().toLowerCase() === activeAccount?.account_name?.trim().toLowerCase()
+              );
+              setNinjaPositions(accPositions);
+
+              const currentAsset = activePanel?.name || selectedAsset || 'NQ';
+              const myPos = accPositions.find((p: any) =>
+                isSameAsset(p.symbol, currentAsset) &&
+                (p.marketPosition === 'BUY' || p.marketPosition === 'SELL') &&
+                Number(p.quantity) > 0
               );
               setActiveNinjaPosition(myPos || null);
             }
           } catch {
             if (isMounted) {
+              setNinjaPositions([]);
               setActiveNinjaPosition(null);
             }
           }
         } else {
+          setNinjaPositions([]);
           setActiveNinjaPosition(null);
         }
       } catch {
         if (isMounted) {
           setNinjaStatus('offline');
+          setNinjaPositions([]);
           setActiveNinjaPosition(null);
         }
       }
@@ -128,9 +140,25 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
         clearInterval(timer);
       };
     } else {
+      setNinjaPositions([]);
       setActiveNinjaPosition(null);
     }
-  }, [isNinjaAccount, activeAccount?.id, activeAccount?.account_name]);
+  }, [isNinjaAccount, activeAccount?.id, activeAccount?.account_name, activePanel?.name, selectedAsset]);
+
+  const [, setReportsUpdateTick] = useState<number>(0);
+  useEffect(() => {
+    const handleReportsUpdated = () => {
+      setReportsUpdateTick(t => t + 1);
+      setIsSubmitting(false);
+    };
+    window.addEventListener('vortex_reports_updated', handleReportsUpdated);
+    return () => window.removeEventListener('vortex_reports_updated', handleReportsUpdated);
+  }, []);
+
+  // Libera imediatamente qualquer lock de submissão ao trocar de ativo ou painel
+  useEffect(() => {
+    setIsSubmitting(false);
+  }, [activePanel?.id, selectedAsset]);
 
   // Sizing Mode State (LOTE vs RISCO $)
   const [sizingMode, setSizingMode] = useState<'lote' | 'risco'>(
@@ -182,6 +210,17 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   const updateRangeSide = (val: 'COMPRA' | 'VENDA' | 'AMBOS') => {
     setRangeSide(val);
     localStorage.setItem('vortex_range_side', val);
+    window.dispatchEvent(new CustomEvent('vortex_custom_sltp_updated'));
+  };
+
+  const [nivelSide, setNivelSide] = useState<'COMPRA' | 'VENDA' | 'AMBOS'>(() => {
+    const saved = localStorage.getItem('vortex_nivel_side');
+    return (saved === 'COMPRA' || saved === 'VENDA' || saved === 'AMBOS') ? saved : 'AMBOS';
+  });
+
+  const updateNivelSide = (val: 'COMPRA' | 'VENDA' | 'AMBOS') => {
+    setNivelSide(val);
+    localStorage.setItem('vortex_nivel_side', val);
     window.dispatchEvent(new CustomEvent('vortex_custom_sltp_updated'));
   };
 
@@ -404,7 +443,6 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
 
   // Effective SL points calculation based on active Gestão System (ATM, Gráfico, Copilot, Range HL, Nível, Pontos)
   const referencePrice = livePrice;
-  const resolvedSL = resolveLevelPrice('COMPRA', 'SL', referencePrice, gammaLevels, slPoints, tpPoints);
 
   const activeCandleRef = typeof window !== 'undefined' ? Number(localStorage.getItem('vortex_range_candle_ref') ?? rangeCandleRef) : rangeCandleRef;
   const activeTpMult = typeof window !== 'undefined' ? Number(localStorage.getItem('vortex_range_tp_multiplier') ?? rangeTpMultiplier) : rangeTpMultiplier;
@@ -412,6 +450,17 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   // Previsões de Range HL em tempo real
   const rangeBuyPreview = calculateRangeHlLevels('COMPRA', referencePrice, effectiveCandles, activeCandleRef, activeTpMult, tickSize);
   const rangeSellPreview = calculateRangeHlLevels('VENDA', referencePrice, effectiveCandles, activeCandleRef, activeTpMult, tickSize);
+
+  // Previsões de Nível Técnico / Gamma em tempo real
+  const nivelBuySl = roundToTick(resolveLevelPrice('COMPRA', 'SL', referencePrice, gammaLevels, slPoints, tpPoints), tickSize);
+  const nivelBuyTp = roundToTick(resolveLevelPrice('COMPRA', 'TP', referencePrice, gammaLevels, slPoints, tpPoints), tickSize);
+  const nivelBuySlPts = Math.abs(referencePrice - nivelBuySl);
+  const nivelBuyTpPts = Math.abs(nivelBuyTp - referencePrice);
+
+  const nivelSellSl = roundToTick(resolveLevelPrice('VENDA', 'SL', referencePrice, gammaLevels, slPoints, tpPoints), tickSize);
+  const nivelSellTp = roundToTick(resolveLevelPrice('VENDA', 'TP', referencePrice, gammaLevels, slPoints, tpPoints), tickSize);
+  const nivelSellSlPts = Math.abs(nivelSellSl - referencePrice);
+  const nivelSellTpPts = Math.abs(referencePrice - nivelSellTp);
 
   let calculatedSlPts = slPoints > 0 ? slPoints : 20;
 
@@ -437,11 +486,8 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
     const effectiveRangePts = rangeSide === 'VENDA' ? rangeSellPreview.slPts : rangeBuyPreview.slPts;
     calculatedSlPts = effectiveRangePts > 0 ? effectiveRangePts : (slPoints > 0 ? slPoints : 20);
   } else if (stopMode === 'nivel') {
-    if (referencePrice > 0 && resolvedSL > 0) {
-      calculatedSlPts = Math.abs(referencePrice - resolvedSL);
-    } else {
-      calculatedSlPts = slPoints > 0 ? slPoints : 20;
-    }
+    const effectiveNivelPts = nivelSide === 'VENDA' ? nivelSellSlPts : nivelBuySlPts;
+    calculatedSlPts = effectiveNivelPts > 0 ? effectiveNivelPts : (slPoints > 0 ? slPoints : 20);
   } else {
     // Modo Pontos (P)
     calculatedSlPts = slPoints > 0 ? slPoints : 20;
@@ -510,13 +556,29 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   const isReportForThisAsset = (r: any) => {
     if (!r) return false;
     const targetSymbol = activePanel?.name || selectedAsset || 'NQ';
-    const targetInstance = activePanel?.instance_id || 'painel_principal';
     const targetPanelId = activePanel?.id || null;
 
+    // 1. O símbolo tem prioridade absoluta: se o relatório possui ativo definido e não bate com targetSymbol, descarta imediatamente
+    if (r.symbol && !isSameAsset(r.symbol, targetSymbol)) return false;
+
+    // 2. Se a descrição possui tag [SÍMBOLO] e não bate, descarta
+    if (r.description) {
+      const match = r.description.match(/\[(.*?)\]/);
+      if (match && match[1] && !isSameAsset(match[1], targetSymbol)) return false;
+    }
+
+    // 3. Casamento exato por ID do painel
     if (targetPanelId && r.panel_id === targetPanelId) return true;
-    if (r.instance_id && r.instance_id === targetInstance) return true;
+
+    // 4. Casamento por tag de descrição
     if (r.description && r.description.includes(`[${targetSymbol}]`)) return true;
-    if (!activePanel && (!r.panel_id || r.instance_id === 'painel_principal')) return true;
+
+    // 5. Casamento pelo símbolo normalizado
+    if (r.symbol && isSameAsset(r.symbol, targetSymbol)) return true;
+
+    // 6. Fallback exclusivamente se o relatório não tiver símbolo registrado
+    if (!r.symbol && !activePanel && (!r.panel_id || r.instance_id === 'painel_principal')) return true;
+
     return false;
   };
 
@@ -604,11 +666,46 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   const isShort = posQty < 0;
 
   // Lock manual entry on the current asset if this asset already has an open position (or if account blocks multi-signals across assets)
-  const hasOpenPosition = (activeNinjaPosition && isNinjaAccount)
-    ? (activeNinjaPosition.marketPosition === 'BUY' || activeNinjaPosition.marketPosition === 'SELL')
-    : (activeReportsList.length > 0 ||
-       (activeAccount?.allow_multi_signals === false && allAccountActiveReports.length > 0) ||
-       (activePosition?.quantity !== undefined && activePosition?.quantity !== 0));
+  const currentAsset = activePanel?.name || selectedAsset || 'NQ';
+  const allowMulti = activeAccount?.allow_multi_signals !== false;
+
+  const hasAssetNinjaPosition = Boolean(
+    isNinjaAccount && activeNinjaPosition &&
+    (activeNinjaPosition.marketPosition === 'BUY' || activeNinjaPosition.marketPosition === 'SELL') &&
+    Number(activeNinjaPosition.quantity) > 0
+  );
+
+  const hasAssetSimPosition = Boolean(
+    activePosition?.quantity !== undefined &&
+    activePosition.quantity !== 0 &&
+    (!activePosition.symbol || isSameAsset(activePosition.symbol, currentAsset))
+  );
+
+  const hasAssetReportPosition = activeReportsList.length > 0;
+
+  const hasThisAssetPosition = Boolean(hasAssetNinjaPosition || hasAssetReportPosition || hasAssetSimPosition);
+
+  const hasAnyNinjaPosition = Boolean(
+    isNinjaAccount && ninjaPositions.some((p: any) =>
+      (p.marketPosition === 'BUY' || p.marketPosition === 'SELL') && Number(p.quantity) > 0
+    )
+  );
+  const hasAnyReportPosition = allAccountActiveReports.length > 0;
+  const hasAnySimPosition = Boolean(activePosition?.quantity !== undefined && activePosition.quantity !== 0);
+  const hasAnyAccountPosition = Boolean(hasAnyNinjaPosition || hasAnyReportPosition || hasAnySimPosition);
+
+  // Se allow_multi_signals === false, qualquer operação aberta na conta bloqueia novas ordens em todos os ativos.
+  // Se allow_multi_signals !== false (padrão), o bloqueio ocorre APENAS para o ativo com operação aberta!
+  // Ao trocar para outro ativo sem operação, os botões COMPRA e VENDA ficam imediatamente habilitados.
+  const hasOpenPosition = !allowMulti ? hasAnyAccountPosition : hasThisAssetPosition;
+
+  // 🛡️ Guard de liveness da Boleta: se não houver operações abertas, isSubmitting NUNCA pode ficar travado em true
+  useEffect(() => {
+    if (!hasOpenPosition && isSubmitting) {
+      const timer = setTimeout(() => setIsSubmitting(false), 200);
+      return () => clearTimeout(timer);
+    }
+  }, [hasOpenPosition, isSubmitting]);
 
   const accountTotalMetrics = inProgressAccountReports.reduce(
     (acc: { pnl: number; pts: number }, r: any) => {
@@ -651,154 +748,151 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
     if (isSubmitting) return;
     setIsSubmitting(true);
 
-    if (hasOpenPosition && !isReverse) {
-      alert(`⚠️ Já existe uma operação em andamento para este ativo na conta selecionada.\n\nPara abrir uma nova posição, zere ou encerre a operação atual antes.`);
+    // Watchdog de segurança: garante liberação do botão após no máximo 2.5s mesmo em falhas assíncronas
+    const submitWatchdog = setTimeout(() => {
       setIsSubmitting(false);
-      return;
-    }
-
-    if (activeAccount && isNinjaAccount) {
-      alert(`🔒 Operação Bloqueada no Painel:\n\nA conta "${activeAccount.account_name}" é uma conta sincronizada do NinjaTrader 8.\n\nPara operar na plataforma Web e replicar ordens aos seus NinjaTraders, utilize uma Conta Demo.\n\nContas NT8 operam exclusivamente via Copy Trading ou diretamente no NinjaTrader 8.`);
-      setIsSubmitting(false);
-      return;
-    }
-
-    if (activeAccount && !isReverse) {
-      if (activeAccount.manual_trading_enabled === false) {
-        alert(`⚠️ Operações manuais desativadas para a conta '${activeAccount.account_name}'.`);
-        setIsSubmitting(false);
-        return;
-      }
-
-      // 🛡️ Validação Completa de Risco da Conta (Stop Diário, Meta de Lucro, Max Drawdown, Max Trades, Posição no Mesmo Ativo e Múltiplos Sinais)
-      if (checkOperationalLimits) {
-        const opCheck = await checkOperationalLimits(activePanel?.id, undefined, activeAccount, true, isATMActive);
-        if (!opCheck.allowed) {
-          alert(`⚠️ Operação manual bloqueada pela Gestão de Risco:\n\n${opCheck.reason}`);
-          setIsSubmitting(false);
-          return;
-        }
-      }
-
-      const maxLots = activeAccount.manual_max_lots !== undefined ? activeAccount.manual_max_lots : 10;
-      if (effectiveContracts > maxLots) {
-        alert(`⚠️ Lote solicitado (${effectiveContracts}x) excede o lote máximo permitido para operações manuais nesta conta (${maxLots}x).`);
-        setIsSubmitting(false);
-        return;
-      }
-    }
-
-    const tickSize = resolvePanelTickSize(activePanel, settings);
-    const effectiveEntry = roundToTick(livePrice, tickSize);
-    const initialStatus = 'Em Andamento';
-
-    // Confirmation dialog if enabled
-    if (settings?.chart_confirm_manual_trade !== false) {
-      let slPrice = 0;
-      let tpPrice = 0;
-      let slPtsUsed = 0;
-      let tpPtsUsed = 0;
-
-      if (isATMActive) {
-        const isTicks = activeATM.unit === 'ticks';
-        const firstBracket = activeATM.brackets?.[0] || { stopLossPts: slPoints, takeProfitPts: tpPoints };
-        slPtsUsed = isTicks ? (firstBracket.stopLossPts * tickSize) : firstBracket.stopLossPts;
-        tpPtsUsed = isTicks ? (firstBracket.takeProfitPts * tickSize) : firstBracket.takeProfitPts;
-        slPrice = roundToTick(side === 'COMPRA' ? effectiveEntry - slPtsUsed : effectiveEntry + slPtsUsed, tickSize);
-        tpPrice = roundToTick(side === 'COMPRA' ? effectiveEntry + tpPtsUsed : effectiveEntry - tpPtsUsed, tickSize);
-      } else if (stopMode === 'copilot' && (copilotSlPrice !== null || copilotTpPrice !== null)) {
-        if (copilotSlPrice !== null && copilotSlPrice > 0) {
-          slPrice = roundToTick(copilotSlPrice, tickSize);
-        } else {
-          const fallbackSlPts = slPoints > 0 ? slPoints : 20;
-          slPrice = roundToTick(side === 'COMPRA' ? effectiveEntry - fallbackSlPts : effectiveEntry + fallbackSlPts, tickSize);
-        }
-        if (copilotTpPrice !== null && copilotTpPrice > 0) {
-          tpPrice = roundToTick(copilotTpPrice, tickSize);
-        } else {
-          const fallbackTpPts = tpPoints > 0 ? tpPoints : 40;
-          tpPrice = roundToTick(side === 'COMPRA' ? effectiveEntry + fallbackTpPts : effectiveEntry - fallbackTpPts, tickSize);
-        }
-        slPtsUsed = Math.abs(effectiveEntry - slPrice);
-        tpPtsUsed = Math.abs(tpPrice - effectiveEntry);
-      } else if (stopMode === 'grafico') {
-        if (customSlPrice !== null && customSlPrice > 0) {
-          slPrice = roundToTick(customSlPrice, tickSize);
-        } else {
-          const fallbackSlPts = slPoints > 0 ? slPoints : 20;
-          slPrice = roundToTick(side === 'COMPRA' ? effectiveEntry - fallbackSlPts : effectiveEntry + fallbackSlPts, tickSize);
-        }
-        if (customTpPrice !== null && customTpPrice > 0) {
-          tpPrice = roundToTick(customTpPrice, tickSize);
-        } else {
-          const fallbackTpPts = tpPoints > 0 ? tpPoints : 40;
-          tpPrice = roundToTick(side === 'COMPRA' ? effectiveEntry + fallbackTpPts : effectiveEntry - fallbackTpPts, tickSize);
-        }
-        slPtsUsed = Math.abs(effectiveEntry - slPrice);
-        tpPtsUsed = Math.abs(tpPrice - effectiveEntry);
-      } else if (stopMode === 'range') {
-        const activeCandleRef = typeof window !== 'undefined' ? Number(localStorage.getItem('vortex_range_candle_ref') ?? rangeCandleRef) : rangeCandleRef;
-        const activeTpMult = typeof window !== 'undefined' ? Number(localStorage.getItem('vortex_range_tp_multiplier') ?? rangeTpMultiplier) : rangeTpMultiplier;
-        const rangeRes = calculateRangeHlLevels(side, effectiveEntry, effectiveCandles, activeCandleRef, activeTpMult, tickSize);
-        slPrice = rangeRes.slPrice;
-        tpPrice = rangeRes.tpPrice;
-        slPtsUsed = rangeRes.slPts;
-        tpPtsUsed = rangeRes.tpPts;
-      } else if (stopMode === 'pontos') {
-        slPtsUsed = slPoints;
-        tpPtsUsed = tpPoints;
-        slPrice = roundToTick(side === 'COMPRA' ? effectiveEntry - slPoints : effectiveEntry + slPoints, tickSize);
-        tpPrice = roundToTick(side === 'COMPRA' ? effectiveEntry + tpPoints : effectiveEntry - tpPoints, tickSize);
-      } else {
-        slPrice = roundToTick(resolveLevelPrice(side, 'SL', effectiveEntry, gammaLevels, slPoints, tpPoints), tickSize);
-        tpPrice = roundToTick(resolveLevelPrice(side, 'TP', effectiveEntry, gammaLevels, slPoints, tpPoints), tickSize);
-        slPtsUsed = Math.abs(effectiveEntry - slPrice);
-        tpPtsUsed = Math.abs(tpPrice - effectiveEntry);
-      }
-
-      const riskEstimatedUsd = slPtsUsed * effectiveContracts * pointValue;
-      const profitEstimatedUsd = tpPtsUsed * effectiveContracts * pointValue;
-
-      const confirmMsg = `Confirmar Ordem A Mercado:\n` +
-        `----------------------------------------\n` +
-        `Direção: ${side}\n` +
-        `Ativo: ${selectedAsset}\n` +
-        `Preço Entrada: ${effectiveEntry.toFixed(2)}\n` +
-        `Contratos: ${effectiveContracts}x\n` +
-        `Gestão: ${isATMActive ? `ATM (${activeATM.name}${activeATM.unit === 'ticks' ? ' - Ticks' : ' - Pts'})` : `Manual (${stopMode === 'pontos' ? `${slPoints}pt SL / ${tpPoints}pt TP` : stopMode === 'grafico' ? `Gráfico Marcado` : stopMode === 'copilot' ? `Copilot IA` : stopMode === 'range' ? `Range HL (Ref: ${rangeCandleRef === 0 ? 'Só Atual' : `Atual+${rangeCandleRef}`} / TP: ${rangeTpMultiplier}x)` : `Níveis Estruturais`})`}\n` +
-        `----------------------------------------\n` +
-        `🛑 Stop Loss: ${slPrice.toFixed(2)} (${slPtsUsed.toFixed(2)} pts) ➔ Risco: -$${riskEstimatedUsd.toFixed(2)}\n` +
-        `🎯 Take Profit: ${tpPrice.toFixed(2)} (${tpPtsUsed.toFixed(2)} pts) ➔ Alvo: +$${profitEstimatedUsd.toFixed(2)}`;
-      if (!window.confirm(confirmMsg)) {
-        setIsSubmitting(false);
-        return;
-      }
-    }
-
-    // AI Validation if enabled
-    if (settings?.chart_manual_ia_validate) {
-      try {
-        const aiRes = await runManualAIAnalysis();
-        if (!aiRes || !aiRes.success || aiRes.sinal !== side) {
-          const reason = aiRes?.resumo || 'A IA não identificou confluência técnica para o sinal solicitado.';
-          const detectedSignal = aiRes?.sinal || 'AGUARDANDO';
-          alert(`❌ Operação Cancelada (IA Não Validou):\n` +
-            `----------------------------------------\n` +
-            `Direção Solicitada: ${side}\n` +
-            `Sinal Detectado pela IA: ${detectedSignal}\n` +
-            `Motivo: ${reason}`);
-          setIsSubmitting(false);
-          return;
-        }
-      } catch (error: any) {
-        console.error('[IA VALIDATE] Erro ao validar:', error);
-        alert(`❌ Erro ao validar operação com a IA: ${error.message || error}`);
-        setIsSubmitting(false);
-        return;
-      }
-    }
+    }, 2500);
 
     try {
+      if (hasOpenPosition && !isReverse) {
+        alert(`⚠️ Já existe uma operação em andamento para este ativo na conta selecionada.\n\nPara abrir uma nova posição, zere ou encerre a operação atual antes.`);
+        return;
+      }
+
+      if (activeAccount && isNinjaAccount) {
+        alert(`🔒 Operação Bloqueada no Painel:\n\nA conta "${activeAccount.account_name}" é uma conta sincronizada do NinjaTrader 8.\n\nPara operar na plataforma Web e replicar ordens aos seus NinjaTraders, utilize uma Conta Demo.\n\nContas NT8 operam exclusivamente via Copy Trading ou diretamente no NinjaTrader 8.`);
+        return;
+      }
+
+      if (activeAccount && !isReverse) {
+        if (activeAccount.manual_trading_enabled === false) {
+          alert(`⚠️ Operações manuais desativadas para a conta '${activeAccount.account_name}'.`);
+          return;
+        }
+
+        // 🛡️ Validação Completa de Risco da Conta (Stop Diário, Meta de Lucro, Max Drawdown, Max Trades, Posição no Mesmo Ativo e Múltiplos Sinais)
+        if (checkOperationalLimits) {
+          const opCheck = await checkOperationalLimits(activePanel?.id, undefined, activeAccount, true, isATMActive);
+          if (!opCheck.allowed) {
+            alert(`⚠️ Operação manual bloqueada pela Gestão de Risco:\n\n${opCheck.reason}`);
+            return;
+          }
+        }
+
+        const maxLots = activeAccount.manual_max_lots !== undefined ? activeAccount.manual_max_lots : 10;
+        if (effectiveContracts > maxLots) {
+          alert(`⚠️ Lote solicitado (${effectiveContracts}x) excede o lote máximo permitido para operações manuais nesta conta (${maxLots}x).`);
+          return;
+        }
+      }
+
+      const tickSize = resolvePanelTickSize(activePanel, settings);
+      const effectiveEntry = roundToTick(livePrice, tickSize);
+      const initialStatus = 'Em Andamento';
+
+      // Confirmation dialog if enabled
+      if (settings?.chart_confirm_manual_trade !== false) {
+        let slPrice = 0;
+        let tpPrice = 0;
+        let slPtsUsed = 0;
+        let tpPtsUsed = 0;
+
+        if (isATMActive) {
+          const isTicks = activeATM.unit === 'ticks';
+          const firstBracket = activeATM.brackets?.[0] || { stopLossPts: slPoints, takeProfitPts: tpPoints };
+          slPtsUsed = isTicks ? (firstBracket.stopLossPts * tickSize) : firstBracket.stopLossPts;
+          tpPtsUsed = isTicks ? (firstBracket.takeProfitPts * tickSize) : firstBracket.takeProfitPts;
+          slPrice = roundToTick(side === 'COMPRA' ? effectiveEntry - slPtsUsed : effectiveEntry + slPtsUsed, tickSize);
+          tpPrice = roundToTick(side === 'COMPRA' ? effectiveEntry + tpPtsUsed : effectiveEntry - tpPtsUsed, tickSize);
+        } else if (stopMode === 'copilot' && (copilotSlPrice !== null || copilotTpPrice !== null)) {
+          if (copilotSlPrice !== null && copilotSlPrice > 0) {
+            slPrice = roundToTick(copilotSlPrice, tickSize);
+          } else {
+            const fallbackSlPts = slPoints > 0 ? slPoints : 20;
+            slPrice = roundToTick(side === 'COMPRA' ? effectiveEntry - fallbackSlPts : effectiveEntry + fallbackSlPts, tickSize);
+          }
+          if (copilotTpPrice !== null && copilotTpPrice > 0) {
+            tpPrice = roundToTick(copilotTpPrice, tickSize);
+          } else {
+            const fallbackTpPts = tpPoints > 0 ? tpPoints : 40;
+            tpPrice = roundToTick(side === 'COMPRA' ? effectiveEntry + fallbackTpPts : effectiveEntry - fallbackTpPts, tickSize);
+          }
+          slPtsUsed = Math.abs(effectiveEntry - slPrice);
+          tpPtsUsed = Math.abs(tpPrice - effectiveEntry);
+        } else if (stopMode === 'grafico') {
+          if (customSlPrice !== null && customSlPrice > 0) {
+            slPrice = roundToTick(customSlPrice, tickSize);
+          } else {
+            const fallbackSlPts = slPoints > 0 ? slPoints : 20;
+            slPrice = roundToTick(side === 'COMPRA' ? effectiveEntry - fallbackSlPts : effectiveEntry + fallbackSlPts, tickSize);
+          }
+          if (customTpPrice !== null && customTpPrice > 0) {
+            tpPrice = roundToTick(customTpPrice, tickSize);
+          } else {
+            const fallbackTpPts = tpPoints > 0 ? tpPoints : 40;
+            tpPrice = roundToTick(side === 'COMPRA' ? effectiveEntry + fallbackTpPts : effectiveEntry - fallbackTpPts, tickSize);
+          }
+          slPtsUsed = Math.abs(effectiveEntry - slPrice);
+          tpPtsUsed = Math.abs(tpPrice - effectiveEntry);
+        } else if (stopMode === 'range') {
+          const activeCandleRef = typeof window !== 'undefined' ? Number(localStorage.getItem('vortex_range_candle_ref') ?? rangeCandleRef) : rangeCandleRef;
+          const activeTpMult = typeof window !== 'undefined' ? Number(localStorage.getItem('vortex_range_tp_multiplier') ?? rangeTpMultiplier) : rangeTpMultiplier;
+          const rangeRes = calculateRangeHlLevels(side, effectiveEntry, effectiveCandles, activeCandleRef, activeTpMult, tickSize);
+          slPrice = rangeRes.slPrice;
+          tpPrice = rangeRes.tpPrice;
+          slPtsUsed = rangeRes.slPts;
+          tpPtsUsed = rangeRes.tpPts;
+        } else if (stopMode === 'pontos') {
+          slPtsUsed = slPoints;
+          tpPtsUsed = tpPoints;
+          slPrice = roundToTick(side === 'COMPRA' ? effectiveEntry - slPoints : effectiveEntry + slPoints, tickSize);
+          tpPrice = roundToTick(side === 'COMPRA' ? effectiveEntry + tpPoints : effectiveEntry - tpPoints, tickSize);
+        } else {
+          slPrice = roundToTick(resolveLevelPrice(side, 'SL', effectiveEntry, gammaLevels, slPoints, tpPoints), tickSize);
+          tpPrice = roundToTick(resolveLevelPrice(side, 'TP', effectiveEntry, gammaLevels, slPoints, tpPoints), tickSize);
+          slPtsUsed = Math.abs(effectiveEntry - slPrice);
+          tpPtsUsed = Math.abs(tpPrice - effectiveEntry);
+        }
+
+        const riskEstimatedUsd = slPtsUsed * effectiveContracts * pointValue;
+        const profitEstimatedUsd = tpPtsUsed * effectiveContracts * pointValue;
+
+        const confirmMsg = `Confirmar Ordem A Mercado:\n` +
+          `----------------------------------------\n` +
+          `Direção: ${side}\n` +
+          `Ativo: ${selectedAsset}\n` +
+          `Preço Entrada: ${effectiveEntry.toFixed(2)}\n` +
+          `Contratos: ${effectiveContracts}x\n` +
+          `Gestão: ${isATMActive ? `ATM (${activeATM.name}${activeATM.unit === 'ticks' ? ' - Ticks' : ' - Pts'})` : `Manual (${stopMode === 'pontos' ? `${slPoints}pt SL / ${tpPoints}pt TP` : stopMode === 'grafico' ? `Gráfico Marcado` : stopMode === 'copilot' ? `Copilot IA` : stopMode === 'range' ? `Range HL (Ref: ${rangeCandleRef === 0 ? 'Só Atual' : `Atual+${rangeCandleRef}`} / TP: ${rangeTpMultiplier}x)` : `Níveis Estruturais`})`}\n` +
+          `----------------------------------------\n` +
+          `🛑 Stop Loss: ${slPrice.toFixed(2)} (${slPtsUsed.toFixed(2)} pts) ➔ Risco: -$${riskEstimatedUsd.toFixed(2)}\n` +
+          `🎯 Take Profit: ${tpPrice.toFixed(2)} (${tpPtsUsed.toFixed(2)} pts) ➔ Alvo: +$${profitEstimatedUsd.toFixed(2)}`;
+        if (!window.confirm(confirmMsg)) {
+          return;
+        }
+      }
+
+      // AI Validation if enabled
+      if (settings?.chart_manual_ia_validate) {
+        try {
+          const aiRes = await runManualAIAnalysis();
+          if (!aiRes || !aiRes.success || aiRes.sinal !== side) {
+            const reason = aiRes?.resumo || 'A IA não identificou confluência técnica para o sinal solicitado.';
+            const detectedSignal = aiRes?.sinal || 'AGUARDANDO';
+            alert(`❌ Operação Cancelada (IA Não Validou):\n` +
+              `----------------------------------------\n` +
+              `Direção Solicitada: ${side}\n` +
+              `Sinal Detectado pela IA: ${detectedSignal}\n` +
+              `Motivo: ${reason}`);
+            return;
+          }
+        } catch (error: any) {
+          console.error('[IA VALIDATE] Erro ao validar:', error);
+          alert(`❌ Erro ao validar operação com a IA: ${error.message || error}`);
+          return;
+        }
+      }
+
       const manualStratId = getAccountManualStrategyId(activeAccount);
 
       if (isATMActive) {
@@ -946,12 +1040,14 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
     } catch (err) {
       console.error('[BOLETA] Erro ao executar ordem:', err);
     } finally {
+      clearTimeout(submitWatchdog);
       setIsSubmitting(false);
     }
   };
 
   // Close position and move pending reports to Histórico de Trades
   const handleFlatOrder = async () => {
+    setIsSubmitting(false);
     try {
       const openReports = (reports || []).filter((r: any) =>
         (r.status === 'Em Andamento' || r.status === 'Pendente') &&
@@ -988,6 +1084,9 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
           openIds.has(r.id) ? { ...r, status: 'Cancelado', exit_price: currentPrice, closed_at: closedAt } : r
         ));
       }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('vortex_reports_updated'));
+      }
 
       // 2. Executa encerramento individual via updateReportAction (propaga para todas as Slaves NT8 idêntico ao TradeDock)
       for (const r of openReports) {
@@ -999,11 +1098,14 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
       }
     } catch (err) {
       console.error('[BOLETA] Erro ao zerar e mover relatórios:', err);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   // Encerrar todas as operações de um ativo específico a partir do card ORDENS ATIVAS
   const handleCloseAssetOrders = async (assetLabel: string, targetReports: any[]) => {
+    setIsSubmitting(false);
     try {
       if (!targetReports || targetReports.length === 0) return;
       if (settings?.chart_confirm_manual_trade !== false) {
@@ -1023,6 +1125,9 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
             : r
         ));
       }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('vortex_reports_updated'));
+      }
 
       for (const r of targetReports) {
         const exitPrice = exitPriceById.get(r.id) || resolveReportLivePrice(r);
@@ -1034,6 +1139,8 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
       }
     } catch (err) {
       console.error(`[BOLETA] Erro ao encerrar ordens de ${assetLabel}:`, err);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -1951,68 +2058,154 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
             </div>
           ) : (
             /* SL e TP Inputs (Modo Pontos ou Modo Nível) */
-            <div className="grid grid-cols-2 gap-1.5">
-              {/* STOP LOSS */}
-              <div className={`${bInnerInputBg} p-1 rounded border border-rose-500/40 flex items-center justify-between`}>
-                <div>
-                  <span className="text-[10px] font-extrabold text-rose-500 block uppercase">
-                    SL ({stopMode === 'pontos' ? 'PTS' : 'NÍVEL'})
-                  </span>
+            <div className="space-y-1.5">
+              <div className="grid grid-cols-2 gap-1.5">
+                {/* STOP LOSS */}
+                <div className={`${bInnerInputBg} p-1 rounded border border-rose-500/40 flex items-center justify-between`}>
+                  <div>
+                    <span className="text-[10px] font-extrabold text-rose-500 block uppercase">
+                      SL ({stopMode === 'pontos' ? 'PTS' : 'NÍVEL'})
+                    </span>
+                  </div>
+                  <div className="flex items-center bg-rose-950/30 border border-rose-700/50 rounded overflow-hidden h-5">
+                    <button
+                      type="button"
+                      onClick={() => updateSlPointsSetting(Math.max(1, slPoints - 5))}
+                      className="px-1.5 h-full bg-rose-600 hover:bg-rose-700 text-white font-bold active:scale-95 text-[10px] cursor-pointer"
+                    >
+                      −
+                    </button>
+                    <input
+                      type="number"
+                      value={slPoints}
+                      onChange={(e) => updateSlPointsSetting(Math.max(1, parseFloat(e.target.value) || 1))}
+                      className="w-8 bg-transparent text-center font-mono font-bold text-rose-600 dark:text-rose-300 text-[10px] outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => updateSlPointsSetting(slPoints + 5)}
+                      className="px-1.5 h-full bg-rose-600 hover:bg-rose-700 text-white font-bold active:scale-95 text-[10px] cursor-pointer"
+                    >
+                      +
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center bg-rose-950/30 border border-rose-700/50 rounded overflow-hidden h-5">
-                  <button
-                    type="button"
-                    onClick={() => updateSlPointsSetting(Math.max(1, slPoints - 5))}
-                    className="px-1.5 h-full bg-rose-600 hover:bg-rose-700 text-white font-bold active:scale-95 text-[10px] cursor-pointer"
-                  >
-                    −
-                  </button>
-                  <input
-                    type="number"
-                    value={slPoints}
-                    onChange={(e) => updateSlPointsSetting(Math.max(1, parseFloat(e.target.value) || 1))}
-                    className="w-8 bg-transparent text-center font-mono font-bold text-rose-600 dark:text-rose-300 text-[10px] outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => updateSlPointsSetting(slPoints + 5)}
-                    className="px-1.5 h-full bg-rose-600 hover:bg-rose-700 text-white font-bold active:scale-95 text-[10px] cursor-pointer"
-                  >
-                    +
-                  </button>
+
+                {/* TAKE PROFIT */}
+                <div className={`${bInnerInputBg} p-1 rounded border border-emerald-500/40 flex items-center justify-between`}>
+                  <div>
+                    <span className="text-[10px] font-extrabold text-emerald-500 block uppercase">
+                      TP ({stopMode === 'pontos' ? 'PTS' : 'NÍVEL'})
+                    </span>
+                  </div>
+                  <div className="flex items-center bg-emerald-950/30 border border-emerald-700/50 rounded overflow-hidden h-5">
+                    <button
+                      type="button"
+                      onClick={() => updateTpPointsSetting(Math.max(1, tpPoints - 5))}
+                      className="px-1.5 h-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold active:scale-95 text-[10px] cursor-pointer"
+                    >
+                      −
+                    </button>
+                    <input
+                      type="number"
+                      value={tpPoints}
+                      onChange={(e) => updateTpPointsSetting(Math.max(1, parseFloat(e.target.value) || 1))}
+                      className="w-8 bg-transparent text-center font-mono font-bold text-emerald-600 dark:text-emerald-300 text-[10px] outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => updateTpPointsSetting(tpPoints + 5)}
+                      className="px-1.5 h-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold active:scale-95 text-[10px] cursor-pointer"
+                    >
+                      +
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              {/* TAKE PROFIT */}
-              <div className={`${bInnerInputBg} p-1 rounded border border-emerald-500/40 flex items-center justify-between`}>
-                <div>
-                  <span className="text-[10px] font-extrabold text-emerald-500 block uppercase">
-                    TP ({stopMode === 'pontos' ? 'PTS' : 'NÍVEL'})
-                  </span>
+              {stopMode === 'nivel' && (
+                <div className="space-y-1 pt-0.5 border-t border-slate-800">
+                  {/* Seletor de Prévia no Gráfico */}
+                  <div className="flex items-center justify-between gap-1 bg-slate-900/70 px-1.5 py-1 rounded border border-slate-800">
+                    <span className="text-[8.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                      <span>📊</span> Simular Nível:
+                    </span>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => updateNivelSide('COMPRA')}
+                        className={`px-1.5 py-0.5 rounded text-[8.5px] font-black transition cursor-pointer ${
+                          nivelSide === 'COMPRA' ? 'bg-emerald-600 text-white shadow ring-1 ring-emerald-400' : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                        title="Exibir projeção de Stop e Take de Nível para Compra no gráfico"
+                      >
+                        COMPRA
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateNivelSide('VENDA')}
+                        className={`px-1.5 py-0.5 rounded text-[8.5px] font-black transition cursor-pointer ${
+                          nivelSide === 'VENDA' ? 'bg-rose-600 text-white shadow ring-1 ring-rose-400' : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                        title="Exibir projeção de Stop e Take de Nível para Venda no gráfico"
+                      >
+                        VENDA
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateNivelSide('AMBOS')}
+                        className={`px-1.5 py-0.5 rounded text-[8.5px] font-black transition cursor-pointer ${
+                          nivelSide === 'AMBOS' ? 'bg-blue-600 text-white shadow ring-1 ring-blue-400' : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                        title="Exibir ambas as projeções de Nível no gráfico simultaneamente"
+                      >
+                        AMBOS
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Badges de Prévia em Tempo Real */}
+                  <div className="grid grid-cols-2 gap-1 text-[8.5px] font-mono pt-0.5">
+                    <div 
+                      onClick={() => updateNivelSide('COMPRA')}
+                      className={`p-1 rounded border transition cursor-pointer ${
+                        nivelSide === 'COMPRA' || nivelSide === 'AMBOS'
+                          ? 'bg-emerald-950/70 border-emerald-500 ring-1 ring-emerald-500/50' 
+                          : 'bg-emerald-950/30 border-emerald-900/60 hover:bg-emerald-950/50'
+                      }`}
+                      title="Clique para destacar simulação de Compra no gráfico"
+                    >
+                      <div className="text-emerald-400 font-bold flex items-center justify-between">
+                        <span>SL COMPRA:</span>
+                        <span>-{nivelBuySlPts.toFixed(1)}pt</span>
+                      </div>
+                      <div className="flex items-center justify-between mt-0.5">
+                        <span className="text-slate-100 font-black">{nivelBuySl.toFixed(2)}</span>
+                        <span className="text-emerald-400 text-[8px] font-bold">TP: +{nivelBuyTpPts.toFixed(1)}pt</span>
+                      </div>
+                    </div>
+
+                    <div 
+                      onClick={() => updateNivelSide('VENDA')}
+                      className={`p-1 rounded border transition cursor-pointer ${
+                        nivelSide === 'VENDA' || nivelSide === 'AMBOS'
+                          ? 'bg-rose-950/70 border-rose-500 ring-1 ring-rose-500/50' 
+                          : 'bg-rose-950/30 border-rose-900/60 hover:bg-rose-950/50'
+                      }`}
+                      title="Clique para destacar simulação de Venda no gráfico"
+                    >
+                      <div className="text-rose-400 font-bold flex items-center justify-between">
+                        <span>SL VENDA:</span>
+                        <span>+{nivelSellSlPts.toFixed(1)}pt</span>
+                      </div>
+                      <div className="flex items-center justify-between mt-0.5">
+                        <span className="text-slate-100 font-black">{nivelSellSl.toFixed(2)}</span>
+                        <span className="text-rose-400 text-[8px] font-bold">TP: -{nivelSellTpPts.toFixed(1)}pt</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center bg-emerald-950/30 border border-emerald-700/50 rounded overflow-hidden h-5">
-                  <button
-                    type="button"
-                    onClick={() => updateTpPointsSetting(Math.max(1, tpPoints - 5))}
-                    className="px-1.5 h-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold active:scale-95 text-[10px] cursor-pointer"
-                  >
-                    −
-                  </button>
-                  <input
-                    type="number"
-                    value={tpPoints}
-                    onChange={(e) => updateTpPointsSetting(Math.max(1, parseFloat(e.target.value) || 1))}
-                    className="w-8 bg-transparent text-center font-mono font-bold text-emerald-600 dark:text-emerald-300 text-[10px] outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => updateTpPointsSetting(tpPoints + 5)}
-                    className="px-1.5 h-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold active:scale-95 text-[10px] cursor-pointer"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
+              )}
             </div>
           )}
         </div>
@@ -2076,16 +2269,20 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 ? "Conta NinjaTrader sincronizada: Selecione uma Conta Demo para operar na boleta"
                 : hasOpenPosition
                 ? "Operação em andamento: Zere a posição atual para abrir nova ordem"
+                : isSubmitting
+                ? "Enviando ordem a mercado..."
                 : "Executar ordem de Compra a Mercado"
             }
             className={`font-black py-2.5 px-2 rounded-lg shadow transition flex items-center justify-center gap-1.5 border text-xs tracking-wider uppercase ${
               isNinjaAccount || hasOpenPosition
                 ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed opacity-50'
-                : 'bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white cursor-pointer border-emerald-500/40 disabled:opacity-50'
+                : isSubmitting
+                ? 'bg-emerald-700 text-emerald-200 border-emerald-600 cursor-wait opacity-75 animate-pulse'
+                : 'bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white cursor-pointer border-emerald-500/40'
             }`}
           >
-            <span className="text-sm">{isNinjaAccount || hasOpenPosition ? '🔒' : '⬆️'}</span>
-            <span>COMPRA</span>
+            <span className="text-sm">{isNinjaAccount || hasOpenPosition ? '🔒' : isSubmitting ? '⏳' : '⬆️'}</span>
+            <span>{isSubmitting ? 'ENVIANDO...' : 'COMPRA'}</span>
           </button>
 
           {/* VENDA */}
@@ -2098,16 +2295,20 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 ? "Conta NinjaTrader sincronizada: Selecione uma Conta Demo para operar na boleta"
                 : hasOpenPosition
                 ? "Operação em andamento: Zere a posição atual para abrir nova ordem"
+                : isSubmitting
+                ? "Enviando ordem a mercado..."
                 : "Executar ordem de Venda a Mercado"
             }
             className={`font-black py-2.5 px-2 rounded-lg shadow transition flex items-center justify-center gap-1.5 border text-xs tracking-wider uppercase ${
               isNinjaAccount || hasOpenPosition
                 ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed opacity-50'
-                : 'bg-rose-600 hover:bg-rose-500 active:scale-95 text-white cursor-pointer border-rose-500/40 disabled:opacity-50'
+                : isSubmitting
+                ? 'bg-rose-700 text-rose-200 border-rose-600 cursor-wait opacity-75 animate-pulse'
+                : 'bg-rose-600 hover:bg-rose-500 active:scale-95 text-white cursor-pointer border-rose-500/40'
             }`}
           >
-            <span className="text-sm">{isNinjaAccount || hasOpenPosition ? '🔒' : '⬇️'}</span>
-            <span>VENDA</span>
+            <span className="text-sm">{isNinjaAccount || hasOpenPosition ? '🔒' : isSubmitting ? '⏳' : '⬇️'}</span>
+            <span>{isSubmitting ? 'ENVIANDO...' : 'VENDA'}</span>
           </button>
         </div>
 

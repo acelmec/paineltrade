@@ -4,7 +4,7 @@ import { PRESET_ATM_STRATEGIES, type ATMStrategy } from '../utils/atmRegistry';
 import type { DrawingItem } from '../types/chartDrawings';
 import type { IndicatorConfig } from '../utils/indicatorRegistry';
 import type { WidgetConfig } from '../utils/widgetRegistry';
-import { checkNinjaStatus, syncNinjaCopyRules, syncNinjaAccountsRisk, type NinjaCopyRule } from './ninjaGateway';
+import { checkNinjaStatus, syncNinjaCopyRules, syncNinjaAccountsRisk, executeNinjaRpc, type NinjaCopyRule } from './ninjaGateway';
 import { hasLocalStreamForPanel, fetchStreamerCandles } from './vortexStreamer';
 
 export const getStableManualStrategyId = (panelId?: string | null, existingId?: string | null): string => {
@@ -1801,36 +1801,47 @@ export function isNinjaMasterAccount(acc: any): boolean {
   }
 }
 
-// Helper não-bloqueante para espelhar eventos no ConectorLocal (Porta 8001 e Porta 80 para MT4)
-export function mirrorToLocalServer(path: string, payload: any) {
+// Helper unificado para espelhar eventos no ConectorLocal (HTTP :8001) e Túnel WebSocket Nuvem
+export async function mirrorToLocalServer(path: string, payload: any): Promise<{ success: boolean; data?: any; error?: any; transport?: string }> {
   try {
+    const normPath = path.startsWith('/') ? path : `/${path}`;
+    const rpcAction = normPath.replace(/^\/+/, '');
     const rawBody = JSON.stringify(payload);
-    const headers = { 'Content-Type': 'application/json' };
-    console.log(`[MIRROR LOCAL] Enviando ${path} para :8001:`, payload);
-    
-    // Disparo prioritário para porta 8001 (MT5, NinjaTrader, VMBot)
-    const gwUrl = typeof localStorage !== 'undefined' ? (localStorage.getItem('vortex_ninja_gateway_url') || 'http://localhost:8001').trim().replace(/\/+$/, '') : 'http://localhost:8001';
-    fetch(`${gwUrl}${path}`, {
-      method: 'POST',
-      headers,
-      body: rawBody
-    }).then(async res => {
-      try {
-        const data = await res.json();
-        console.log(`[MIRROR LOCAL] Resposta :8001 para ${path}:`, data);
-      } catch {}
-    }).catch(err => {
-      console.warn(`[MIRROR LOCAL] Falha ao enviar para :8001:`, err);
-    });
+    console.log(`[MIRROR LOCAL/TUNNEL] Despachando ${normPath}:`, payload);
 
-    // Disparo secundário legado na porta 80 (MT4)
-    fetch(`http://localhost:80${path}`, {
-      method: 'POST',
-      headers,
-      body: rawBody
-    }).catch(() => {});
-  } catch (err) {
-    // Falha silenciosa para nunca travar a UI
+    // 1. Disparo secundário legado na porta 80 (MT4) caso exista
+    try {
+      fetch(`http://localhost:80${normPath}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: rawBody
+      }).catch(() => {});
+    } catch {}
+
+    // 2. Despacho primário unificado (Local HTTP :8001 OU Túnel WebSocket Nuvem)
+    const res = await executeNinjaRpc<any>(rpcAction, payload, 4000);
+    if (res.data) {
+      console.log(`[MIRROR LOCAL/TUNNEL] Sucesso via ${res.transport} para ${normPath}:`, res.data);
+      const isSuccess = res.data.success !== false;
+      return {
+        success: isSuccess,
+        data: res.data,
+        transport: res.transport,
+        error: !isSuccess ? (res.data.error || 'Erro no NinjaTrader') : undefined
+      };
+    }
+    if (res.error) {
+      console.warn(`[MIRROR LOCAL/TUNNEL] Falha via ${res.transport} para ${normPath}:`, res.error);
+      return {
+        success: false,
+        error: typeof res.error === 'string' ? res.error : (res.error?.message || 'Falha de comunicação com NinjaTrader'),
+        transport: res.transport
+      };
+    }
+    return { success: false, error: 'Resposta vazia do NinjaTrader', transport: res.transport };
+  } catch (err: any) {
+    console.warn(`[MIRROR LOCAL/TUNNEL] Exceção ao despachar ${path}:`, err);
+    return { success: false, error: err?.message || String(err) };
   }
 }
 
@@ -2107,6 +2118,9 @@ export async function triggerCopyTradingForMaster(masterReport: any, originalPay
         const isSlaveNinja = isNinjaExecutionAccount(slaveAccount);
         const alreadyDispatched = Boolean((originalPayload as any)?.already_dispatched_to_slaves);
 
+        let dispatchSuccess = true;
+        let dispatchError = '';
+
         if (isSlaveNinja && !alreadyDispatched && !isMasterNinja) {
           const copyPayload = {
             ...childPayload,
@@ -2117,7 +2131,26 @@ export async function triggerCopyTradingForMaster(masterReport: any, originalPay
             is_atm: isAtm,
             allow_multi: Boolean(slaveAccount.allow_multi_signals || isAtm)
           };
-          mirrorToLocalServer('/sinal_local', copyPayload);
+          const dispatchRes = await mirrorToLocalServer('/sinal_local', copyPayload);
+          if (dispatchRes && dispatchRes.success === false) {
+            dispatchSuccess = false;
+            dispatchError = dispatchRes.error || dispatchRes.data?.error || 'Falha ao despachar ordem para o NinjaTrader';
+          }
+        }
+
+        if (!dispatchSuccess) {
+          console.warn(`⚠️ [COPY TRADING] Ordem rejeitada pelo NinjaTrader em '${slaveAccount.account_name}': ${dispatchError}`);
+          logCopyTradingMessage({
+            type: 'REJEITADO',
+            masterAccount: masterAccName,
+            slaveAccount: slaveAccount.account_name,
+            symbol: childSymbol,
+            side: originalPayload.side || 'COMPRA',
+            quantity: slaveQty,
+            reason: dispatchError,
+            message: `Ordem ${originalPayload.side || 'COMPRA'} (${slaveQty}x ${childSymbol}) REJEITADA em '${slaveAccount.account_name}': ${dispatchError}`
+          });
+          continue;
         }
 
         logCopyTradingMessage({
@@ -5299,6 +5332,9 @@ export function saveLocalCopyTradingConfigs(configs: CopyTradingConfig[]) {
   } catch {}
 }
 
+let lastSyncedRulesPayload = '';
+let lastSyncedRiskPayload = '';
+
 export async function syncAllCopyRulesToNinjaTrader(_force?: boolean): Promise<boolean> {
   try {
     const status = await checkNinjaStatus();
@@ -5325,54 +5361,69 @@ export async function syncAllCopyRulesToNinjaTrader(_force?: boolean): Promise<b
       allow_multi_signals: a.allow_multi_signals !== false
     }));
 
-    // 🛡️ Sincroniza imediatamente o monitor de gestão de risco do NinjaTrader
-    try {
-      await syncNinjaAccountsRisk(accountRisks);
-    } catch (riskErr) {
-      console.warn('[NinjaGateway] Aviso ao sincronizar risco de contas com NinjaTrader:', riskErr);
-    }
-
-    if (!copyConfigs || copyConfigs.length === 0) {
-      await syncNinjaCopyRules([], accountRisks);
-      return true;
+    // 🛡️ Sincroniza o monitor de gestão de risco do NinjaTrader apenas se houver alterações reais
+    const riskPayloadStr = JSON.stringify(accountRisks);
+    if (_force || riskPayloadStr !== lastSyncedRiskPayload) {
+      try {
+        const ok = await syncNinjaAccountsRisk(accountRisks);
+        if (ok) lastSyncedRiskPayload = riskPayloadStr;
+      } catch (riskErr) {
+        console.warn('[NinjaGateway] Aviso ao sincronizar risco de contas com NinjaTrader:', riskErr);
+      }
     }
 
     const ninjaRules: NinjaCopyRule[] = [];
-    for (const c of copyConfigs) {
+    const seenPairs = new Set<string>();
+
+    for (const c of (copyConfigs || [])) {
       const masterAcc = allAccounts.find(a => a.id === c.master_account_id || a.account_name === c.master_account_id);
       const slaveAcc = allAccounts.find(a => a.id === c.slave_account_id || a.account_name === c.slave_account_id);
 
-      const masterName = masterAcc?.account_name || c.master_account_id;
-      const slaveName = slaveAcc?.account_name || c.slave_account_id;
+      const masterName = (masterAcc?.account_name || c.master_account_id || '').trim();
+      const slaveName = (slaveAcc?.account_name || c.slave_account_id || '').trim();
+
+      if (!masterName || !slaveName) continue;
+
+      const pairKey = `${masterName.toLowerCase()}::${slaveName.toLowerCase()}`;
+      if (seenPairs.has(pairKey)) continue; // Deduplicação estrita Master -> Slave
+      seenPairs.add(pairKey);
 
       // Uma regra só é considerada ativa se a regra em si estiver ativa E tanto Master quanto Slave estiverem ativas
       const isMasterActive = masterAcc ? (masterAcc.is_active !== false) : true;
       const isSlaveActive = slaveAcc ? (slaveAcc.is_active !== false) : true;
       const isRuleActive = (c.is_active !== false) && isMasterActive && isSlaveActive;
 
-      if (masterName && slaveName) {
-        ninjaRules.push({
-          id: c.id,
-          masterAccount: masterName,
-          slaveAccount: slaveName,
-          lotMultiplier: Number(c.lot_multiplier || 1),
-          isActive: isRuleActive,
-          allowedSymbols: c.allowed_symbols || 'TODOS',
-          executionSymbol: slaveAcc?.execution_symbol || undefined,
-          symbolMapping: slaveAcc?.symbol_mapping || undefined,
-          maxDailyLoss: Number(slaveAcc?.trader_daily_stop_loss_usd || slaveAcc?.daily_stop_loss_usd || 0),
-          dailyProfitTarget: Number(slaveAcc?.trader_daily_take_profit_usd || slaveAcc?.daily_max_gain_usd || 0),
-          maxDailyTrades: (slaveAcc?.manual_max_daily_trades !== undefined && slaveAcc?.manual_max_daily_trades !== null && (slaveAcc?.manual_max_daily_trades as any) !== '')
-            ? Number(slaveAcc.manual_max_daily_trades)
-            : ((slaveAcc?.daily_max_entries !== undefined && slaveAcc?.daily_max_entries !== null && (slaveAcc?.daily_max_entries as any) !== '') ? Number(slaveAcc.daily_max_entries) : 0),
-          copyAtmStrategy: c.copy_atm_strategy !== false,
-          closeSlavesOnMasterClose: c.close_slaves_on_master_close !== false,
-          cancelOrphanOrders: c.cancel_orphan_orders === true
-        });
-      }
+      ninjaRules.push({
+        id: c.id,
+        masterAccount: masterName,
+        slaveAccount: slaveName,
+        lotMultiplier: Number(c.lot_multiplier || 1),
+        isActive: isRuleActive,
+        allowedSymbols: c.allowed_symbols || 'TODOS',
+        executionSymbol: slaveAcc?.execution_symbol || undefined,
+        symbolMapping: slaveAcc?.symbol_mapping || undefined,
+        maxDailyLoss: Number(slaveAcc?.trader_daily_stop_loss_usd || slaveAcc?.daily_stop_loss_usd || 0),
+        dailyProfitTarget: Number(slaveAcc?.trader_daily_take_profit_usd || slaveAcc?.daily_max_gain_usd || 0),
+        maxDailyTrades: (slaveAcc?.manual_max_daily_trades !== undefined && slaveAcc?.manual_max_daily_trades !== null && (slaveAcc?.manual_max_daily_trades as any) !== '')
+          ? Number(slaveAcc.manual_max_daily_trades)
+          : ((slaveAcc?.daily_max_entries !== undefined && slaveAcc?.daily_max_entries !== null && (slaveAcc?.daily_max_entries as any) !== '') ? Number(slaveAcc.daily_max_entries) : 0),
+        copyAtmStrategy: c.copy_atm_strategy !== false,
+        closeSlavesOnMasterClose: c.close_slaves_on_master_close !== false,
+        cancelOrphanOrders: c.cancel_orphan_orders === true
+      });
     }
 
-    return await syncNinjaCopyRules(ninjaRules, accountRisks);
+    // ⚡ Otimização Inteligente: Se as regras não mudaram, não reenvia RPC e não reescreve disco no NinjaTrader
+    const rulesPayloadStr = JSON.stringify(ninjaRules);
+    if (!_force && rulesPayloadStr === lastSyncedRulesPayload) {
+      return true;
+    }
+
+    const syncOk = await syncNinjaCopyRules(ninjaRules, accountRisks);
+    if (syncOk) {
+      lastSyncedRulesPayload = rulesPayloadStr;
+    }
+    return syncOk;
   } catch (err) {
     console.warn('[NinjaGateway] Erro ao sincronizar regras de copy com NinjaTrader:', err);
     return false;
@@ -5421,37 +5472,65 @@ export function resolveAccountUuid(accountIdentifier: string, userId?: string): 
 export async function fetchCopyTradingConfigsSupabase(_providedAccounts?: BrokerAccount[]): Promise<CopyTradingConfig[]> {
   try {
     const local = getLocalCopyTradingConfigs();
+    const user = await getAuthUser();
+
     const { data, error } = await withDbTimeout(
       supabase
         .from('painelvm_copy_trading_config')
         .select('*'),
-      4000
+      5000
     );
 
     if (error) {
+      console.warn('[DB] Erro ao buscar copy trading no Supabase:', error.message);
       return local;
     }
+
     if (data !== null && Array.isArray(data)) {
-      const currentAccounts = getLocalBrokerAccounts();
+      const localAccs = getLocalBrokerAccounts();
+      const currentAccounts: BrokerAccount[] = (_providedAccounts && _providedAccounts.length > 0)
+        ? _providedAccounts
+        : localAccs;
+
       const currentAccIds = new Set(currentAccounts.map(a => a.id));
       const currentAccNames = new Set(currentAccounts.map(a => (a.account_name || '').trim().toLowerCase()));
 
-      const filteredConfigs = data.filter(c => 
-        currentAccIds.has(c.master_account_id) || 
-        currentAccIds.has(c.slave_account_id) ||
-        currentAccNames.has((c.master_account_id || '').trim().toLowerCase()) ||
-        currentAccNames.has((c.slave_account_id || '').trim().toLowerCase())
-      );
+      // Regras que pertencem às contas do usuário OU foram criadas pelo usuário logado
+      const filteredConfigs = data.filter(c => {
+        if (user?.id && c.user_id && c.user_id === user.id) return true;
+        const m = (c.master_account_id || '').trim().toLowerCase();
+        const s = (c.slave_account_id || '').trim().toLowerCase();
+        return (
+          currentAccIds.has(c.master_account_id) ||
+          currentAccIds.has(c.slave_account_id) ||
+          currentAccNames.has(m) ||
+          currentAccNames.has(s)
+        );
+      });
 
-      // Preserva os campos ricos salvos no localStorage (não deixa Supabase sobrescrever com undefined)
+      const isSamePair = (c1: CopyTradingConfig, c2: CopyTradingConfig) => {
+        if (c1.id === c2.id) return true;
+        const m1 = (c1.master_account_id || c1.master_account_name || '').trim().toLowerCase();
+        const m2 = (c2.master_account_id || c2.master_account_name || '').trim().toLowerCase();
+        const s1 = (c1.slave_account_id || c1.slave_account_name || '').trim().toLowerCase();
+        const s2 = (c2.slave_account_id || c2.slave_account_name || '').trim().toLowerCase();
+        const accM1 = currentAccounts.find(a => a.id.toLowerCase() === m1 || a.account_name?.toLowerCase() === m1)?.account_name?.toLowerCase() || m1;
+        const accM2 = currentAccounts.find(a => a.id.toLowerCase() === m2 || a.account_name?.toLowerCase() === m2)?.account_name?.toLowerCase() || m2;
+        const accS1 = currentAccounts.find(a => a.id.toLowerCase() === s1 || a.account_name?.toLowerCase() === s1)?.account_name?.toLowerCase() || s1;
+        const accS2 = currentAccounts.find(a => a.id.toLowerCase() === s2 || a.account_name?.toLowerCase() === s2)?.account_name?.toLowerCase() || s2;
+        return accM1.length > 0 && accM1 === accM2 && accS1.length > 0 && accS1 === accS2;
+      };
+
+      // Preserva os campos ricos salvos no localStorage e enriquece com nomes legíveis
       const mergedConfigs: CopyTradingConfig[] = filteredConfigs.map(dbRule => {
-        const localMatch = local.find(l => l.id === dbRule.id || (
-          (l.master_account_id === dbRule.master_account_id || l.master_account_name === dbRule.master_account_id) &&
-          (l.slave_account_id === dbRule.slave_account_id || l.slave_account_name === dbRule.slave_account_id)
-        ));
+        const localMatch = local.find(l => isSamePair(l, dbRule));
+        const mAcc = currentAccounts.find(a => a.id === dbRule.master_account_id || a.account_name?.trim().toLowerCase() === (dbRule.master_account_id || '').trim().toLowerCase());
+        const sAcc = currentAccounts.find(a => a.id === dbRule.slave_account_id || a.account_name?.trim().toLowerCase() === (dbRule.slave_account_id || '').trim().toLowerCase());
 
         return {
           ...dbRule,
+          master_account_name: mAcc?.account_name || localMatch?.master_account_name || dbRule.master_account_name || dbRule.master_account_id,
+          slave_account_name: sAcc?.account_name || localMatch?.slave_account_name || dbRule.slave_account_name || dbRule.slave_account_id,
           allowed_symbols: dbRule.allowed_symbols !== undefined && dbRule.allowed_symbols !== null ? dbRule.allowed_symbols : (localMatch?.allowed_symbols || 'TODOS'),
           copy_atm_strategy: dbRule.copy_atm_strategy !== undefined && dbRule.copy_atm_strategy !== null ? Boolean(dbRule.copy_atm_strategy) : (localMatch?.copy_atm_strategy !== false),
           close_slaves_on_master_close: dbRule.close_slaves_on_master_close !== undefined && dbRule.close_slaves_on_master_close !== null ? Boolean(dbRule.close_slaves_on_master_close) : (localMatch?.close_slaves_on_master_close !== undefined ? localMatch.close_slaves_on_master_close : true),
@@ -5461,13 +5540,24 @@ export async function fetchCopyTradingConfigsSupabase(_providedAccounts?: Broker
 
       // Preserva também qualquer regra local recente ainda não sincronizada
       for (const loc of local) {
-        if (!mergedConfigs.some(m => m.id === loc.id || (m.master_account_id === loc.master_account_id && m.slave_account_id === loc.slave_account_id))) {
+        if (!mergedConfigs.some(m => isSamePair(m, loc))) {
           mergedConfigs.push(loc);
         }
       }
 
-      saveLocalCopyTradingConfigs(mergedConfigs);
-      return mergedConfigs;
+      // Deduplicação estrita de pares Master -> Slave para garantir contagem exata
+      const finalDeduplicated: CopyTradingConfig[] = [];
+      for (const c of mergedConfigs) {
+        const idx = finalDeduplicated.findIndex(existing => isSamePair(existing, c));
+        if (idx >= 0) {
+          finalDeduplicated[idx] = c;
+        } else {
+          finalDeduplicated.push(c);
+        }
+      }
+
+      saveLocalCopyTradingConfigs(finalDeduplicated);
+      return finalDeduplicated;
     }
     return local;
   } catch (err) {
@@ -5483,11 +5573,13 @@ async function ensureAccountInSupabase(accountId: string, userId: string): Promi
   const acc = localAccounts.find(a => a.id === accountId || a.account_name === accountId);
   if (!acc) {
     try {
-      const { data } = await supabase
-        .from('painelvm_broker_accounts')
-        .select('id')
-        .or(`id.eq.${accountId},account_name.eq.${accountId}`)
-        .maybeSingle();
+      let query = supabase.from('painelvm_broker_accounts').select('id');
+      if (isValidUUID(accountId)) {
+        query = query.or(`id.eq.${accountId},account_name.eq.${accountId}`);
+      } else {
+        query = query.eq('account_name', accountId);
+      }
+      const { data } = await query.maybeSingle();
       if (data) return true;
     } catch { }
     return false;
@@ -5604,6 +5696,8 @@ export async function saveBatchCopyTradingConfigsSupabase(
       id: ruleId,
       master_account_id: masterId,
       slave_account_id: slaveId,
+      master_account_name: masterAcc?.account_name || (params as any).master_account_name || params.master_account_id,
+      slave_account_name: slaveAcc?.account_name || (params as any).slave_account_name || params.slave_account_id,
       lot_multiplier: Number(params.lot_multiplier) || 1.0,
       allowed_symbols: params.allowed_symbols || 'TODOS',
       copy_manual_trades: params.copy_manual_trades !== false,
@@ -5652,9 +5746,33 @@ export async function saveBatchCopyTradingConfigsSupabase(
 
       await Promise.all(distinctAccs.map(accId => ensureAccountInSupabase(accId, user.id)));
 
-      // Tenta salvar payload completo incluindo opções de ATM, zeragem conjunta e cancelamento de órfãs
-      const richPayloads = fullConfigs.map(c => ({
+      // Consulta regras existentes no Supabase para reutilizar o ID existente se houver conflito de par (master, slave)
+      let existingDbRules: Array<{ id: string; master_account_id: string; slave_account_id: string }> = [];
+      try {
+        const { data: dbRules } = await withDbTimeout(
+          supabase.from('painelvm_copy_trading_config').select('id, master_account_id, slave_account_id'),
+          3500
+        );
+        if (dbRules && Array.isArray(dbRules)) {
+          existingDbRules = dbRules;
+        }
+      } catch {}
+
+      // Se já existe uma regra no Supabase para esse mesmo par Master->Slave, preserva o ID do banco
+      for (const fc of fullConfigs) {
+        const dbMatch = existingDbRules.find(r => 
+          (r.master_account_id === fc.master_account_id && r.slave_account_id === fc.slave_account_id) ||
+          r.id === fc.id
+        );
+        if (dbMatch) {
+          fc.id = dbMatch.id;
+        }
+      }
+
+      // Tentativa 1: Payload rico com user_id
+      const richWithUser = fullConfigs.map(c => ({
         id: c.id,
+        user_id: user.id,
         master_account_id: c.master_account_id,
         slave_account_id: c.slave_account_id,
         lot_multiplier: Number(c.lot_multiplier) || 1.0,
@@ -5667,16 +5785,52 @@ export async function saveBatchCopyTradingConfigsSupabase(
         is_active: c.is_active !== false
       }));
 
-      const { error: richError } = await withDbTimeout(
+      let { error: saveErr } = await withDbTimeout(
         supabase
           .from('painelvm_copy_trading_config')
-          .upsert(richPayloads, { onConflict: 'id' }),
+          .upsert(richWithUser, { onConflict: 'id' }),
         5000
       );
 
-      if (richError) {
-        // Se o banco ainda não tiver as novas colunas, faz fallback para o payload básico
-        const basicPayloads = fullConfigs.map(c => ({
+      // Tentativa 2: Payload rico sem user_id (se coluna user_id não existir na tabela)
+      if (saveErr) {
+        console.warn('[DB] Tentativa 1 falhou, tentando Payload rico sem user_id:', saveErr.message);
+        const richWithoutUser = richWithUser.map(({ user_id, ...rest }) => rest);
+        const res2 = await withDbTimeout(
+          supabase
+            .from('painelvm_copy_trading_config')
+            .upsert(richWithoutUser, { onConflict: 'id' }),
+          5000
+        );
+        saveErr = res2.error;
+      }
+
+      // Tentativa 3: Payload básico com user_id
+      if (saveErr) {
+        console.warn('[DB] Tentativa 2 falhou, tentando Payload básico com user_id:', saveErr.message);
+        const basicWithUser = fullConfigs.map(c => ({
+          id: c.id,
+          user_id: user.id,
+          master_account_id: c.master_account_id,
+          slave_account_id: c.slave_account_id,
+          lot_multiplier: Number(c.lot_multiplier) || 1.0,
+          copy_manual_trades: c.copy_manual_trades !== false,
+          copy_algo_trades: c.copy_algo_trades !== false,
+          is_active: c.is_active !== false
+        }));
+        const res3 = await withDbTimeout(
+          supabase
+            .from('painelvm_copy_trading_config')
+            .upsert(basicWithUser, { onConflict: 'id' }),
+          5000
+        );
+        saveErr = res3.error;
+      }
+
+      // Tentativa 4: Payload básico sem user_id
+      if (saveErr) {
+        console.warn('[DB] Tentativa 3 falhou, tentando Payload básico sem user_id:', saveErr.message);
+        const basicWithoutUser = fullConfigs.map(c => ({
           id: c.id,
           master_account_id: c.master_account_id,
           slave_account_id: c.slave_account_id,
@@ -5685,16 +5839,19 @@ export async function saveBatchCopyTradingConfigsSupabase(
           copy_algo_trades: c.copy_algo_trades !== false,
           is_active: c.is_active !== false
         }));
-
-        const { error: basicError } = await withDbTimeout(
+        const res4 = await withDbTimeout(
           supabase
             .from('painelvm_copy_trading_config')
-            .upsert(basicPayloads, { onConflict: 'id' }),
+            .upsert(basicWithoutUser, { onConflict: 'id' }),
           5000
         );
-        if (basicError) {
-          console.error('[DB] Erro ao salvar regras de copy trading no Supabase:', basicError);
-        }
+        saveErr = res4.error;
+      }
+
+      if (saveErr) {
+        console.error('[DB] ERRO CRÍTICO ao salvar regras de copy trading no Supabase:', saveErr);
+      } else {
+        console.log('[DB] ✅ Regras de Copy Trading salvas com sucesso no Supabase!');
       }
     }
   } catch (err) {
@@ -5724,14 +5881,24 @@ export async function deleteCopyTradingConfigSupabase(id: string): Promise<boole
             .eq('id', id),
           4000
         );
-      } else if (target && isValidUUID(target.master_account_id) && isValidUUID(target.slave_account_id)) {
-        await withDbTimeout(
-          supabase
-            .from('painelvm_copy_trading_config')
-            .delete()
-            .match({ master_account_id: target.master_account_id, slave_account_id: target.slave_account_id }),
-          4000
-        );
+      }
+      if (target) {
+        const allAccs = getLocalBrokerAccounts();
+        const mAcc = allAccs.find(a => a.id === target.master_account_id || a.account_name === target.master_account_id);
+        const sAcc = allAccs.find(a => a.id === target.slave_account_id || a.account_name === target.slave_account_id);
+        const mIds = Array.from(new Set([target.master_account_id, mAcc?.id, mAcc?.account_name].filter(Boolean))) as string[];
+        const sIds = Array.from(new Set([target.slave_account_id, sAcc?.id, sAcc?.account_name].filter(Boolean))) as string[];
+        for (const m of mIds) {
+          for (const s of sIds) {
+            await withDbTimeout(
+              supabase
+                .from('painelvm_copy_trading_config')
+                .delete()
+                .match({ master_account_id: m, slave_account_id: s }),
+              3000
+            ).catch(() => {});
+          }
+        }
       }
     } catch (err) {
       console.warn('[DB] Erro ao deletar copy trading no Supabase:', err);

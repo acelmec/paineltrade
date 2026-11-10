@@ -339,6 +339,9 @@ export const TradeDock: React.FC = () => {
               closedIds.has(r.id) ? { ...r, status: 'Cancelado', closed_at: closedAt } : r
             ));
           }
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('vortex_reports_updated'));
+          }
           for (const rep of matchingReports) {
             if (updateReportAction) {
               await updateReportAction(rep.id, 'Cancelado');
@@ -347,6 +350,9 @@ export const TradeDock: React.FC = () => {
         }
       } else if (updateReportAction) {
         await updateReportAction(orderItem.id, 'Cancelado');
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('vortex_reports_updated'));
+        }
       }
     } catch (e) {
       console.error('Erro ao cancelar ordem:', e);

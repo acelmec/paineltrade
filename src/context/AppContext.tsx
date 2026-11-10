@@ -5119,10 +5119,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const closedAt = new Date().toISOString();
 
 
-          // Atualiza reportsRef.current IMEDIATAMENTE (0ms) para evitar re-disparo em loops concorrentes
+          // Atualiza reportsRef.current e setReports IMEDIATAMENTE (0ms) para refletir encerramento em toda a UI sem recarregar tela
           reportsRef.current = (reportsRef.current || []).map(r =>
             r.id === activeReport.id ? { ...r, status, exit_price: exitExecutedPrice, closed_at: closedAt } : r
           );
+          setReports((prev: any) => (prev || []).map((r: any) =>
+            r.id === activeReport.id ? { ...r, status, exit_price: exitExecutedPrice, closed_at: closedAt } : r
+          ));
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('vortex_reports_updated'));
+          }
 
           // Nunca forçar flat geral no NinjaTrader em saídas normais de operações individuais
           updateStrategyReportStatusSupabase(activeReport.id, status, exitExecutedPrice, closedAt, false, false)
@@ -10343,6 +10349,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           : r
       ));
       saveLocalStrategyReports(reportsRef.current);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('vortex_reports_updated'));
+      }
 
       const success = await updateStrategyReportStatusSupabase(id, status, resolvedPrice, closedAt, false);
       return success;
@@ -14237,9 +14246,10 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
           await fetchReportsList(true); // silent = true
         }
 
-        // 1.5 Sincronizar Contas e Regras de Espelhamento (Copy Trading) do Supabase a cada 10s
+        // 1.5 Sincronizar Contas e Regras de Espelhamento (Copy Trading) do Supabase a cada 30s
         // Garante que qualquer regra ou conta criada no PC Local apareça automaticamente no PC Remoto / Conexão Restrita e vice-versa
-        if (syncCounter % 2 === 0) {
+        // Nota: syncAllCopyRulesToNinjaTrader possui cache inteligente de payload e só dispara RPC caso haja alterações reais
+        if (syncCounter % 6 === 0) {
           const syncedAccs = await refreshAccounts(false);
           await refreshCopyConfigs(syncedAccs);
           if (!isRestrictedSession) {
