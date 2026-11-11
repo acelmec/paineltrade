@@ -220,7 +220,57 @@ export const CopyTradingDashboard: React.FC = () => {
 
   // Checagem periódica do NinjaTrader (Local ou via Cloud Bridge do PC Principal)
   const checkStatus = useCallback(async () => {
+    const applyBridgeSnapshot = (bridgeSnap: any) => {
+      setIsRemoteBridge(true);
+      setNinjaOnline(true);
+      setNinjaLatency(bridgeSnap.latencyMs || 25);
+      const bridgeAccs = bridgeSnap.accounts || [];
+      const syncedBridgeAccs = bridgeAccs.filter((a: any) =>
+        syncedNt8NamesSet.size === 0 || syncedNt8NamesSet.has((a.name || '').trim().toLowerCase())
+      );
+      setNinjaAccounts(syncedBridgeAccs.length > 0 ? syncedBridgeAccs : bridgeAccs);
+
+      const rawPositions = bridgeSnap.positions || [];
+      const filteredBridgePositions = rawPositions.filter((p: any) =>
+        !p.account || syncedNt8NamesSet.size === 0 || syncedNt8NamesSet.has(p.account.trim().toLowerCase())
+      );
+      setOpenPositions(filteredBridgePositions.length > 0 ? filteredBridgePositions : rawPositions);
+
+      const rawOrders = bridgeSnap.orders || [];
+      const filteredBridgeOrders = rawOrders.filter((o: any) =>
+        !o.account || syncedNt8NamesSet.size === 0 || syncedNt8NamesSet.has(o.account.trim().toLowerCase())
+      );
+      setWorkingOrders(filteredBridgeOrders.length > 0 ? filteredBridgeOrders : rawOrders);
+      if (bridgeSnap.updatedAt) {
+        setBridgeLastSyncedTime(new Date(bridgeSnap.updatedAt).toLocaleTimeString('pt-BR'));
+      }
+      if (bridgeSnap.performance && bridgeSnap.performance.length > 0) {
+        setAccountsPerformance(bridgeSnap.performance.filter((ap: any) =>
+          syncedNt8NamesSet.size === 0 ||
+          (ap.name && syncedNt8NamesSet.has(ap.name.trim().toLowerCase())) ||
+          (ap.displayName && syncedNt8NamesSet.has(ap.displayName.trim().toLowerCase()))
+        ));
+      }
+      if (bridgeSnap.metricsMap) {
+        saveNinjaAccountMetricsCache(bridgeSnap.metricsMap);
+      }
+      if (bridgeSnap.copyMessages && bridgeSnap.copyMessages.length > 0) {
+        setCopyMessages(bridgeSnap.copyMessages);
+      }
+    };
+
     try {
+      // 📱 Sessão restrita (celular / acesso remoto): a fonte da verdade é o snapshot ao vivo publicado
+      // pelo PC principal (~1.2s). Consultar o NT8 direto via túnel pode devolver cache velho (timeouts
+      // silenciosos), congelando o PnL flutuante após a primeira carga.
+      if (isRestrictedSession) {
+        const snap = await fetchNinjaLiveBridgeSnapshotSupabase(true);
+        if (snap && snap.isOnline) {
+          applyBridgeSnapshot(snap);
+          return;
+        }
+      }
+
       const res = await checkNinjaStatus();
       setNinjaStatusInfo(res);
       const online = res.status === 'online';
@@ -299,42 +349,7 @@ export const CopyTradingDashboard: React.FC = () => {
         // Resgata o snapshot ao vivo espelhado da Cloud Bridge do PC Principal
         const bridgeSnap = await fetchNinjaLiveBridgeSnapshotSupabase(true);
         if (bridgeSnap && bridgeSnap.isOnline) {
-          setIsRemoteBridge(true);
-          setNinjaOnline(true);
-          setNinjaLatency(bridgeSnap.latencyMs || 25);
-          const bridgeAccs = bridgeSnap.accounts || [];
-          const syncedBridgeAccs = bridgeAccs.filter((a: any) =>
-            syncedNt8NamesSet.size === 0 || syncedNt8NamesSet.has((a.name || '').trim().toLowerCase())
-          );
-          setNinjaAccounts(syncedBridgeAccs.length > 0 ? syncedBridgeAccs : bridgeAccs);
-
-          const rawPositions = bridgeSnap.positions || [];
-          const filteredBridgePositions = rawPositions.filter((p: any) =>
-            !p.account || syncedNt8NamesSet.size === 0 || syncedNt8NamesSet.has(p.account.trim().toLowerCase())
-          );
-          setOpenPositions(filteredBridgePositions.length > 0 ? filteredBridgePositions : rawPositions);
-
-          const rawOrders = bridgeSnap.orders || [];
-          const filteredBridgeOrders = rawOrders.filter((o: any) =>
-            !o.account || syncedNt8NamesSet.size === 0 || syncedNt8NamesSet.has(o.account.trim().toLowerCase())
-          );
-          setWorkingOrders(filteredBridgeOrders.length > 0 ? filteredBridgeOrders : rawOrders);
-          if (bridgeSnap.updatedAt) {
-            setBridgeLastSyncedTime(new Date(bridgeSnap.updatedAt).toLocaleTimeString('pt-BR'));
-          }
-          if (bridgeSnap.performance && bridgeSnap.performance.length > 0) {
-            setAccountsPerformance(bridgeSnap.performance.filter((ap: any) =>
-              syncedNt8NamesSet.size === 0 ||
-              (ap.name && syncedNt8NamesSet.has(ap.name.trim().toLowerCase())) ||
-              (ap.displayName && syncedNt8NamesSet.has(ap.displayName.trim().toLowerCase()))
-            ));
-          }
-          if (bridgeSnap.metricsMap) {
-            saveNinjaAccountMetricsCache(bridgeSnap.metricsMap);
-          }
-          if (bridgeSnap.copyMessages && bridgeSnap.copyMessages.length > 0) {
-            setCopyMessages(bridgeSnap.copyMessages);
-          }
+          applyBridgeSnapshot(bridgeSnap);
         } else {
           setIsRemoteBridge(false);
           setNinjaOnline(false);
@@ -349,7 +364,7 @@ export const CopyTradingDashboard: React.FC = () => {
       setNinjaOnline(false);
       setNinjaLatency(null);
     }
-  }, [syncedNt8NamesSet]);
+  }, [syncedNt8NamesSet, isRestrictedSession]);
 
   useEffect(() => {
     refreshAccounts(false);
@@ -611,7 +626,8 @@ export const CopyTradingDashboard: React.FC = () => {
         setWorkingOrders(prev => prev.filter(o => o.orderId !== orderId));
       } else {
         try {
-          await cancelNinjaOrder(orderId, account);
+          const okCancel = await cancelNinjaOrder(orderId, account);
+          if (!okCancel) throw new Error('Cancelamento direto não confirmado');
           addLog('❌ CANCELAMENTO', `Ordem ${orderId} cancelada na conta ${account}.`, 'sistema');
         } catch (directErr) {
           await sendNinjaRemoteCommandSupabase({ type: 'CANCEL_ORDER', orderId, account });

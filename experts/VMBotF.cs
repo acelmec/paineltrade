@@ -358,6 +358,9 @@
 
 					// ✅ 9. Filtro Tamanho Candle (Range)
 					if (!CheckCandleRangeFilter(1)) return false;
+
+					// ✅ 10. Filtro Gamma Level (Sessão 24)
+					if (Gamma_FiltroAtivo && !CheckFiltroGamma(1)) return false;
 				 
 				    // ✅ TODOS OS FILTROS PASSARAM
 				    return true;
@@ -424,6 +427,9 @@
 
 					// ✅ 9. Filtro Tamanho Candle (Range)
 					if (!CheckCandleRangeFilter(1)) return false;
+
+					// ✅ 10. Filtro Gamma Level (Sessão 24)
+					if (Gamma_FiltroAtivo && !CheckFiltroGamma(-1)) return false;
 					
 				    return true;
 				}
@@ -651,16 +657,26 @@
 				{
 				    try
 				    {
-				        foreach (NinjaTrader.Cbi.Position pos in Account.Positions)
+				        if (Position != null && Position.MarketPosition != MarketPosition.Flat)
 				        {
-				            if (pos != null &&
-				                pos.Instrument != null &&
-				                pos.Instrument.FullName == Instrument.FullName &&
-				                pos.Quantity != 0)
+				            DebugPrint($"[HasAccountPosition] ✅ Posição ativa na estratégia: {Position.Quantity} contratos ({Position.MarketPosition})");
+				            return true;
+				        }
+
+				        if (Account?.Positions != null)
+				        {
+				            foreach (NinjaTrader.Cbi.Position pos in Account.Positions)
 				            {
-				                
-				                DebugPrint($"[HasAccountPosition] ✅ Posição encontrada: {pos.Quantity} contratos");
-				                return true;
+				                if (pos != null &&
+				                    pos.Instrument != null &&
+				                    (pos.Instrument == Instrument ||
+				                     pos.Instrument.FullName == Instrument.FullName ||
+				                     (pos.Instrument.MasterInstrument != null && Instrument.MasterInstrument != null && string.Equals(pos.Instrument.MasterInstrument.Name, Instrument.MasterInstrument.Name, StringComparison.OrdinalIgnoreCase))) &&
+				                    pos.Quantity != 0)
+				                {
+				                    DebugPrint($"[HasAccountPosition] ✅ Posição encontrada na conta: {pos.Quantity} contratos");
+				                    return true;
+				                }
 				            }
 				        }
 				        return false;
@@ -679,20 +695,31 @@
 		{
 		    try
 		    {
-		        // ✅ CORREÇÃO CRÍTICA: Account.Orders (não apenas Orders)
-		        // Isso inclui: ordens manuais (DOM), outras estratégias, e esta estratégia
-		        //foreach (Order order in Account.Orders) ULTIMO AJUSTE
-				foreach (Order order in Account.Orders.ToList())
+		        if (buyStopOrder != null && (buyStopOrder.OrderState == OrderState.Working || buyStopOrder.OrderState == OrderState.Submitted || buyStopOrder.OrderState == OrderState.Accepted))
+		            return true;
+		        if (sellStopOrder != null && (sellStopOrder.OrderState == OrderState.Working || sellStopOrder.OrderState == OrderState.Submitted || sellStopOrder.OrderState == OrderState.Accepted))
+		            return true;
+		        if (buyOrder != null && (buyOrder.OrderState == OrderState.Working || buyOrder.OrderState == OrderState.Submitted || buyOrder.OrderState == OrderState.Accepted))
+		            return true;
+		        if (sellOrder != null && (sellOrder.OrderState == OrderState.Working || sellOrder.OrderState == OrderState.Submitted || sellOrder.OrderState == OrderState.Accepted))
+		            return true;
+
+		        if (Account?.Orders != null)
 		        {
-		            if (order != null && 
-		                order.Instrument != null &&
-		                order.Instrument.FullName == Instrument.FullName &&
-		                (order.OrderState == OrderState.Working || 
-		                 order.OrderState == OrderState.Submitted ||
-		                 order.OrderState == OrderState.Accepted))
+		            foreach (Order order in Account.Orders.ToList())
 		            {
-		                DebugPrint($"[HasAccountWorkingOrders] ✅ Ordem pendente: {order.Name} ({order.OrderState}) | ID: {order.Id} | Origem: {(order.Id.ToString().Contains("Strategy") ? "Estratégia" : "Manual/Outra")}");
-		                return true;
+		                if (order != null && 
+		                    order.Instrument != null &&
+		                    (order.Instrument == Instrument ||
+		                     order.Instrument.FullName == Instrument.FullName ||
+		                     (order.Instrument.MasterInstrument != null && Instrument.MasterInstrument != null && string.Equals(order.Instrument.MasterInstrument.Name, Instrument.MasterInstrument.Name, StringComparison.OrdinalIgnoreCase))) &&
+		                    (order.OrderState == OrderState.Working || 
+		                     order.OrderState == OrderState.Submitted ||
+		                     order.OrderState == OrderState.Accepted))
+		                {
+		                    DebugPrint($"[HasAccountWorkingOrders] ✅ Ordem pendente: {order.Name} ({order.OrderState}) | ID: {order.Id} | Origem: {(order.Id.ToString().Contains("Strategy") ? "Estratégia" : "Manual/Outra")}");
+		                    return true;
+		                }
 		            }
 		        }
 		        return false;
@@ -1495,6 +1522,12 @@
 				    if (currentEstrategia != estrategiaMode.SessaoHILO) return;
 				    if (BarsInProgress != 0 || CurrentBar < 1) return;
 
+			// ⚡ SINCRONIZAÇÃO EM MEMÓRIA RAM DO GAMMA CACHE (1 consulta a cada 10 min, zero impacto no NT8)
+			if (Gamma_FiltroAtivo || Stop_OrigemModo == ModoStopLossVMBot.GammaNivel)
+			{
+				AxionSharedContext.SincronizarGammaSeNecessario(supabaseUrl, supabaseServiceKey, referenceSymbol, DebugPrint);
+			}
+
 				    DateTime barTime = Time[0];
 				    TimeSpan ct = barTime.TimeOfDay;
 				    TimeSpan st = new TimeSpan(SessaoHILO_Start.Hour, SessaoHILO_Start.Minute, SessaoHILO_Start.Second);
@@ -2062,7 +2095,7 @@
 					_mainBorder = MakePanelBorder(Panel_Main_X, Panel_Main_Y);
 				    var sp = (StackPanel)_mainBorder.Child;
 				
-				    sp.Children.Add(MakeTB("VM BOT V1.52f", Brushes.Cyan, 14));
+				    sp.Children.Add(MakeTB("VM BOT V1.8", Brushes.Cyan, 14));
 				    sp.Children.Add(MakeTB("vmtrader", new SolidColorBrush(Color.FromRgb(255, 215, 0)), 10));
 				    sp.Children.Add(MakeSep());
 				
@@ -2922,8 +2955,9 @@
 				            // ✅ Alinhar com TickSize do ativo (CRÍTICO)
 				            double alignedPrice = Math.Round(value / TickSize) * TickSize;
 				            
-				            // Obter preço atual
+				            // Obter preço atual (com fallback para Close[0] em backtest/Strategy Analyzer histórico)
 				            double currentPrice = Position.MarketPosition == MarketPosition.Long ? GetCurrentBid() : GetCurrentAsk();
+				            if (currentPrice <= 0 && CurrentBar >= 0) currentPrice = Close[0];
 				            
 				            // ✅ Calcular distância mínima DINÂMICA baseada no ativo
 				            double minDistance = GetMinStopDistanceForInstrument();
@@ -4456,7 +4490,7 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 		            if (State == State.SetDefaults)
 		            {
 		                Description                             = "Scalping de abertura: Order Block, HiLo Prior, Manual Box e Grid Scalper";
-		                Name                                    = "VM BOT 1.52f";
+		                Name                                    = "VM BOT 1.8";
 		                Calculate                               = Calculate.OnEachTick;
 		                VM_MaxSignalAgeSeconds                  = 60;
 		                VM_MonitorarEncerramentoPainel          = true;
@@ -4638,20 +4672,11 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 					        DebugPrint($"[{(ehGrid ? "GRID" : "FVG SCALPER")}] EntriesPerDirection ajustado para {EntriesPerDirection}");
 					    }
 					
-					    // ✅ NOVO — PROBLEMA 1: DataSeries de 1s para TrailStop
-					    // IMPORTANTE: adicionar ANTES das séries da Força2D para manter índices corretos
-					    if (TRAIL_MODE)
-						{
-						    // ✅ Adiciona a série PRIMEIRO, depois calcula o índice
-						    AddDataSeries(BarsPeriodType.Second, 1);
-						    TrailSeries1s_Index = BarsArray?.Length - 1 ?? -1;  // Índice da série recém-adicionada
-						    DebugPrint($"[TRAIL 1S] ✅ DataSeries 1s adicionada — índice: {TrailSeries1s_Index}");
-						}
-					    else
-					    {
-					        TrailSeries1s_Index = -1;
-					        DebugPrint("[TRAIL 1S] TrailStop inativo — sem DataSeries extra.");
-					    }
+					    // ✅ TRAIL STOP NATIVO ON EACH TICK:
+					    // O robô opera com Calculate = Calculate.OnEachTick. O TrailStop roda diretamente
+					    // a cada tick de mercado no BarsInProgress == 0, eliminando a DataSeries de 1s
+					    // que travava o carregamento histórico (milhões de barras) e impedia alteração de stop.
+					    TrailSeries1s_Index = -1;
 					
 					    // Força 2D (igual ao original, mas os índices agora somam +1 se TRAIL_MODE ativo)
 					    if (Force2D_Mode != force2DMode.OFF)
@@ -4906,13 +4931,14 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				// Funciona no Strategy Analyzer, Backtest, Replay e Live Trading.
 				// =====================================================================
 				// =====================================================================
-				// TRAIL STOP — Processamento via DataSeries de 1 segundo (OTIMIZADO)
+				// TRAIL STOP NATIVO — Processamento OnEachTick (SEM DataSeries de 1s)
+				// Funciona instantaneamente no Strategy Analyzer, Backtest, Replay e Live Trading.
 				// =====================================================================
-				
-				// ✅ VERSÃO OTIMIZADA: Early exit mais agressivo
-				private void ProcessTrailStop1s()
+				private void ProcessTrailStop()
 				{
-				    // ✅ EARLY EXIT #1: Sem posição = sem trabalho (verificação mais rápida)
+				    if (!TRAIL_MODE) return;
+
+				    // ✅ 1. Sem posição aberta = reset de estado
 				    if (Position.MarketPosition == MarketPosition.Flat)
 				    {
 				        if (breakEvenTriggered)
@@ -4920,42 +4946,42 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				            breakEvenTriggered = false; 
 				            trailStopPrice = 0.0; 
 				            trailStepCount = 0;
-				            DebugPrint("[TRAIL 1S] Reset defensivo — posição flat.");
+				            DebugPrint("[TRAIL] Reset defensivo — posição flat.");
 				        }
 				        return;
 				    }
 				    
-				    // ✅ EARLY EXIT #2: Índice inválido
-				    if (TrailSeries1s_Index < 0) return;
-				    if (BarsArray == null || BarsArray.Length <= TrailSeries1s_Index) return;
-				    if (CurrentBars[TrailSeries1s_Index] < 1) return;
+				    if (CurrentBar < 0) return;
 				
-				    // ✅ EARLY EXIT #3: Lucro insuficiente para ativação (evita cálculos)
-				    double currentPrice = Closes[TrailSeries1s_Index][0];
+				    // ✅ 2. Preço atual confiável: Bid/Ask em tempo real, ou Close[0] em backtest/analyzer
+				    double currentPrice = Position.MarketPosition == MarketPosition.Long ? GetCurrentBid() : GetCurrentAsk();
+				    if (currentPrice <= 0 && CurrentBar >= 0) currentPrice = Close[0];
+				    if (currentPrice <= 0) return;
+
 				    double profitTicks = Position.GetUnrealizedProfitLoss(PerformanceUnit.Ticks, currentPrice);
 				    
 				    if (!breakEvenTriggered && profitTicks < TRAIL_Start)
 				    {
-				        return;  // ✅ Sai imediatamente se não atingiu threshold
+				        return;  // ✅ Sai imediatamente se não atingiu o lucro de ativação
 				    }
 				
 				    int minTicks = GetMinStopTicksForInstrument();
 				    double newStop = 0.0;
 				
-				    // FASE 1: Ativação inicial do TrailStop
+				    // FASE 1: Ativação inicial do TrailStop (ao atingir TRAIL_Start)
 				    if (!breakEvenTriggered && profitTicks >= TRAIL_Start)
 				    {
 				        if (Position.MarketPosition == MarketPosition.Long)
 				        {
 				            newStop = Math.Round((currentPrice - TRAIL_StopDistance * TickSize) / TickSize) * TickSize;
-				            if (newStop < currentPrice)
+				            if (newStop < currentPrice && newStop > 0)
 				            {
 				                if (SetStopLossSafe("", CalculationMode.Price, newStop, false))
 				                {
 				                    breakEvenTriggered = true;
 				                    trailStepCount = 0;
 				                    trailStopPrice = newStop;
-				                    DebugPrint($"[TRAIL 1S] ATIVADO Long | stop={newStop:F4} | lucro={profitTicks:F1}tk");
+				                    DebugPrint($"[TRAIL] ✅ ATIVADO Long | Stop={newStop:F2} | Lucro={profitTicks:F1} ticks");
 				                }
 				                else
 				                {
@@ -4965,7 +4991,7 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				                        breakEvenTriggered = true;
 				                        trailStepCount = 0;
 				                        trailStopPrice = currentPrice - safeTicks * TickSize;
-				                        DebugPrint($"[TRAIL 1S] ATIVADO Long (fallback) | {safeTicks}tk");
+				                        DebugPrint($"[TRAIL] ✅ ATIVADO Long (fallback ticks) | {safeTicks} ticks");
 				                    }
 				                }
 				            }
@@ -4980,7 +5006,7 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				                    breakEvenTriggered = true;
 				                    trailStepCount = 0;
 				                    trailStopPrice = newStop;
-				                    DebugPrint($"[TRAIL 1S] ATIVADO Short | stop={newStop:F4} | lucro={profitTicks:F1}tk");
+				                    DebugPrint($"[TRAIL] ✅ ATIVADO Short | Stop={newStop:F2} | Lucro={profitTicks:F1} ticks");
 				                }
 				                else
 				                {
@@ -4990,7 +5016,7 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				                        breakEvenTriggered = true;
 				                        trailStepCount = 0;
 				                        trailStopPrice = currentPrice + safeTicks * TickSize;
-				                        DebugPrint($"[TRAIL 1S] ATIVADO Short (fallback) | {safeTicks}tk");
+				                        DebugPrint($"[TRAIL] ✅ ATIVADO Short (fallback ticks) | {safeTicks} ticks");
 				                    }
 				                }
 				            }
@@ -4998,32 +5024,50 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				        return;
 				    }
 				
-				    // FASE 2: Step (Degraus Reais)
-				    if (!breakEvenTriggered || profitTicks < TRAIL_Start) return;
+				    // FASE 2: Degraus subsequentes (TRAIL_Step)
+				    if (!breakEvenTriggered || profitTicks < TRAIL_Start || TRAIL_Step <= 0) return;
 				
 				    int stepsEarned = (int)((profitTicks - TRAIL_Start) / TRAIL_Step);
 				    if (stepsEarned <= trailStepCount) return;
 				
-				    double stepValue = TRAIL_Step * TickSize;
+				    int stepsDelta = stepsEarned - trailStepCount;
+				    double stepValue = stepsDelta * (TRAIL_Step * TickSize);
 				
 				    if (Position.MarketPosition == MarketPosition.Long)
 				    {
 				        newStop = trailStopPrice + stepValue;
 				        if (newStop >= currentPrice - TickSize) 
 				            newStop = currentPrice - TickSize;
+
+				        newStop = Math.Round(newStop / TickSize) * TickSize;
+
+				        if (newStop > trailStopPrice)
+				        {
+				            if (SetStopLossSafe("", CalculationMode.Price, newStop, false))
+				            {
+				                DebugPrint($"[TRAIL] 📈 Step Long {trailStepCount} → {stepsEarned} | Stop={trailStopPrice:F2} → {newStop:F2}");
+				                trailStepCount = stepsEarned;
+				                trailStopPrice = newStop;
+				            }
+				        }
 				    }
-				    else
+				    else if (Position.MarketPosition == MarketPosition.Short)
 				    {
 				        newStop = trailStopPrice - stepValue;
 				        if (newStop <= currentPrice + TickSize) 
 				            newStop = currentPrice + TickSize;
-				    }
-				
-				    if (SetStopLossSafe("", CalculationMode.Price, newStop, false))
-				    {
-				        DebugPrint($"[TRAIL 1S] Step {trailStepCount} → {stepsEarned} | stop={trailStopPrice:F4} → {newStop:F4}");
-				        trailStepCount = stepsEarned;
-				        trailStopPrice = newStop;
+
+				        newStop = Math.Round(newStop / TickSize) * TickSize;
+
+				        if (newStop < trailStopPrice)
+				        {
+				            if (SetStopLossSafe("", CalculationMode.Price, newStop, false))
+				            {
+				                DebugPrint($"[TRAIL] 📉 Step Short {trailStepCount} → {stepsEarned} | Stop={trailStopPrice:F2} → {newStop:F2}");
+				                trailStepCount = stepsEarned;
+				                trailStopPrice = newStop;
+				            }
+				        }
 				    }
 				}
 				
@@ -5192,22 +5236,14 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				    
 				    _swBar.Restart();
 				    
-				    // Para estratégias com DataSeries adicionais, valida índices
-				    if (TRAIL_MODE && TrailSeries1s_Index >= 0)
-				    {
-				        if (BarsArray.Length <= TrailSeries1s_Index) return;
-				        if (CurrentBars == null || CurrentBars.Length <= TrailSeries1s_Index) return;
-				    }
-				    
-				    // ✅✅✅ ISTO ESTAVA FALTANDO ✅✅✅
-				    if (TRAIL_MODE && Position.MarketPosition != MarketPosition.Flat)
-				    {
-				        ProcessTrailStop1s();  // ← CHAMA A FUNÇÃO DE TRAIL STOP
-				    }
-				    // ✅✅✅ FIM DA ADIÇÃO ✅✅✅
-				    
 				    if (BarsInProgress != 0) return;
 				    if (CurrentBar < MinBarsRequired()) return;
+				    
+				    // ✅ TRAIL STOP NATIVO: Executado estritamente em BarsInProgress == 0 a cada tick de mercado
+				    if (TRAIL_MODE && Position.MarketPosition != MarketPosition.Flat)
+				    {
+				        ProcessTrailStop();
+				    }
 				    
 				    if (Force2D_Mode != force2DMode.OFF
 				        && _force2DUpSeries != null
@@ -5864,7 +5900,7 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				    
 				    else // Trata as estratégias: Preço e ManualBox
     {
-        if (QuantOperacoes < MaxOrderSession && !HasAccountPositionOrOrders() && !(SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName)))
+        if (QuantOperacoes < MaxOrderSession && Position.MarketPosition == MarketPosition.Flat && !HasAccountPositionOrOrders() && !(SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName)))
         {
             // 1. AVALIAR FILTROS INDEPENDENTEMENTE (Sem 'return' que mata o método)
             bool podeComprar = (currentOperatingMode == OperatingMode.Comprado || currentOperatingMode == OperatingMode.Ambos) && CheckEntryFiltersBuy();
@@ -5900,7 +5936,7 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
                     Print($"[VMBOT BRIDGE] 🚀 Sinal de COMPRA (Preço/Box) enviado para o indicador @ {p}");
                     IncrementarQuantOperacoes();
                     Reset1();
-                    if (OrderMode == orderMode.Mercado) return;
+                    return;
                 }
                 else
                 {
@@ -5969,15 +6005,15 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
                         Reset1();
                     }
                 
-                    if (SL_Ticks > 0) SetStopLoss("", CalculationMode.Ticks, SL_Ticks, false);
-                    if (TP_Ticks > 0) SetProfitTarget("", CalculationMode.Ticks, TP_Ticks, false);
+                    AplicarStopETakeProfitOrdens(1, Close[0], "");
 
-                    // ✅ CORREÇÃO: Se entrou a mercado, sai do método para não tentar vender no mesmo tick
-                    if (OrderMode == orderMode.Mercado) return; 
+                    // ✅ CORREÇÃO MANDATÓRIA: Se enviou compra (Mercado, PendenteLimit ou PendenteStop), sai do método
+                    // para nunca submeter ordem de venda no mesmo ciclo/tick!
+                    return; 
                 }
             }
 
-            // 3. EXECUTAR VENDA (só chega aqui se a compra falhou nos filtros ou não entrou a mercado)
+            // 3. EXECUTAR VENDA (só chega aqui se a compra falhou nos filtros ou não entrou)
             if (podeVender)
             {
                 if (SendSignalsToIndicator)
@@ -6007,7 +6043,7 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
                     Print($"[VMBOT BRIDGE] 🚀 Sinal de VENDA (Preço/Box) enviado para o indicador @ {p}");
                     IncrementarQuantOperacoes();
                     Reset1();
-                    if (OrderMode == orderMode.Mercado) return;
+                    return;
                 }
                 else
                 {
@@ -6077,11 +6113,10 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
                         Reset1();
                     }
 
-                    if (SL_Ticks > 0) SetStopLoss("", CalculationMode.Ticks, SL_Ticks, false);
-                    if (TP_Ticks > 0) SetProfitTarget("", CalculationMode.Ticks, TP_Ticks, false);
+                    AplicarStopETakeProfitOrdens(1, Close[0], "");
                     
-                    // ✅ CORREÇÃO: Se entrou a mercado, sai do método
-                    if (OrderMode == orderMode.Mercado) return;
+                    // ✅ CORREÇÃO MANDATÓRIA: Sai do método após submeter venda
+                    return;
                 }
             }
         }
@@ -6293,8 +6328,8 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 						string painelFilter = string.IsNullOrWhiteSpace(cleanPainelId) ? "" : $"or=(account_id.eq.{Uri.EscapeDataString(cleanPainelId)},panel_id.eq.{Uri.EscapeDataString(cleanPainelId)})&";
 						string strategyFilter = string.IsNullOrWhiteSpace(cleanStrategyId) ? "" : $"strategy_id=eq.{Uri.EscapeDataString(cleanStrategyId)}&";
 
-						// ✅ FASE 1: Se estiver FLAT, busca NOVO SINAL "Em Andamento" (exatamente como no VmSignalIndicatorHybrid)
-						if (Position.MarketPosition == MarketPosition.Flat)
+						// ✅ FASE 1: Se estiver FLAT no robô E na conta, busca NOVO SINAL "Em Andamento"
+						if (Position.MarketPosition == MarketPosition.Flat && !HasAccountPosition())
 						{
 							string json = null;
 
@@ -6590,6 +6625,21 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 						signal.StrategyId = ExtractJsonField(json, "strategy_id"); 
 				        signal.StrategyName = ExtractJsonField(json, "strategy_name");
 				        signal.Side = ExtractJsonField(json, "side").ToLowerInvariant();
+				        
+				        string isMasterEvStr = ExtractJsonField(json, "is_master_event");
+				        string sourceStr = ExtractJsonField(json, "source");
+				        string desc = ExtractJsonField(json, "description");
+				        string accName = ExtractJsonField(json, "account_name");
+
+				        // 🔒 Proteção Absoluta contra Auto-Execução / Loop / Echo de operações locais do NinjaTrader
+				        if (isMasterEvStr.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 ||
+				            sourceStr.IndexOf("ninjatrader", StringComparison.OrdinalIgnoreCase) >= 0 ||
+				            desc.IndexOf("NinjaTrader", StringComparison.OrdinalIgnoreCase) >= 0 ||
+				            (Account != null && !string.IsNullOrEmpty(accName) && string.Equals(accName.Trim(), Account.Name.Trim(), StringComparison.OrdinalIgnoreCase)))
+				        {
+				            Print($"[VM POLL] ⛔ Sinal ignorado: Originado da própria conta Master ({accName}) ou execução direta do NinjaTrader (Anti-Loop).");
+				            return null;
+				        }
 				        
 				        string rawSymbol = ExtractJsonField(json, "symbol");
 				        if (string.IsNullOrWhiteSpace(rawSymbol)) rawSymbol = ExtractJsonField(json, "ativo");
@@ -6925,6 +6975,362 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 
 				    DebugPrint($"[FILTRO CANDLE RANGE] ✅ Aprovado | Range: {candleRangeTicks:F0} ticks (Mín: {CandleRange_MinTicks}, Máx: {CandleRange_MaxTicks})");
 				    return true;
+				}
+
+
+				// =====================================================================
+				// ── AXION SHARED CONTEXT (CACHE EM MEMÓRIA RAM COMPARTILHADO) ────────
+				// =====================================================================
+				public static class AxionSharedContext
+				{
+					private static readonly object _syncLock = new object();
+					private static DateTime _lastFetchTime = DateTime.MinValue;
+					public static List<double> NiveisMacro = new List<double>();
+					public static List<double> Niveis0DTE = new List<double>();
+					public static List<double> NiveisBL = new List<double>();
+					public static List<double> NiveisGEX = new List<double>();
+					public static double HVL = 0;
+					public static double HVL0 = 0;
+					public static double PutWall = 0;
+					public static double CallWall = 0;
+					public static string GammaBias = "NEUTRO";
+					public static int BiasScore = 0;
+
+					public static void SincronizarGammaSeNecessario(string url, string key, string symbol, Action<string> debugPrint)
+					{
+						if ((DateTime.UtcNow - _lastFetchTime).TotalMinutes < 10) return;
+
+						lock (_syncLock)
+						{
+							if ((DateTime.UtcNow - _lastFetchTime).TotalMinutes < 10) return;
+							_lastFetchTime = DateTime.UtcNow;
+
+							Task.Run(async () =>
+							{
+								try
+								{
+									string cleanSymbol = string.IsNullOrWhiteSpace(symbol) ? "NQ" : symbol.Trim().ToUpper();
+									string queryUrl = $"{url.TrimEnd('/')}/rest/v1/gamma_levels?reference_symbol=eq.{Uri.EscapeDataString(cleanSymbol)}&order=id.desc&limit=1";
+
+									HttpWebRequest request = (HttpWebRequest)WebRequest.Create(queryUrl);
+									request.Method = "GET";
+									request.Timeout = 4000;
+									request.Headers.Add("apikey", key);
+									request.Headers.Add("Authorization", $"Bearer {key}");
+									request.ContentType = "application/json";
+
+									using (HttpWebResponse response = (HttpWebResponse)await request.GetResponseAsync())
+									using (StreamReader reader = new StreamReader(response.GetResponseStream()))
+									{
+										string json = await reader.ReadToEndAsync();
+										ParseGammaJson(json);
+										debugPrint?.Invoke($"[AXION CACHE] ✅ Gamma Levels sincronizados em memória RAM para {cleanSymbol}");
+									}
+								}
+								catch (Exception ex)
+								{
+									debugPrint?.Invoke($"[AXION CACHE] ⚠️ Falha ao sincronizar Gamma Levels: {ex.Message}");
+								}
+							});
+						}
+					}
+
+					private static void ParseGammaJson(string json)
+					{
+						if (string.IsNullOrWhiteSpace(json)) return;
+						json = json.Trim().TrimStart('[').TrimEnd(']');
+						if (string.IsNullOrWhiteSpace(json)) return;
+
+						lock (_syncLock)
+						{
+							NiveisMacro.Clear();
+							Niveis0DTE.Clear();
+							NiveisBL.Clear();
+							NiveisGEX.Clear();
+
+							double extrairNum(string chave)
+							{
+								string pat = "\"" + chave + "\":";
+								int idx = json.IndexOf(pat, StringComparison.OrdinalIgnoreCase);
+								if (idx < 0) return 0;
+								int st = idx + pat.Length;
+								while (st < json.Length && (char.IsWhiteSpace(json[st]) || json[st] == '"')) st++;
+								int ed = st;
+								while (ed < json.Length && (char.IsDigit(json[ed]) || json[ed] == '.' || json[ed] == '-')) ed++;
+								if (ed > st && double.TryParse(json.Substring(st, ed - st), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double val))
+									return val;
+								return 0;
+							}
+
+							List<double> extrairLista(string chave)
+							{
+								List<double> list = new List<double>();
+								string pat = "\"" + chave + "\":";
+								int idx = json.IndexOf(pat, StringComparison.OrdinalIgnoreCase);
+								if (idx < 0) return list;
+								int st = idx + pat.Length;
+								while (st < json.Length && (char.IsWhiteSpace(json[st]) || json[st] == '"')) st++;
+								int ed = st;
+								while (ed < json.Length && json[ed] != '"' && json[ed] != ',' && json[ed] != '}') ed++;
+								if (ed > st)
+								{
+									string raw = json.Substring(st, ed - st);
+									string[] parts = raw.Split(',');
+									foreach (string p in parts)
+									{
+										if (double.TryParse(p.Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d) && d > 0)
+											list.Add(d);
+									}
+								}
+								return list;
+							}
+
+							HVL = extrairNum("hvl");
+							CallWall = extrairNum("call_resistance");
+							PutWall = extrairNum("put_support");
+							HVL0 = extrairNum("hvl_0dte");
+							double c0 = extrairNum("call_resistance_0dte");
+							double p0 = extrairNum("put_support_0dte");
+							double gwall = extrairNum("gamma_wall_0dte");
+
+							if (HVL > 0) NiveisMacro.Add(HVL);
+							if (CallWall > 0) NiveisMacro.Add(CallWall);
+							if (PutWall > 0) NiveisMacro.Add(PutWall);
+							if (gwall > 0) NiveisMacro.Add(gwall);
+
+							if (HVL0 > 0) Niveis0DTE.Add(HVL0);
+							if (c0 > 0) Niveis0DTE.Add(c0);
+							if (p0 > 0) Niveis0DTE.Add(p0);
+
+							NiveisBL = extrairLista("bl");
+							NiveisGEX = extrairLista("gex");
+						}
+					}
+				}
+
+				// =====================================================================
+				// ── SESSÃO 24 & 25: LÓGICA FILTRO GAMMA E STOP/TP ESTRUTURAL ────────
+				// =====================================================================
+				private List<double> ObterNiveisGammaSelecionados()
+				{
+					List<double> list = new List<double>();
+					lock (typeof(AxionSharedContext))
+					{
+						if (Gamma_GrupoMacro) list.AddRange(AxionSharedContext.NiveisMacro);
+						if (Gamma_Grupo0DTE) list.AddRange(AxionSharedContext.Niveis0DTE);
+						if (Gamma_GrupoBL_Fortes && AxionSharedContext.NiveisBL.Count > 0)
+						{
+							// Pega do 7 ao 10 (ou últimos 4 da lista de BL)
+							int startIdx = Math.Max(0, AxionSharedContext.NiveisBL.Count - 4);
+							for (int i = startIdx; i < AxionSharedContext.NiveisBL.Count; i++)
+								list.Add(AxionSharedContext.NiveisBL[i]);
+						}
+						if (Gamma_GrupoGEX_Fortes && AxionSharedContext.NiveisGEX.Count > 0)
+						{
+							// Pega do 7 ao 10 (ou últimos 4 da lista de GEX)
+							int startIdx = Math.Max(0, AxionSharedContext.NiveisGEX.Count - 4);
+							for (int i = startIdx; i < AxionSharedContext.NiveisGEX.Count; i++)
+								list.Add(AxionSharedContext.NiveisGEX[i]);
+						}
+					}
+					list.Sort();
+					return list;
+				}
+
+				private bool CheckFiltroGamma(int direction)
+				{
+					if (!Gamma_FiltroAtivo) return true;
+
+					List<double> niveisAtivos = ObterNiveisGammaSelecionados();
+					if (niveisAtivos == null || niveisAtivos.Count < 2) return true;
+
+					double precoAtual = Close[0];
+					double piso = double.MinValue;
+					double teto = double.MaxValue;
+
+					foreach (double nivel in niveisAtivos)
+					{
+						if (nivel <= precoAtual && nivel > piso) piso = nivel;
+						if (nivel >= precoAtual && nivel < teto) teto = nivel;
+					}
+
+					if (piso == double.MinValue || teto == double.MaxValue) return true;
+
+					double distanciaRangeTicks = (teto - piso) / TickSize;
+					if (Gamma_RangeMinTicks > 0 && distanciaRangeTicks < Gamma_RangeMinTicks)
+					{
+						DebugPrint($"[FILTRO GAMMA] ❌ Bloqueado: Range ({distanciaRangeTicks:F0} ticks) < Mínimo ({Gamma_RangeMinTicks})");
+						return false;
+					}
+					if (Gamma_RangeMaxTicks > 0 && distanciaRangeTicks > Gamma_RangeMaxTicks)
+					{
+						DebugPrint($"[FILTRO GAMMA] ❌ Bloqueado: Range ({distanciaRangeTicks:F0} ticks) > Máximo ({Gamma_RangeMaxTicks})");
+						return false;
+					}
+
+					if (Gamma_DrawLevels)
+					{
+						Draw.Line(this, "Gamma_Piso", false, 0, piso, -20, piso, Brushes.SeaGreen, DashStyleHelper.Solid, 2);
+						Draw.Line(this, "Gamma_Teto", false, 0, teto, -20, teto, Brushes.Crimson, DashStyleHelper.Solid, 2);
+					}
+
+					double posPct = ((precoAtual - piso) / (teto - piso)) * 100.0;
+
+					if (direction == 1) // COMPRA
+					{
+						bool passouPullback = Gamma_OperarPullback && (posPct <= Gamma_PullbackCompraMaxPct);
+						bool passouBreakout = Gamma_OperarBreakout && (Close[0] > teto);
+
+						if (!passouPullback && !passouBreakout)
+						{
+							DebugPrint($"[FILTRO GAMMA] ❌ COMPRA Bloqueada: Pos={posPct:F1}% (Permitido: 0 a {Gamma_PullbackCompraMaxPct:F0}%)");
+							return false;
+						}
+						DebugPrint($"[FILTRO GAMMA] ✅ COMPRA Aprovada | Pos={posPct:F1}% | Piso={piso:F2} | Teto={teto:F2}");
+						return true;
+					}
+					else if (direction == -1) // VENDA
+					{
+						bool passouPullback = Gamma_OperarPullback && (posPct >= Gamma_PullbackVendaMinPct);
+						bool passouBreakout = Gamma_OperarBreakout && (Close[0] < piso);
+
+						if (!passouPullback && !passouBreakout)
+						{
+							DebugPrint($"[FILTRO GAMMA] ❌ VENDA Bloqueada: Pos={posPct:F1}% (Permitido: {Gamma_PullbackVendaMinPct:F0} a 100%)");
+							return false;
+						}
+						DebugPrint($"[FILTRO GAMMA] ✅ VENDA Aprovada | Pos={posPct:F1}% | Piso={piso:F2} | Teto={teto:F2}");
+						return true;
+					}
+
+					return false;
+				}
+
+				private double ObterVpocRecente(int lookbackBars = 20)
+				{
+					if (CurrentBar < lookbackBars) return 0;
+					double minP = double.MaxValue;
+					double maxP = double.MinValue;
+
+					for (int i = 0; i < lookbackBars; i++)
+					{
+						if (Low[i] < minP) minP = Low[i];
+						if (High[i] > maxP) maxP = High[i];
+					}
+
+					if (maxP <= minP || TickSize <= 0) return 0;
+					int totalBins = (int)Math.Min(100, (maxP - minP) / TickSize + 1);
+					long[] volumeProfile = new long[totalBins];
+
+					for (int i = 0; i < lookbackBars; i++)
+					{
+						double barMid = (High[i] + Low[i]) / 2.0;
+						int bin = (int)((barMid - minP) / TickSize);
+						if (bin >= 0 && bin < totalBins)
+							volumeProfile[bin] += (long)Volume[i];
+					}
+
+					long maxVol = -1;
+					int maxBin = 0;
+					for (int b = 0; b < totalBins; b++)
+					{
+						if (volumeProfile[b] > maxVol)
+						{
+							maxVol = volumeProfile[b];
+							maxBin = b;
+						}
+					}
+
+					return minP + (maxBin * TickSize);
+				}
+
+				// ── 25. GESTÃO ESTRUTURAL DE STOPLOSS & TAKEPROFIT (ENUM) ────────
+				public enum ModoStopLossVMBot { FixoTicks, HLCA, GammaNivel, VPOC_Micro, ATR }
+
+				private (int StopTicks, int TargetTicks) CalcularStopETakeProfitEstrutural(int direction, double entryPrice)
+				{
+					int stopCalculadoTicks = SL_Ticks;
+
+					switch (Stop_OrigemModo)
+					{
+						case ModoStopLossVMBot.GammaNivel:
+							List<double> niveis = ObterNiveisGammaSelecionados();
+							double nivelRef = 0;
+							if (direction == 1)
+							{
+								for (int i = niveis.Count - 1; i >= 0; i--)
+								{
+									if (niveis[i] <= entryPrice) { nivelRef = niveis[i]; break; }
+								}
+								if (nivelRef > 0)
+								{
+									double pStop = nivelRef - (Stop_FolgaNivelTicks * TickSize);
+									stopCalculadoTicks = (int)Math.Round((entryPrice - pStop) / TickSize);
+								}
+							}
+							else
+							{
+								for (int i = 0; i < niveis.Count; i++)
+								{
+									if (niveis[i] >= entryPrice) { nivelRef = niveis[i]; break; }
+								}
+								if (nivelRef > 0)
+								{
+									double pStop = nivelRef + (Stop_FolgaNivelTicks * TickSize);
+									stopCalculadoTicks = (int)Math.Round((pStop - entryPrice) / TickSize);
+								}
+							}
+							break;
+
+						case ModoStopLossVMBot.VPOC_Micro:
+							double vpoc = ObterVpocRecente(20);
+							if (vpoc > 0)
+							{
+								double pStop = direction == 1 ? vpoc - (Stop_FolgaNivelTicks * TickSize) : vpoc + (Stop_FolgaNivelTicks * TickSize);
+								stopCalculadoTicks = (int)Math.Round(Math.Abs(entryPrice - pStop) / TickSize);
+							}
+							break;
+
+						case ModoStopLossVMBot.ATR:
+							if (_gridATR == null || _gridATR.Period != Stop_ATR_Period)
+								_gridATR = ATR(Stop_ATR_Period);
+							double atrVal = _gridATR[0];
+							if (atrVal > 0)
+							{
+								stopCalculadoTicks = (int)Math.Round((atrVal * Stop_ATR_Multiplier) / TickSize);
+							}
+							break;
+
+						case ModoStopLossVMBot.HLCA:
+							double hlcaStop = CalcHLCAStopLoss(direction, entryPrice);
+							if (hlcaStop > 0)
+								stopCalculadoTicks = (int)Math.Round(Math.Abs(entryPrice - hlcaStop) / TickSize);
+							break;
+
+						default:
+							stopCalculadoTicks = SL_Ticks;
+							break;
+					}
+
+					// 🛡️ REGRA INVIOLÁVEL: O Stop Estrutural nunca pode ser menor que o Stop Convencional (SL_Ticks)
+					int stopFinalTicks = Math.Max(stopCalculadoTicks, SL_Ticks);
+
+					// 🎯 TAKE PROFIT POR FATOR MULTIPLICADOR
+					int tpFinalTicks = TP_Ticks;
+					if (TP_UsarFatorMultiplicador && TP_FatorMultiplicador > 0)
+					{
+						tpFinalTicks = (int)Math.Round(stopFinalTicks * TP_FatorMultiplicador);
+					}
+
+					DebugPrint($"[RISK ENGINE V1.8] 📐 Modo: {Stop_OrigemModo} | SL Final: {stopFinalTicks}t (Piso SL: {SL_Ticks}t) | TP Final: {tpFinalTicks}t (Fator: {TP_FatorMultiplicador:F1}x)");
+					return (stopFinalTicks, tpFinalTicks);
+				}
+
+				private void AplicarStopETakeProfitOrdens(int direction, double entryPrice, string signalName = "")
+				{
+					var (sl, tp) = CalcularStopETakeProfitEstrutural(direction, entryPrice);
+					if (sl > 0) SetStopLoss(signalName, CalculationMode.Ticks, sl, false);
+					if (tp > 0) SetProfitTarget(signalName, CalculationMode.Ticks, tp, false);
 				}
 
 		        #region Properties
@@ -7392,6 +7798,89 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 
 				
 				
+
+				// ── 24. FILTRO GAMMA LEVEL (Sessão Única Modular) ────────────────
+				[NinjaScriptProperty]
+				[Display(Name="Filtro Gamma — Ativo", Description="Se ativado, filtra qualquer entrada pelo posicionamento do preço no canal Gamma", Order=1, GroupName="24. FILTRO GAMMA LEVEL")]
+				public bool Gamma_FiltroAtivo { get; set; }
+
+				[NinjaScriptProperty]
+				[Display(Name="Operar Pullback (Reteste/Extremos)", Description="Permite entradas na região de desconto/prêmio do canal", Order=2, GroupName="24. FILTRO GAMMA LEVEL")]
+				public bool Gamma_OperarPullback { get; set; } = true;
+
+				[NinjaScriptProperty]
+				[Display(Name="Operar Breakout (Rompimento)", Description="Permite entradas quando o preço rompe o piso ou teto", Order=3, GroupName="24. FILTRO GAMMA LEVEL")]
+				public bool Gamma_OperarBreakout { get; set; } = true;
+
+				[NinjaScriptProperty]
+				[Range(0.0, 50.0)]
+				[Display(Name="Pullback Compra — Range Máximo (%)", Description="Percentual a partir do piso para compra (Ex: 50% = compra entre 0% e 50%)", Order=4, GroupName="24. FILTRO GAMMA LEVEL")]
+				public double Gamma_PullbackCompraMaxPct { get; set; } = 50.0;
+
+				[NinjaScriptProperty]
+				[Range(50.0, 100.0)]
+				[Display(Name="Pullback Venda — Range Mínimo (%)", Description="Percentual a partir do piso para venda (Ex: 50% = venda entre 50% e 100%)", Order=5, GroupName="24. FILTRO GAMMA LEVEL")]
+				public double Gamma_PullbackVendaMinPct { get; set; } = 50.0;
+
+				[NinjaScriptProperty]
+				[Range(0, int.MaxValue)]
+				[Display(Name="Range Mínimo entre Níveis (Ticks)", Description="Distância mínima em ticks entre o piso e o teto (0 = sem mínimo)", Order=6, GroupName="24. FILTRO GAMMA LEVEL")]
+				public int Gamma_RangeMinTicks { get; set; } = 25;
+
+				[NinjaScriptProperty]
+				[Range(0, int.MaxValue)]
+				[Display(Name="Range Máximo entre Níveis (Ticks)", Description="Distância máxima em ticks entre o piso e o teto (0 = sem máximo)", Order=7, GroupName="24. FILTRO GAMMA LEVEL")]
+				public int Gamma_RangeMaxTicks { get; set; } = 300;
+
+				[NinjaScriptProperty]
+				[Display(Name="Região: Macro (PUT/CALL/HVL/GWall)", GroupName="24. FILTRO GAMMA LEVEL", Order=8)]
+				public bool Gamma_GrupoMacro { get; set; } = true;
+
+				[NinjaScriptProperty]
+				[Display(Name="Região: 0DTE (HVL 0DTE/PUT 0DTE/CALL 0DTE)", GroupName="24. FILTRO GAMMA LEVEL", Order=9)]
+				public bool Gamma_Grupo0DTE { get; set; } = true;
+
+				[NinjaScriptProperty]
+				[Display(Name="Região: BL Fortes (BL 7 a 10)", GroupName="24. FILTRO GAMMA LEVEL", Order=10)]
+				public bool Gamma_GrupoBL_Fortes { get; set; } = true;
+
+				[NinjaScriptProperty]
+				[Display(Name="Região: GEX Fortes (GEX 7 a 10)", GroupName="24. FILTRO GAMMA LEVEL", Order=11)]
+				public bool Gamma_GrupoGEX_Fortes { get; set; } = true;
+
+				[NinjaScriptProperty]
+				[Display(Name="Desenhar Níveis no Gráfico", GroupName="24. FILTRO GAMMA LEVEL", Order=12)]
+				public bool Gamma_DrawLevels { get; set; } = true;
+
+				// ── 25. GESTÃO ESTRUTURAL DE STOPLOSS & TAKEPROFIT ───────────────
+				[NinjaScriptProperty]
+				[Display(Name="Origem do Stop Loss", Description="FixoTicks, HLCA, GammaNivel, VPOC_Micro ou ATR", GroupName="25. STOP LOSS & TAKE PROFIT ESTRUTURAL", Order=1)]
+				public ModoStopLossVMBot Stop_OrigemModo { get; set; } = ModoStopLossVMBot.FixoTicks;
+
+				[NinjaScriptProperty]
+				[Range(0, 50)]
+				[Display(Name="Folga do Stop Atrás do Nível/VPOC (Ticks)", Description="Ticks de respiro além da barreira física de opções ou VPOC", GroupName="25. STOP LOSS & TAKE PROFIT ESTRUTURAL", Order=2)]
+				public int Stop_FolgaNivelTicks { get; set; } = 4;
+
+				[NinjaScriptProperty]
+				[Range(1, 100)]
+				[Display(Name="ATR — Período", Description="Período de cálculo do ATR para o Stop Loss", GroupName="25. STOP LOSS & TAKE PROFIT ESTRUTURAL", Order=3)]
+				public int Stop_ATR_Period { get; set; } = 10;
+
+				[NinjaScriptProperty]
+				[Range(0.5, 10.0)]
+				[Display(Name="ATR — Multiplicador", Description="Multiplicador do ATR (Ex: 3.0 x ATR)", GroupName="25. STOP LOSS & TAKE PROFIT ESTRUTURAL", Order=4)]
+				public double Stop_ATR_Multiplier { get; set; } = 3.0;
+
+				[NinjaScriptProperty]
+				[Display(Name="TP por Fator Multiplicador", Description="Calcula o Take Profit multiplicando o Stop Loss real pelo fator", GroupName="25. STOP LOSS & TAKE PROFIT ESTRUTURAL", Order=5)]
+				public bool TP_UsarFatorMultiplicador { get; set; } = true;
+
+				[NinjaScriptProperty]
+				[Range(0.5, 10.0)]
+				[Display(Name="TP — Fator Multiplicador (Risco:Retorno)", Description="Ex: 1.5 = TP de 1.5x o Stop; 2.0 = TP de 2.0x o Stop", GroupName="25. STOP LOSS & TAKE PROFIT ESTRUTURAL", Order=6)]
+				public double TP_FatorMultiplicador { get; set; } = 1.5;
+
 				#endregion
 		    }
 		}

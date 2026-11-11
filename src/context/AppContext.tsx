@@ -13008,6 +13008,10 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                   created_at: ev.timestamp || new Date().toISOString(),
                   description: `[${matchedPanel?.name || ev.symbol}] Entrada direta no NinjaTrader (${ev.orderName || 'Chart Trader'})`,
                   is_master_event: true,
+                  source: 'ninjatrader_master_execution',
+                  origin: 'ninjatrader_native',
+                  is_broadcast_blocked: true,
+                  is_remote_signal: false,
                   already_dispatched: true,
                   already_dispatched_to_slaves: true,
                   is_atm: Boolean(ev.stopLoss || ev.takeProfit)

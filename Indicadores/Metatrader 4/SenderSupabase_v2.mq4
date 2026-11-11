@@ -39,9 +39,9 @@ input string Group_Destino       = "=== 2. DESTINO DE ENVIO ===";
 input int    InpDestinationMode  = DEST_SUPABASE_ONLY;                // Modo: 0=Supabase Direto (Padrao), 1=Hub Local WS, 2=Dual (Hub + DB)
 input string InpLocalHubUrl      = "http://127.0.0.1:8080";             // URL do Relay WebSocket Hub (Porta 8080)
 input string Supabase_URL        = "https://db.vemviraramesa.com.br"; // Supabase URL
-input string Supabase_API_Key    = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJyb2xlIjogInNlcnZpY2Vfcm9sZSIsCiAgImlzcyI6ICJzdXBhYmFzZSIsCiAgImlhdCI6IDE3MTUwNTA4MDAsCiAgImV4cCI6 IDE4NzI4MTcyMDAKfQ.YtBPvGJb6-WoLS70wxSXaKTg4TGQnMUcUTeD2p_2jBY";
+input string Supabase_API_Key    = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJyb2xlIjogInNlcnZpY2Vfcm9sZSIsCiAgImlzcyI6ICJzdXBhYmFzZSIsCiAgImlhdCI6IDE3MTUwNTA4MDAsCiAgImV4cCI6IDE4NzI4MTcyMDAKfQ.YtBPvGJb6-WoLS70wxSXaKTg4TGQnMUcUTeD2p_2jBY";
 input string Instance_ID         = "painel_principal";
-input int    Hora_Ajuste         = -5;                                // Ajuste de fuso horario da corretora (ex: -5)
+input int    Hora_Ajuste         = -5;                                // Ajuste de fuso horario da corretora (padrao -5, igual ao GammaPainel: converte para horario de Brasilia)
 input int    Send_Interval_MS    = 100;                               // Intervalo minimo entre envios (ms)
 input int    WebRequest_Timeout  = 10000;                             // Timeout WebRequest (ms)
 
@@ -152,7 +152,7 @@ string FormatAdjustedISO(datetime brokerTime)
    string iso = TimeToStr(adjustedTime, TIME_DATE|TIME_SECONDS);
    StringReplace(iso, ".", "-");
    StringReplace(iso, " ", "T");
-   return iso + "Z";
+   return iso; // sem sufixo Z: o Postgres interpreta no fuso do banco (America/Sao_Paulo)
 }
 
 bool IsNasdaqOpen()
@@ -530,8 +530,14 @@ void EnviarParaDestino()
    if(rawJson == g_last_json) return;
    g_last_json = rawJson;
 
+   // Linha ao vivo = linha do minuto M1 corrente (timestamp = abertura da barra).
+   // Atualizada continuamente; ao virar o minuto ela fica congelada como historico.
+   datetime barOpen = iTime(NASDAQ_Symbol, PERIOD_M1, 0);
+   if(barOpen == 0) barOpen = iTime(NULL, PERIOD_M1, 0);
+   if(barOpen == 0) barOpen = TimeCurrent();
    string updatedAtIso = FormatAdjustedISO(TimeCurrent());
-   string fullPayload = rawJson + ",\"updated_at\":\"" + updatedAtIso + "\"}";
+   string barIso       = FormatAdjustedISO(barOpen);
+   string fullPayload = rawJson + ",\"timestamp\":\"" + barIso + "\",\"updated_at\":\"" + updatedAtIso + "\"}";
 
    // 1. Hub Local (Modo 1 ou 2)
    if(InpDestinationMode == DEST_LOCAL_HUB || InpDestinationMode == DEST_DUAL_STREAM)
@@ -547,7 +553,7 @@ void EnviarParaDestino()
       while(StringLen(baseUrl) > 0 && StringSubstr(baseUrl, StringLen(baseUrl) - 1, 1) == "/")
          baseUrl = StringSubstr(baseUrl, 0, StringLen(baseUrl) - 1);
 
-      string url = baseUrl + "/rest/v1/nasdaq_force?on_conflict=instance_id";
+      string url = baseUrl + "/rest/v1/nasdaq_force?on_conflict=instance_id,timestamp";
       EnviarPayload(url, fullPayload, true);
    }
 }
@@ -560,9 +566,10 @@ void EnviarCandleFechadoParaDestino(datetime closedTime)
    bool hasData = (assets[0].compra > 0 || assets[0].venda > 0);
    if(!hasData) return;
 
-   string rawJson = BuildForceJson();
+   // Usa o ultimo snapshot ainda dentro do minuto fechado (evita gravar valores do minuto novo)
+   string rawJson = (StringLen(g_last_json) > 0) ? g_last_json : BuildForceJson();
    string updatedAtIso = FormatAdjustedISO(closedTime > 0 ? closedTime : TimeCurrent());
-   string fullPayload = rawJson + ",\"timestamp\":\"" + updatedAtIso + "\",\"updated_at\":\"" + updatedAtIso + "\"}";
+   string fullPayload = rawJson + ",\"timestamp\":\"" + updatedAtIso + "\",\"updated_at\":\"" + FormatAdjustedISO(TimeCurrent()) + "\"}";
 
    if(InpDestinationMode == DEST_SUPABASE_ONLY || InpDestinationMode == DEST_DUAL_STREAM)
    {
@@ -605,6 +612,7 @@ void OnTimer()
       datetime closedCandleTime = g_last_m1_bar_time;
       g_last_m1_bar_time = currentBarTime;
       EnviarCandleFechadoParaDestino(closedCandleTime);
+      g_last_json = ""; // forca criacao imediata da linha do novo minuto
    }
 
    // Envio em Tempo Real

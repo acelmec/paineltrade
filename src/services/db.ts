@@ -2023,9 +2023,14 @@ export async function triggerCopyTradingForMaster(masterReport: any, originalPay
           continue;
         }
 
-        const ratio = Number((slaveConfig as any).lot_multiplier || 1);
-        let slaveQty = Math.round(masterQty * ratio);
+        const rawMultiplier = (slaveConfig as any).lot_multiplier !== undefined && (slaveConfig as any).lot_multiplier !== null
+          ? (slaveConfig as any).lot_multiplier
+          : (slaveConfig as any).lotMultiplier;
+        const ratio = Number(rawMultiplier);
+        const safeRatio = (!isNaN(ratio) && ratio > 0) ? ratio : 1.0;
+        let slaveQty = Math.round(masterQty * safeRatio);
         if (slaveQty < 1) slaveQty = 1;
+        console.log(`⚡ [COPY TRADING] Master '${masterAccName}' (${masterQty}x) ➔ Slave '${slaveAccount.account_name}' (${slaveQty}x | Mult: ${safeRatio}x)`);
 
         const isAtm = Boolean(
           (originalPayload as any).is_atm ||

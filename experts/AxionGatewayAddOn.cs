@@ -170,10 +170,13 @@ namespace NinjaTrader.NinjaScript.AddOns
             var match = Regex.Match(json, $"\"{key}\"\\s*:\\s*(\\d+)");
             return match.Success ? int.Parse(match.Groups[1].Value) : def;
         }
+
         private static double ExtractJsonDouble(string json, string key, double def)
         {
-            var match = Regex.Match(json, $"\"{key}\"\\s*:\\s*([0-9.]+)");
-            return match.Success ? double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) : def;
+            var match = Regex.Match(json, $"\"{key}\"\\s*:\\s*([0-9.,]+)");
+            if (!match.Success) return def;
+            string valStr = match.Groups[1].Value.Replace(',', '.');
+            return double.TryParse(valStr, NumberStyles.Any, CultureInfo.InvariantCulture, out double val) ? val : def;
         }
     }
 
@@ -778,16 +781,17 @@ namespace NinjaTrader.NinjaScript.AddOns
                         ord.OrderState == OrderState.Rejected)
                         return false;
 
-                    string ordId = ord.OrderId ?? ord.Id.ToString();
-                    if (_inFlightCancellingOrders.TryGetValue(ordId, out DateTime lastCancelTime))
-                    {
-                        if ((now - lastCancelTime).TotalSeconds < 4.0)
-                            return false; // Ordem em trânsito de cancelamento
-                    }
+                    // ✅ SUBMISSÃO: a trava de "não cancelar ordem de entrada" NÃO se aplica ao envio.
+                    // (Bug anterior: Copy_Entry / SL / TP sem OCO eram descartados silenciosamente aqui,
+                    // gerando log de "copiada" sem a ordem existir na NinjaTrader.)
                     return true;
                 }).ToArray();
 
-                if (validOrders.Length == 0) return;
+                if (validOrders.Length == 0)
+                {
+                    Log($"[AVISO SUBMIT]: Nenhuma ordem válida para enviar na conta {targetAccount.Name} (estados terminais).");
+                    return;
+                }
 
                 foreach (var ord in validOrders)
                 {
@@ -826,7 +830,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                         ord.OrderState == OrderState.Rejected)
                         return false;
 
-                    string ordId = ord.OrderId ?? ord.Id.ToString();
+                    string ordId = GetCancelKey(targetAccount, ord);
                     if (_inFlightCancellingOrders.TryGetValue(ordId, out DateTime lastCancelTime))
                     {
                         if ((now - lastCancelTime).TotalSeconds < 4.0)
@@ -875,8 +879,9 @@ namespace NinjaTrader.NinjaScript.AddOns
         /// <summary>
         /// Cancelamento seguro de ordens com semáforo atômico anti-colisão e execução síncrona no Dispatcher UI.
         /// Ignora ordens já sob cancelamento, em CancelPending, Cancelled, Filled ou Rejected.
+        /// Se bypassEntryProtection for false, bloqueia terminantemente o cancelamento de qualquer ordem de entrada solitária.
         /// </summary>
-        private static void SafeCancelOrders(Account targetAccount, params Order[] orders)
+        private static void SafeCancelOrders(Account targetAccount, bool bypassEntryProtection, params Order[] orders)
         {
             if (targetAccount == null || orders == null || orders.Length == 0) return;
             try
@@ -890,11 +895,21 @@ namespace NinjaTrader.NinjaScript.AddOns
                         ord.OrderState == OrderState.Rejected)
                         return false;
 
-                    string ordId = ord.OrderId ?? ord.Id.ToString();
-                    if (_inFlightCancellingOrders.TryGetValue(ordId, out DateTime lastCancelTime))
+                    // 🛡️ TRAVA SUPREMA DE SEGURANÇA: NUNCA cancelar ordens de entrada legítimas solitárias no book!
+                    if (!bypassEntryProtection && IsExplicitEntryOrder(ord))
                     {
-                        if ((now - lastCancelTime).TotalSeconds < 4.0)
-                            return false; // Já despachado para cancelamento nos últimos 4s
+                        return false;
+                    }
+
+                    // Cancelamento explícito (bypass) do usuário nunca é suprimido pelo semáforo de trânsito.
+                    if (!bypassEntryProtection)
+                    {
+                        string ordId = GetCancelKey(targetAccount, ord);
+                        if (_inFlightCancellingOrders.TryGetValue(ordId, out DateTime lastCancelTime))
+                        {
+                            if ((now - lastCancelTime).TotalSeconds < 4.0)
+                                return false; // Já despachado para cancelamento nos últimos 4s
+                        }
                     }
                     return true;
                 }).Distinct().ToArray();
@@ -904,8 +919,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                 // Registra imediatamente todos os IDs no semáforo para evitar concorrência
                 foreach (var ord in validOrders)
                 {
-                    string ordId = ord.OrderId ?? ord.Id.ToString();
-                    _inFlightCancellingOrders[ordId] = now;
+                    _inFlightCancellingOrders[GetCancelKey(targetAccount, ord)] = now;
                 }
 
                 if (Application.Current?.Dispatcher != null && !Application.Current.Dispatcher.CheckAccess())
@@ -933,10 +947,19 @@ namespace NinjaTrader.NinjaScript.AddOns
             {
                 Log($"[AVISO SAFE CANCEL]: Não foi possível cancelar ordem em {targetAccount.Name}: {ex.Message}");
             }
-            finally
-            {
-                SuppressExecutingScriptName();
-            }
+        }
+
+        // Chave única por conta+ordem (OrderId pode ser vazio "" em ordens pendentes recém-criadas,
+        // o que fazia uma ordem bloquear o cancelamento de todas as outras por 4s).
+        private static string GetCancelKey(Account acc, Order ord)
+        {
+            string id = string.IsNullOrEmpty(ord.OrderId) ? ord.Id.ToString() : ord.OrderId;
+            return id;
+        }
+
+        private static void SafeCancelOrders(Account targetAccount, params Order[] orders)
+        {
+            SafeCancelOrders(targetAccount, false, orders);
         }
 
         #endregion
@@ -1096,12 +1119,71 @@ namespace NinjaTrader.NinjaScript.AddOns
             return false;
         }
 
+        public static bool IsExplicitProtectionBracket(Order order)
+        {
+            if (order == null) return false;
+
+            // 1. Ordens Market nunca são brackets pendentes
+            if (order.OrderType == OrderType.Market) return false;
+
+            // 2. Se a ordem não possui vínculo OCO, NUNCA é um bracket de proteção automático!
+            // Ordens solitárias no livro (Limit, Stop Market, Stop Limit) são intenções de entrada do trader/robô.
+            if (string.IsNullOrWhiteSpace(order.Oco)) return false;
+
+            // 3. Se possui OCO, verificar se tem nome expresso de Stop Loss ou Take Profit (ATM do NinjaTrader ou Axion)
+            string n = order.Name?.Trim() ?? "";
+            bool isBracketName = n.StartsWith("Axion_SL", StringComparison.OrdinalIgnoreCase) ||
+                                 n.StartsWith("Axion_TP", StringComparison.OrdinalIgnoreCase) ||
+                                 n.StartsWith("Profit target", StringComparison.OrdinalIgnoreCase) ||
+                                 n.StartsWith("Stop loss", StringComparison.OrdinalIgnoreCase) ||
+                                 n.IndexOf("Target", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                 n.IndexOf("Stop", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                 n.Equals("SL", StringComparison.OrdinalIgnoreCase) ||
+                                 n.Equals("TP", StringComparison.OrdinalIgnoreCase);
+
+            return isBracketName;
+        }
+
+        public static bool IsExplicitEntryOrder(Order order)
+        {
+            if (order == null) return false;
+
+            // Se for comprovadamente um bracket de proteção com OCO ativo, não é entrada
+            if (IsExplicitProtectionBracket(order)) return false;
+
+            // Qualquer ordem pendente Limit, Stop Market ou Stop Limit sem ser bracket OCO é 100% entrada legítima!
+            if (order.OrderType == OrderType.Limit || order.OrderType == OrderType.StopMarket || order.OrderType == OrderType.StopLimit)
+            {
+                return true;
+            }
+
+            string n = order.Name?.Trim() ?? "";
+            // Ordens de entrada por padrão de nome
+            if (n.StartsWith("Buy", StringComparison.OrdinalIgnoreCase) ||
+                n.StartsWith("Sell", StringComparison.OrdinalIgnoreCase) ||
+                n.IndexOf("Entry", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("Limit", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("MIT", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("MarketIfTouched", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("Robo", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("Robot", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("Signal", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("Sinal", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("Order", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
         public static bool IsProtectionOrExitOrder(Order order)
         {
             if (order == null) return false;
-            if (!string.IsNullOrEmpty(order.Oco)) return true;
-            if (IsCopyOrder(order) || IsInternalOrder(order)) return true;
-            if (order.OrderType == OrderType.StopMarket || order.OrderType == OrderType.StopLimit) return true;
+            // Ordens de entrada legítimas (Limit, Buy, Sell, MIT, etc.) NUNCA são consideradas ordens de proteção/saída!
+            if (IsExplicitEntryOrder(order)) return false;
+
+            if (IsInternalOrder(order) && (order.Name.StartsWith("Axion_SL") || order.Name.StartsWith("Axion_TP") || order.Name.Contains("Close") || order.Name.Contains("Exit") || order.Name.Contains("Zerar"))) return true;
             return IsExitOrProtectionOrderName(order.Name);
         }
 
@@ -1110,7 +1192,26 @@ namespace NinjaTrader.NinjaScript.AddOns
             if (string.IsNullOrWhiteSpace(orderName)) return false;
             string n = orderName.Trim();
 
-            // 1. Ordens expressamente identificadas como Stop Loss, Profit Target ou Saída / Fechamento
+            // 1. NUNCA classificar ordens de entrada (compra/venda/robôs/limit/mit/stop de entrada) como saída
+            if (n.StartsWith("Buy", StringComparison.OrdinalIgnoreCase) ||
+                n.StartsWith("Sell", StringComparison.OrdinalIgnoreCase) ||
+                n.IndexOf("Entry", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("Limit", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("MIT", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("MarketIfTouched", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("Robo", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("Robot", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("Signal", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("Sinal", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("Order", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                if (!n.StartsWith("Axion_SL") && !n.StartsWith("Axion_TP") && !n.StartsWith("Profit target") && !n.StartsWith("Stop loss"))
+                {
+                    return false;
+                }
+            }
+
+            // 2. Ordens expressamente identificadas como Stop Loss, Profit Target ou Saída / Fechamento
             if (n.Equals("Close", StringComparison.OrdinalIgnoreCase) ||
                 n.Equals("Copy_Close", StringComparison.OrdinalIgnoreCase) ||
                 n.Equals("RiskClose", StringComparison.OrdinalIgnoreCase) ||
@@ -1124,25 +1225,13 @@ namespace NinjaTrader.NinjaScript.AddOns
                 n.StartsWith("Axion_TP", StringComparison.OrdinalIgnoreCase) ||
                 n.StartsWith("Axion_Close", StringComparison.OrdinalIgnoreCase) ||
                 n.StartsWith("Axion_Risk", StringComparison.OrdinalIgnoreCase) ||
-                n.StartsWith("Stop", StringComparison.OrdinalIgnoreCase) ||
+                n.Equals("SL", StringComparison.OrdinalIgnoreCase) ||
+                n.Equals("TP", StringComparison.OrdinalIgnoreCase) ||
+                n.StartsWith("StopLoss", StringComparison.OrdinalIgnoreCase) ||
                 n.StartsWith("Target", StringComparison.OrdinalIgnoreCase) ||
                 n.StartsWith("Profit", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
-            }
-
-            // 2. Nunca classificar ordens de entrada (compra/venda/robôs/limit/mit/stop de entrada) como saída
-            if (n.StartsWith("Buy", StringComparison.OrdinalIgnoreCase) ||
-                n.StartsWith("Sell", StringComparison.OrdinalIgnoreCase) ||
-                n.IndexOf("Entry", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                n.IndexOf("MIT", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                n.IndexOf("MarketIfTouched", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                n.IndexOf("Robo", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                n.IndexOf("Robot", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                n.IndexOf("Signal", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                n.IndexOf("Sinal", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return false;
             }
 
             return false;
@@ -1367,66 +1456,82 @@ namespace NinjaTrader.NinjaScript.AddOns
                 if (string.IsNullOrWhiteSpace(json)) return;
                 _copyRules.Clear();
 
-                int rulesIdx = json.IndexOf("\"rules\":[", StringComparison.OrdinalIgnoreCase);
-                if (rulesIdx < 0) rulesIdx = json.IndexOf("\"rules\": [", StringComparison.OrdinalIgnoreCase);
+                int rulesIdx = json.IndexOf("\"rules\":", StringComparison.OrdinalIgnoreCase);
                 if (rulesIdx >= 0)
                 {
                     int startArr = json.IndexOf('[', rulesIdx);
-                    int endArr = json.IndexOf(']', startArr);
-                    if (startArr >= 0 && endArr > startArr)
+                    if (startArr >= 0)
                     {
-                        string arrStr = json.Substring(startArr + 1, endArr - startArr - 1);
-                        string[] itemStrs = arrStr.Split(new[] { "}," }, StringSplitOptions.RemoveEmptyEntries);
-                        foreach (var itemStr in itemStrs)
+                        // Encontra o fim balanceado do array de regras
+                        int depth = 0;
+                        int endArr = -1;
+                        for (int c = startArr; c < json.Length; c++)
                         {
-                            string item = itemStr.Trim();
-                            if (!item.EndsWith("}")) item += "}";
-                            string id = ExtractJsonString(item, "id") ?? Guid.NewGuid().ToString("N");
-                            string master = ExtractJsonString(item, "masterAccount") ?? ExtractJsonString(item, "master_account_name") ?? ExtractJsonString(item, "master_account_id") ?? "";
-                            string slave = ExtractJsonString(item, "slaveAccount") ?? ExtractJsonString(item, "slave_account_name") ?? ExtractJsonString(item, "slave_account_id") ?? "";
-                            double mult = ExtractJsonDouble(item, "lotMultiplier", 1.0);
-                            if (mult <= 0) mult = ExtractJsonDouble(item, "lot_multiplier", 1.0);
-                            bool active = ExtractJsonBool(item, "isActive", true);
-                            if (item.Contains("\"is_active\"")) active = ExtractJsonBool(item, "is_active", true);
-                            string allowedSym = ExtractJsonString(item, "allowedSymbols") ?? ExtractJsonString(item, "allowed_symbols") ?? "TODOS";
-                            string execSym = ExtractJsonString(item, "executionSymbol") ?? ExtractJsonString(item, "execution_symbol") ?? "";
-                            string mapSym = ExtractJsonString(item, "symbolMapping") ?? ExtractJsonString(item, "symbol_mapping") ?? "";
-                            double maxLoss = ExtractJsonDouble(item, "maxDailyLoss", 0);
-                            int maxTrades = ExtractJsonInt(item, "maxDailyTrades", 0);
-                            bool copyAtm = ExtractJsonBool(item, "copyAtmStrategy", true);
-                            if (item.Contains("\"copy_atm_strategy\"")) copyAtm = ExtractJsonBool(item, "copy_atm_strategy", true);
-                            bool closeOnMasterClose = ExtractJsonBool(item, "closeSlavesOnMasterClose", true);
-                            if (item.Contains("\"close_slaves_on_master_close\"")) closeOnMasterClose = ExtractJsonBool(item, "close_slaves_on_master_close", true);
-                            bool cancelOrphan = ExtractJsonBool(item, "cancelOrphanOrders", false);
-                            if (item.Contains("\"cancel_orphan_orders\"")) cancelOrphan = ExtractJsonBool(item, "cancel_orphan_orders", false);
-
-                            if (!string.IsNullOrEmpty(master) && !string.IsNullOrEmpty(slave))
+                            if (json[c] == '[') depth++;
+                            else if (json[c] == ']')
                             {
-                                var rule = new CopyTradingRule
+                                depth--;
+                                if (depth == 0) { endArr = c; break; }
+                            }
+                        }
+
+                        if (endArr > startArr)
+                        {
+                            string arrStr = json.Substring(startArr + 1, endArr - startArr - 1);
+                            // Extrai determinística e individualmente cada bloco de objeto {...}
+                            var matches = Regex.Matches(arrStr, @"\{[^{}]*\}");
+                            foreach (Match m in matches)
+                            {
+                                string item = m.Value.Trim();
+                                string id = ExtractJsonString(item, "id") ?? Guid.NewGuid().ToString("N");
+                                string master = ExtractJsonString(item, "masterAccount") ?? ExtractJsonString(item, "master_account_name") ?? ExtractJsonString(item, "master_account_id") ?? "";
+                                string slave = ExtractJsonString(item, "slaveAccount") ?? ExtractJsonString(item, "slave_account_name") ?? ExtractJsonString(item, "slave_account_id") ?? "";
+                                double mult = ExtractJsonDouble(item, "lotMultiplier", 0);
+                                if (mult <= 0) mult = ExtractJsonDouble(item, "lot_multiplier", 1.0);
+                                if (mult <= 0) mult = 1.0;
+                                bool active = ExtractJsonBool(item, "isActive", true);
+                                if (item.Contains("\"is_active\"")) active = ExtractJsonBool(item, "is_active", true);
+                                string allowedSym = ExtractJsonString(item, "allowedSymbols") ?? ExtractJsonString(item, "allowed_symbols") ?? "TODOS";
+                                string execSym = ExtractJsonString(item, "executionSymbol") ?? ExtractJsonString(item, "execution_symbol") ?? "";
+                                string mapSym = ExtractJsonString(item, "symbolMapping") ?? ExtractJsonString(item, "symbol_mapping") ?? "";
+                                double maxLoss = ExtractJsonDouble(item, "maxDailyLoss", 0);
+                                int maxTrades = ExtractJsonInt(item, "maxDailyTrades", 0);
+                                bool copyAtm = ExtractJsonBool(item, "copyAtmStrategy", true);
+                                if (item.Contains("\"copy_atm_strategy\"")) copyAtm = ExtractJsonBool(item, "copy_atm_strategy", true);
+                                bool closeOnMasterClose = ExtractJsonBool(item, "closeSlavesOnMasterClose", true);
+                                if (item.Contains("\"close_slaves_on_master_close\"")) closeOnMasterClose = ExtractJsonBool(item, "close_slaves_on_master_close", true);
+                                bool cancelOrphan = ExtractJsonBool(item, "cancelOrphanOrders", false);
+                                if (item.Contains("\"cancel_orphan_orders\"")) cancelOrphan = ExtractJsonBool(item, "cancel_orphan_orders", false);
+
+                                if (!string.IsNullOrEmpty(master) && !string.IsNullOrEmpty(slave))
                                 {
-                                    Id = id,
-                                    MasterAccountName = master,
-                                    SlaveAccountName = slave,
-                                    LotMultiplier = mult > 0 ? mult : 1.0,
-                                    IsActive = active,
-                                    AllowedSymbols = allowedSym,
-                                    ExecutionSymbol = execSym,
-                                    SymbolMapping = mapSym,
-                                    MaxDailyLoss = maxLoss,
-                                    MaxDailyTrades = maxTrades,
-                                    CopyAtmStrategy = copyAtm,
-                                    CloseSlavesOnMasterClose = closeOnMasterClose,
-                                    CancelOrphanOrders = cancelOrphan
-                                };
-                                // Deduplicação estrita: substitui qualquer regra anterior com o mesmo par Master e Slave
-                                var existingPair = _copyRules.Values.FirstOrDefault(r => 
-                                    string.Equals(r.MasterAccountName?.Trim(), master.Trim(), StringComparison.OrdinalIgnoreCase) &&
-                                    string.Equals(r.SlaveAccountName?.Trim(), slave.Trim(), StringComparison.OrdinalIgnoreCase));
-                                if (existingPair != null && existingPair.Id != rule.Id)
-                                {
-                                    _copyRules.TryRemove(existingPair.Id, out _);
+                                    var rule = new CopyTradingRule
+                                    {
+                                        Id = id,
+                                        MasterAccountName = master,
+                                        SlaveAccountName = slave,
+                                        LotMultiplier = mult > 0 ? mult : 1.0,
+                                        IsActive = active,
+                                        AllowedSymbols = allowedSym,
+                                        ExecutionSymbol = execSym,
+                                        SymbolMapping = mapSym,
+                                        MaxDailyLoss = maxLoss,
+                                        MaxDailyTrades = maxTrades,
+                                        CopyAtmStrategy = copyAtm,
+                                        CloseSlavesOnMasterClose = closeOnMasterClose,
+                                        CancelOrphanOrders = cancelOrphan
+                                    };
+                                    // Deduplicação estrita: substitui qualquer regra anterior com o mesmo par Master e Slave
+                                    var existingPair = _copyRules.Values.FirstOrDefault(r => 
+                                        string.Equals(r.MasterAccountName?.Trim(), master.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                                        string.Equals(r.SlaveAccountName?.Trim(), slave.Trim(), StringComparison.OrdinalIgnoreCase));
+                                    if (existingPair != null && existingPair.Id != rule.Id)
+                                    {
+                                        _copyRules.TryRemove(existingPair.Id, out _);
+                                    }
+                                    _copyRules[rule.Id] = rule;
+                                    Log($"📋 [COPY RULE CARREGADA]: {rule.MasterAccountName} ➔ {rule.SlaveAccountName} | Mult: {rule.LotMultiplier:F2}x | Ativa: {rule.IsActive}");
                                 }
-                                _copyRules[rule.Id] = rule;
                             }
                         }
                     }
@@ -1479,6 +1584,12 @@ namespace NinjaTrader.NinjaScript.AddOns
         {
             rejectReason = "";
             if (sRisk == null) return true;
+
+            // Se o gerenciamento de risco estiver desativado para esta conta e não houver limites estritos configurados, permite operar livremente
+            if (!AxionGatewayState.HabilitarGestaoRiscoGlobal && !sRisk.RiskManagementEnabled && sRisk.DailyLossLimitUsd <= 0 && sRisk.DailyProfitTargetUsd <= 0 && sRisk.MaxDailyTrades <= 0 && string.IsNullOrWhiteSpace(sRisk.TradingStartTime))
+            {
+                return true;
+            }
 
             if (sRisk.IsBlocked)
             {
@@ -1979,12 +2090,6 @@ namespace NinjaTrader.NinjaScript.AddOns
 
                         bool isTrulyFlat = (accPos == null || accPos.MarketPosition == MarketPosition.Flat || accPos.Quantity == 0);
 
-                        // 🧹 Se a conta ficou FLAT (seja Master, Slave ou Avulsa/Standalone), cancelar imediatamente qualquer ordem órfã (SL/TP)
-                        if (isTrulyFlat)
-                        {
-                            CancelarOrdensPendentes(account, inst);
-                        }
-
                         // 2. SÓ PROCESSAR ESPELHAMENTO se a conta for MASTER em alguma regra de copy ativa
                         var matchingCloseRules = _copyRules.Values.Where(r => r.IsActive && string.Equals(r.MasterAccountName, account.Name, StringComparison.OrdinalIgnoreCase)).ToList();
                         if (matchingCloseRules.Count == 0)
@@ -2029,12 +2134,14 @@ namespace NinjaTrader.NinjaScript.AddOns
                         }
 
                         // A partir daqui, a Master está 100% CONFIRMADA COMO FLAT (ZERO CONTRATOS):
-                        // A. Cancelar ordens órfãs de proteção (SL/TP) na conta Master (NUNCA ordens de entrada)
+                        // A. Cancelar brackets de ATM órfãos deixados por posições encerradas (NUNCA ordens de entrada solitárias)
                         var orphanOrders = account.Orders.Where(o => 
                             o != null && o.Instrument != null && 
                             (o.Instrument == inst || o.Instrument.FullName == inst.FullName || (o.Instrument.MasterInstrument != null && inst.MasterInstrument != null && string.Equals(o.Instrument.MasterInstrument.Name, inst.MasterInstrument.Name, StringComparison.OrdinalIgnoreCase))) && 
                             (o.OrderState == OrderState.Working || o.OrderState == OrderState.Accepted) &&
-                            IsExitOrProtectionOrderName(o.Name)
+                            !IsExplicitEntryOrder(o) &&
+                            (!string.IsNullOrEmpty(o.Oco) || 
+                             (!string.IsNullOrEmpty(o.Name) && (o.Name.StartsWith("Axion_SL") || o.Name.StartsWith("Axion_TP") || o.Name.StartsWith("Profit target") || o.Name.StartsWith("Stop loss"))))
                         ).ToList();
 
                         if (orphanOrders.Count > 0)
@@ -2144,11 +2251,6 @@ namespace NinjaTrader.NinjaScript.AddOns
                                             }
                                             catch { }
                                         });
-                                    }
-                                    else
-                                    {
-                                        // Apenas cancela ordens pendentes/órfãs deste ativo específico na Slave, preservando outros ativos (ex: MNQ intacto)!
-                                        CancelarOrdensPendentes(slaveAcc, slaveInst);
                                     }
                                 }
                             }
@@ -2355,8 +2457,38 @@ namespace NinjaTrader.NinjaScript.AddOns
                             Log($"[AVISO NÍVEIS MASTER]: {levEx.Message}");
                         }
 
-                        bool isSl = masterOrder.OrderType == OrderType.StopMarket || masterOrder.OrderType == OrderType.StopLimit || (!string.IsNullOrEmpty(masterOrder.Name) && (masterOrder.Name.Contains("Stop") || masterOrder.Name.Contains("SL")));
-                        bool isTp = masterOrder.OrderType == OrderType.Limit || (!string.IsNullOrEmpty(masterOrder.Name) && (masterOrder.Name.Contains("Target") || masterOrder.Name.Contains("TP")));
+                        bool isExplicitEntry = IsExplicitEntryOrder(masterOrder);
+
+                        Position masterActivePos = null;
+                        if (masterAccount.Positions != null)
+                        {
+                            lock (masterAccount.Positions)
+                            {
+                                masterActivePos = masterAccount.Positions.FirstOrDefault(p => p != null && (
+                                    p.Instrument == masterOrder.Instrument ||
+                                    (p.Instrument != null && (p.Instrument.FullName == masterOrder.Instrument?.FullName ||
+                                     (p.Instrument.MasterInstrument != null && masterOrder.Instrument?.MasterInstrument != null && string.Equals(p.Instrument.MasterInstrument.Name, masterOrder.Instrument.MasterInstrument.Name, StringComparison.OrdinalIgnoreCase))))
+                                ));
+                            }
+                        }
+
+                        bool hasMasterOpenPos = masterActivePos != null && masterActivePos.MarketPosition != MarketPosition.Flat && masterActivePos.Quantity != 0;
+                        bool isExitAction = false;
+                        if (hasMasterOpenPos)
+                        {
+                            isExitAction = (masterActivePos.MarketPosition == MarketPosition.Long && (masterOrder.OrderAction == OrderAction.Sell || masterOrder.OrderAction == OrderAction.SellShort)) ||
+                                           (masterActivePos.MarketPosition == MarketPosition.Short && (masterOrder.OrderAction == OrderAction.Buy || masterOrder.OrderAction == OrderAction.BuyToCover));
+                        }
+
+                        bool isSl = !isExplicitEntry && (
+                            (IsProtectionOrExitOrder(masterOrder) && (masterOrder.OrderType == OrderType.StopMarket || masterOrder.OrderType == OrderType.StopLimit || (!string.IsNullOrEmpty(masterOrder.Name) && (masterOrder.Name.Contains("Stop") || masterOrder.Name.Contains("SL"))))) ||
+                            (hasMasterOpenPos && isExitAction && (masterOrder.OrderType == OrderType.StopMarket || masterOrder.OrderType == OrderType.StopLimit))
+                        );
+
+                        bool isTp = !isExplicitEntry && (
+                            (!string.IsNullOrEmpty(masterOrder.Name) && (masterOrder.Name.Contains("Target") || masterOrder.Name.Contains("TP") || masterOrder.Name.Contains("Profit"))) ||
+                            (hasMasterOpenPos && isExitAction && masterOrder.OrderType == OrderType.Limit)
+                        );
                         double masterCurrentPrice = (isSl ? masterOrder.StopPrice : (isTp ? masterOrder.LimitPrice : (masterOrder.StopPrice > 0 ? masterOrder.StopPrice : (masterOrder.LimitPrice > 0 ? masterOrder.LimitPrice : 0))));
 
                         double masterTick = (masterOrder.Instrument?.MasterInstrument != null && masterOrder.Instrument.MasterInstrument.TickSize > 0) ? masterOrder.Instrument.MasterInstrument.TickSize : 0.25;
@@ -2892,6 +3024,12 @@ namespace NinjaTrader.NinjaScript.AddOns
                                 isEntry = true;
                                 isExit = false;
                                 _flatteningAccountUntil.TryRemove(account.Name, out _);
+                                if (execOrder.Instrument != null)
+                                {
+                                    string fillStateKey = $"{account.Name}_{execOrder.Instrument.FullName}";
+                                    _lastReconcileAdjustmentTime[fillStateKey] = DateTime.UtcNow;
+                                    _unprotectedPositionSince.TryRemove(fillStateKey, out _);
+                                }
                             }
                             else if ((posAfter.MarketPosition == MarketPosition.Long && isSell) ||
                                      (posAfter.MarketPosition == MarketPosition.Short && isBuy))
@@ -3302,7 +3440,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                                             continue;
                                         }
 
-                                        string orderSlaveKey = $"{execOrder.OrderId}_{slaveAcc.Name.Trim().ToLowerInvariant()}";
+                                        string safeOrderId = !string.IsNullOrEmpty(execOrder.OrderId) ? execOrder.OrderId : execOrder.Id.ToString();
+                                        string orderSlaveKey = $"{safeOrderId}_{slaveAcc.Name.Trim().ToLowerInvariant()}";
                                         int alreadyCopiedForSlave = _copiedLotsPerMasterOrderAndSlave.TryGetValue(orderSlaveKey, out int ac) ? ac : 0;
                                         int masterFilledSoFar = execOrder.Filled > 0 ? execOrder.Filled : effectiveMasterQty;
                                         int masterDeltaToCopy = masterFilledSoFar - alreadyCopiedForSlave;
@@ -3324,7 +3463,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                                             }
 
                                             int rawSlaveQty = Math.Max(1, (int)Math.Round(masterDeltaToCopy * rule.LotMultiplier));
-                                            int slaveQty = ClampLotSizeForAccount(slaveAcc.Name, rawSlaveQty, out _, out _);
+                                            int slaveQty = ClampLotSizeForAccount(slaveAcc.Name, rawSlaveQty, out bool wasClamped, out int maxAllowed);
                                             _copiedLotsPerMasterOrderAndSlave[orderSlaveKey] = masterFilledSoFar;
 
                                             // Checar bloqueio de risco e limites diários da conta slave (Horário, Quantidade de Operações e Meta Diária de Loss/Take)
@@ -3365,7 +3504,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                                             _lastReconcileAdjustmentTime[$"{slaveAcc.Name}_{slaveInst.FullName}"] = DateTime.UtcNow;
                                             StealthSubmit(slaveAcc, slaveEntryOrder);
 
-                                            Log($"⚡⚡ [COPY C# INSTANTÂNEO <0.1ms]: {(isBuy ? OrderAction.Buy : OrderAction.Sell)} {slaveQty}x {slaveInst.FullName} na Slave {slaveAcc.Name} (Master: {account.Name} | Mult: {rule.LotMultiplier:F1}x | SL: {detectedSl:F2} | TP: {detectedTp:F2})");
+                                            Log($"⚡⚡ [COPY C# INSTANTÂNEO <0.1ms]: {(isBuy ? OrderAction.Buy : OrderAction.Sell)} {slaveQty}x (MasterDelta: {masterDeltaToCopy}x, Mult: {rule.LotMultiplier:F2}x, Calc: {rawSlaveQty}x{(wasClamped ? $", Clamped to MaxLots {maxAllowed}x" : "")}) {slaveInst.FullName} na Slave {slaveAcc.Name} (Master: {account.Name} | SL: {detectedSl:F2} | TP: {detectedTp:F2})");
                                         }
                                     }
                                     catch (Exception copyEx)
@@ -3620,7 +3759,7 @@ namespace NinjaTrader.NinjaScript.AddOns
             if (account == null) return;
             try
             {
-                MarkAccountFlattening(account.Name, 5000);
+                MarkAccountFlattening(account.Name, 5.0);
 
                 var pendingKeys = _pendingBrackets.Where(kvp => kvp.Value.Account == account).Select(kvp => kvp.Key).ToList();
                 foreach (var k in pendingKeys) _pendingBrackets.TryRemove(k, out _);
@@ -3723,16 +3862,14 @@ namespace NinjaTrader.NinjaScript.AddOns
                             continue;
                         }
 
-                        // 🛡️ PRESERVAÇÃO DE ORDENS PENDENTES DE ENTRADA:
-                        // NUNCA cancelar ordens pendentes de entrada (Limit, Stop, MIT de robôs ou trader) que estão aguardando no livro.
-                        // Apenas ordens expressamente de saída/proteção (SL/TP) são canceladas na limpeza de brackets pós-fechamento,
-                        // exceto se a conta estiver em comando explícito de zeragem total / pânico (IsAccountCurrentlyFlattening).
-                        if (!IsAccountCurrentlyFlattening(account.Name))
+                        // 🛡️ REGRA INVIOLÁVEL: PRESERVAÇÃO TOTAL DE ORDENS PENDENTES DE ENTRADA
+                        // Ordens pendentes solitárias (Limit, Stop de rompimento, ordens de robôs ou traders)
+                        // aguardam livremente no livro e NUNCA devem ser canceladas pelo sistema de ordens fantasma.
+                        // Somente brackets comprovados de saída/proteção de posições já encerradas com OCO (Axion_SL, Axion_TP, Stop loss, Profit target) são elegíveis para cancelamento.
+                        if (!IsExplicitProtectionBracket(order))
                         {
-                            if (!IsProtectionOrExitOrder(order))
-                            {
-                                continue; // Preserva ordens pendentes de entrada no book!
-                            }
+                            // Não é bracket de proteção OCO legítimo: PRESERVAR 100%!
+                            continue;
                         }
 
                         if (order.OrderState == OrderState.Working || order.OrderState == OrderState.Accepted || order.OrderState == OrderState.Submitted || order.OrderState == OrderState.TriggerPending)
@@ -4191,10 +4328,6 @@ namespace NinjaTrader.NinjaScript.AddOns
                             }
                         }
 
-                        if (!hasEntryInFlight && !recentCopyEntry)
-                        {
-                            CancelarOrdensPendentes(slaveAcc, slaveInst);
-                        }
                         return;
                     }
 
@@ -4311,8 +4444,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                     }
 
                     // 🔒 Proteção Tradovate/Rithmic: Se já existirem ordens em trânsito de submissão ou cancelamento, aguarda a corretora confirmar antes de reconciliar
-                    bool hasSlaveOrdersInTransit = slaveSlOrders.Any(o => o.OrderState == OrderState.Submitted || o.OrderState == OrderState.Initialized || o.OrderState == OrderState.CancelPending || _inFlightCancellingOrders.ContainsKey(o.OrderId)) ||
-                                                   slaveTpOrders.Any(o => o.OrderState == OrderState.Submitted || o.OrderState == OrderState.Initialized || o.OrderState == OrderState.CancelPending || _inFlightCancellingOrders.ContainsKey(o.OrderId));
+                    bool hasSlaveOrdersInTransit = slaveSlOrders.Any(o => o.OrderState == OrderState.Submitted || o.OrderState == OrderState.Initialized || o.OrderState == OrderState.CancelPending || _inFlightCancellingOrders.ContainsKey(GetCancelKey(slaveAcc, o))) ||
+                                                   slaveTpOrders.Any(o => o.OrderState == OrderState.Submitted || o.OrderState == OrderState.Initialized || o.OrderState == OrderState.CancelPending || _inFlightCancellingOrders.ContainsKey(GetCancelKey(slaveAcc, o)));
                     if (hasSlaveOrdersInTransit)
                     {
                         return;
@@ -7367,14 +7500,14 @@ ORDER BY e.Time ASC;";
                 }
 
                 // 3. FECHAMENTO GERAL (ZERAGEM TOTAL DA CONTA / ATIVO)
-                MarkAccountFlattening(targetAccount.Name, 5000);
+                MarkAccountFlattening(targetAccount.Name, 5.0);
 
                 var slaveRules = _copyRules.Values.Where(r => r.IsActive && string.Equals(r.MasterAccountName, targetAccount.Name, StringComparison.OrdinalIgnoreCase)).ToList();
                 var cascadedSlaveAccounts = new List<Account>();
                 foreach (var rule in slaveRules)
                 {
                     if (string.Equals(rule.SlaveAccountName, targetAccount.Name, StringComparison.OrdinalIgnoreCase)) continue;
-                    MarkAccountFlattening(rule.SlaveAccountName, 5000);
+                    MarkAccountFlattening(rule.SlaveAccountName, 5.0);
                     Account slaveAcc = null;
                     lock (Account.All)
                     {
@@ -7484,23 +7617,35 @@ ORDER BY e.Time ASC;";
                 string accountName = ExtractJsonString(body, "account_name") ?? ExtractJsonString(body, "account") ?? "";
 
                 int cancelledCount = 0;
+                // Snapshot das contas SEM segurar lock durante Dispatcher.Invoke (evita deadlock com a UI do NT8)
+                List<Account> accounts;
                 lock (Account.All)
                 {
-                    var accounts = Account.All.Where(a => string.IsNullOrEmpty(accountName) || string.Equals(a.Name, accountName, StringComparison.OrdinalIgnoreCase)).ToList();
-                    foreach (var acc in accounts)
-                    {
-                        if (acc.Orders == null) continue;
-                        var toCancel = acc.Orders.Where(o => 
-                            (o.OrderState == OrderState.Working || o.OrderState == OrderState.Accepted || o.OrderState == OrderState.Submitted) &&
-                            (string.IsNullOrEmpty(orderId) || string.Equals(o.Id.ToString(), orderId, StringComparison.OrdinalIgnoreCase) || string.Equals(o.Oco, orderId, StringComparison.OrdinalIgnoreCase))
-                        ).ToArray();
+                    accounts = Account.All.Where(a => a != null && (string.IsNullOrEmpty(accountName) || string.Equals(a.Name, accountName, StringComparison.OrdinalIgnoreCase))).ToList();
+                }
 
-                        if (toCancel.Length > 0)
-                        {
-                            SafeCancelOrders(acc, toCancel);
-                            cancelledCount += toCancel.Length;
-                            Log($"[CANCEL ORDEM]: {toCancel.Length} ordens canceladas na conta {acc.Name}");
-                        }
+                foreach (var acc in accounts)
+                {
+                    if (acc.Orders == null) continue;
+                    List<Order> snapshot;
+                    lock (acc.Orders) { snapshot = acc.Orders.ToList(); }
+
+                    var toCancel = snapshot.Where(o =>
+                        o != null &&
+                        (o.OrderState == OrderState.Working || o.OrderState == OrderState.Accepted || o.OrderState == OrderState.Submitted ||
+                         o.OrderState == OrderState.TriggerPending || o.OrderState == OrderState.ChangePending || o.OrderState == OrderState.Initialized) &&
+                        (string.IsNullOrEmpty(orderId) ||
+                         string.Equals(o.Id.ToString(), orderId, StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(o.OrderId, orderId, StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(o.Oco, orderId, StringComparison.OrdinalIgnoreCase))
+                    ).ToArray();
+
+                    if (toCancel.Length > 0)
+                    {
+                        // 🔓 Cancelamento EXPLÍCITO do usuário (inclusive ordem pendente órfã) NUNCA é bloqueado.
+                        SafeCancelOrders(acc, true, toCancel);
+                        cancelledCount += toCancel.Length;
+                        Log($"[CANCEL ORDEM]: {toCancel.Length} ordens canceladas na conta {acc.Name}");
                     }
                 }
 
@@ -7529,7 +7674,7 @@ ORDER BY e.Time ASC;";
                     // 1. Marca TODAS as contas em modo de zeragem ANTES de disparar ordens para impedir qualquer eco/cópia cruzada
                     foreach (var acc in targetAccounts)
                     {
-                        if (acc != null) MarkAccountFlattening(acc.Name, 5500);
+                        if (acc != null) MarkAccountFlattening(acc.Name, 5.5);
                     }
 
                     _activeBrackets.Clear();
@@ -7594,8 +7739,10 @@ ORDER BY e.Time ASC;";
         }
         private static double ExtractJsonDouble(string json, string key, double def)
         {
-            var match = Regex.Match(json, $"\"{key}\"\\s*:\\s*([0-9.]+)");
-            return match.Success ? double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) : def;
+            var match = Regex.Match(json, $"\"{key}\"\\s*:\\s*([0-9.,]+)");
+            if (!match.Success) return def;
+            string valStr = match.Groups[1].Value.Replace(',', '.');
+            return double.TryParse(valStr, NumberStyles.Any, CultureInfo.InvariantCulture, out double val) ? val : def;
         }
 
         #endregion
