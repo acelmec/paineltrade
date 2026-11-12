@@ -2886,7 +2886,7 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
           <div className="bg-blue-900/10 border border-blue-700/40 p-4 rounded-lg">
             <h3 className="text-sm font-bold text-blue-300 mb-2">🗄️ Credenciais e IDs</h3>
             <p className="text-[11px] text-slate-400 mb-3">IDs padrões criados no Supabase vinculados ao seu painel.</p>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs text-slate-400 uppercase block mb-1">Instance ID (Força & Níveis)</label>
                 <input
@@ -3009,7 +3009,7 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
               </label>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs text-slate-400 uppercase block mb-1">🤖 Bot Token (API Key)</label>
                 <input
@@ -3095,7 +3095,7 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
               type="button"
               onClick={async () => {
@@ -3321,7 +3321,7 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
             </div>
           )}
           
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
               type="button"
               onClick={async () => {
@@ -3860,7 +3860,7 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
             </div>
 
             {/* Gestão de Risco em Moeda USD */}
-            <div className="grid grid-cols-2 gap-4 border-t border-slate-700/60 pt-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-slate-700/60 pt-4">
               <div>
                 <label className="text-xs text-slate-400 uppercase block mb-1">Modo Padrão de Dimensionamento</label>
                 <select
@@ -3888,7 +3888,7 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs text-slate-400 uppercase block mb-1">Stop Loss Padrão (Pontos)</label>
                 <input

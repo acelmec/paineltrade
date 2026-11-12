@@ -25,6 +25,8 @@ import {
   BroadcastPopupModal, 
   type BroadcastNotificationItem 
 } from './components/NotificationCenterDrawer';
+import { useIsMobile } from './utils/platform';
+import { MobileBottomNav } from './components/MobileBottomNav';
 
 export const AppContent: React.FC = () => {
   const {
@@ -48,6 +50,7 @@ export const AppContent: React.FC = () => {
   } = useApp();
   
   const isCopyOnly = planDetails?.isCopyTraderOnly === true;
+  const isMobile = useIsMobile();
   const [currentPage, setCurrentPage] = useState<string>(() => {
     return isCopyOnly ? 'copytrade' : 'dashboard';
   });
@@ -156,27 +159,29 @@ export const AppContent: React.FC = () => {
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#0a0e1a] text-[#e2e8f0] font-sans">
-      {/* Botão flutuante para abrir o menu no celular */}
-      <button 
-        onClick={() => setCollapsed(!collapsed)}
-        className="fixed top-3 left-3 z-[9999] md:hidden bg-slate-900/90 border border-slate-700 text-white p-2 rounded shadow-lg text-lg flex items-center justify-center w-9 h-9 active:scale-95 transition"
-        title="Menu"
-      >
-        ☰
-      </button>
+      {/* Botão flutuante para abrir o menu caso necessário */}
+      {!isMobile && (
+        <button 
+          onClick={() => setCollapsed(!collapsed)}
+          className="fixed top-3 left-3 z-[9999] md:hidden bg-slate-900/90 border border-slate-700 text-white p-2 rounded shadow-lg text-lg flex items-center justify-center w-9 h-9 active:scale-95 transition"
+          title="Menu"
+        >
+          ☰
+        </button>
+      )}
 
-      {/* Sidebar */}
+      {/* Sidebar - Na versão desktop mantém-se 100% como antes */}
       <Sidebar 
         currentPage={currentPage} 
         setCurrentPage={setCurrentPage} 
-        collapsed={collapsed}
+        collapsed={isMobile ? true : collapsed}
         setCollapsed={setCollapsed}
         onOpenNotifications={() => setIsNotificationDrawerOpen(true)}
         unreadCount={unreadBroadcastCount}
       />
 
       {/* Main Content Area */}
-      <div className={`w-full max-w-full overflow-x-hidden p-[6px] md:p-2 transition-all duration-300 ${collapsed ? 'pl-[6px] md:pl-[70px]' : 'pl-[6px] md:pl-[230px]'}`}>
+      <div className={`w-full max-w-full overflow-x-hidden p-[6px] md:p-2 transition-all duration-300 ${isMobile ? 'pl-0 pb-20' : (collapsed ? 'pl-[6px] md:pl-[70px]' : 'pl-[6px] md:pl-[230px]')}`}>
         <ErrorBoundary fallbackTitle="Erro na Interface do Painel">
           {!isCopyOnly && currentPage === 'dashboard' && (
             (canUseMode2 && panelMode === 'mode2') ? <TradeWorkstation /> : <Dashboard />
@@ -252,6 +257,14 @@ export const AppContent: React.FC = () => {
         onClose={() => setIsPopupOpen(false)}
         broadcast={popupBroadcast}
         onMarkAsRead={handleMarkAsRead}
+      />
+
+      {/* Menu Inferior Deslizável no Rodapé (Exclusivo Mobile / Android) */}
+      <MobileBottomNav
+        currentPage={currentPage}
+        setCurrentPage={setCurrentPage}
+        onOpenNotifications={() => setIsNotificationDrawerOpen(true)}
+        unreadCount={unreadBroadcastCount}
       />
     </div>
   );

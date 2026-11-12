@@ -29,6 +29,7 @@ import { DrawingSettingsModal } from './DrawingSettingsModal';
 import { getAccountManualStrategyId, fetchChartDrawingsSupabase, saveChartDrawingsSupabase, fetchAccountChartStateSupabase, saveAccountChartStateSupabase } from '../services/db';
 import { evaluateDrawingTrigger } from '../utils/drawingEngine';
 import { calculateTradeManagement } from '../utils/levelPriceResolver';
+import { useIsMobile } from '../utils/platform';
 
 export const TradeWorkstation: React.FC = () => {
   const {
@@ -64,6 +65,10 @@ export const TradeWorkstation: React.FC = () => {
 
   const pKey = activePanel?.id || currentSymbol || 'main_panel';
   const accKey = activeAccount?.id || 'default_account';
+
+  const isMobile = useIsMobile();
+  const [isMobileBoletaOpen, setIsMobileBoletaOpen] = useState<boolean>(false);
+  const [mobileQty, setMobileQty] = useState<number>(1);
 
   // Timeframe persistido por Painel (Independente da Conta)
   const [timeframe, setTimeframe] = useState<number>(() => {
@@ -1247,9 +1252,109 @@ export const TradeWorkstation: React.FC = () => {
     ? rawBoletaPrice
     : (boletaCandles.length > 0 ? boletaCandles[boletaCandles.length - 1].close : currentPrice);
 
+  const activePositionForSymbol = useMemo(() => {
+    if (!reports || !Array.isArray(reports)) return null;
+    return reports.find((r: any) =>
+      r.status === 'Em Andamento' &&
+      (r.ativo === boletaSymbol || r.ativo?.toLowerCase() === boletaSymbol?.toLowerCase())
+    );
+  }, [reports, boletaSymbol]);
+
+  const pnlFormatted = useMemo(() => {
+    if (!activePositionForSymbol) return '';
+    const pnl = activePositionForSymbol.pnl_pontos;
+    if (typeof pnl === 'number') {
+      const sign = pnl >= 0 ? '+' : '';
+      return `${sign}${pnl.toFixed(1)} pts`;
+    }
+    return '';
+  }, [activePositionForSymbol]);
+
   return (
-    <div className={`w-full h-[calc(100vh-20px)] ${wsRootBg} flex flex-col font-sans overflow-hidden transition-colors duration-200`}>
-      {/* Top Workstation Header Toolbar - Single-Line Compact Modern Header */}
+    <div className={`w-full ${isMobile ? 'h-[calc(100vh-70px)]' : 'h-[calc(100vh-20px)]'} ${wsRootBg} flex flex-col font-sans overflow-hidden transition-colors duration-200`}>
+      {/* Mobile Top Compact Toolbar */}
+      {isMobile ? (
+        <div className={`${wsHeaderBg} border-b px-2 py-1 h-10 flex items-center justify-between select-none shrink-0 relative z-50`}>
+          <div className="flex items-center gap-1.5">
+            <div className={`flex items-center gap-1 ${wsInputBg} border px-2 py-0.5 rounded-lg`}>
+              <span className="text-xs">📈</span>
+              <select
+                value={focusedSlot.panelId || ''}
+                onChange={(e) => updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, panelId: e.target.value }))}
+                className="bg-transparent text-xs font-black outline-none cursor-pointer text-blue-300 max-w-[105px] truncate"
+              >
+                {panels?.map((p: any) => {
+                  const cleanName = p.name ? p.name.replace(/\s*\([^)]*\)/g, '').trim() : 'Painel';
+                  return (
+                    <option key={p.id} value={p.id} className="bg-[#181d28]">
+                      {cleanName}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            <div className={`flex items-center gap-0.5 ${wsInputBg} border px-1.5 py-0.5 rounded-lg`}>
+              <span className="text-[10px] text-slate-400">⏱️</span>
+              <select
+                value={focusedSlot.timeframe}
+                onChange={(e) => updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, timeframe: Number(e.target.value) }))}
+                className="bg-transparent text-xs font-bold text-blue-400 outline-none cursor-pointer"
+              >
+                <option value={1} className="bg-[#181d28]">1m</option>
+                <option value={2} className="bg-[#181d28]">2m</option>
+                <option value={3} className="bg-[#181d28]">3m</option>
+                <option value={5} className="bg-[#181d28]">5m</option>
+                <option value={10} className="bg-[#181d28]">10m</option>
+                <option value={15} className="bg-[#181d28]">15m</option>
+                <option value={30} className="bg-[#181d28]">30m</option>
+                <option value={60} className="bg-[#181d28]">1h</option>
+                <option value={1440} className="bg-[#181d28]">1D</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setFitChartTrigger(prev => prev + 1)}
+              className="border border-amber-500/60 font-mono font-black text-xs text-amber-400 px-2 py-0.5 rounded-lg bg-amber-950/30 active:scale-95"
+              title="Alinhar Gráfico e Escala (NinjaTrader 8 - Botão F)"
+            >
+              F
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsIndicatorsModalOpen(true)}
+              className="bg-blue-600/20 border border-blue-500/40 text-blue-300 px-2 py-0.5 rounded-lg text-xs font-bold active:scale-95 flex items-center gap-0.5"
+              title="Gerenciar Indicadores"
+            >
+              <span>📊</span>
+              <span className="text-[9px] bg-blue-900 px-1 rounded-full">{focusedVisibleIndicators.length}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsMobileBoletaOpen(true)}
+              className="bg-emerald-600 border border-emerald-500 text-white px-2 py-0.5 rounded-lg text-xs font-bold active:scale-95 shadow"
+              title="Abrir Boleta de Operações"
+            >
+              📋
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setPanelMode && setPanelMode('mode1')}
+              className={`${wsBtnBg} px-2 py-0.5 rounded-lg text-xs font-semibold border active:scale-95`}
+              title="Voltar ao Painel 1"
+            >
+              ↩️
+            </button>
+          </div>
+        </div>
+      ) : (
+      /* Top Workstation Header Toolbar - Single-Line Compact Modern Header */
       <div className={`${wsHeaderBg} border-b px-3 py-1.5 h-11 flex items-center justify-between gap-2.5 select-none shrink-0 relative z-50 transition-colors duration-200`}>
         {/* Left Section: Clean Asset Selector, Timeframe Dropdown & Indicators */}
         <div className="flex items-center gap-2 shrink-0">
@@ -1713,6 +1818,7 @@ export const TradeWorkstation: React.FC = () => {
           </button>
         </div>
       </div>
+      )}
 
       {/* Main Area (Left Column: Chart + Drag Splitter + Dock | Right Column: Full Height Boleta) */}
       <div className="flex-1 flex overflow-hidden relative">
@@ -1721,7 +1827,7 @@ export const TradeWorkstation: React.FC = () => {
           {/* Main Chart Area (Single ou Multi-Gráficos com Splitters Arrastáveis) */}
           <div ref={chartContainerRef} className={`flex-1 relative ${isLightTheme ? 'bg-[#ffffff]' : 'bg-[#000000]'} overflow-hidden transition-colors duration-200`}>
             <TradeChartGrid
-              layout={chartLayout}
+              layout={isMobile ? 'single' : chartLayout}
               ratios={splitRatios}
               onChangeRatios={handleChangeRatios}
               maximizedSlotIndex={maximizedSlotIndex}
@@ -1801,8 +1907,8 @@ export const TradeWorkstation: React.FC = () => {
             />
           </div>
 
-          {/* Drag Splitter Resizer (Linha Arrastável por Mouse) & Bottom Dock Panel */}
-          {showBottomDock && (
+          {/* Drag Splitter Resizer (Linha Arrastável por Mouse) & Bottom Dock Panel (Apenas Desktop) */}
+          {!isMobile && showBottomDock && (
             <>
               <div
                 onMouseDown={handleMouseDownSplitter}
@@ -1820,8 +1926,8 @@ export const TradeWorkstation: React.FC = () => {
           )}
         </div>
 
-        {/* Right Column: Full Height Boleta Panel (quando ancorada) */}
-        {!isRightBoletaCollapsed && !isBoletaFloating && (
+        {/* Right Column: Full Height Boleta Panel (Apenas Desktop quando ancorada) */}
+        {!isMobile && !isRightBoletaCollapsed && !isBoletaFloating && (
           <div className="w-80 h-full flex-shrink-0 border-l border-slate-800 overflow-y-auto relative">
             <TradeBoleta
               selectedAsset={boletaSymbol}
@@ -1835,8 +1941,117 @@ export const TradeWorkstation: React.FC = () => {
         )}
       </div>
 
-      {/* Boleta Flutuante Desancorada (Móvel para qualquer lugar da tela conforme Regra 5) */}
-      {!isRightBoletaCollapsed && isBoletaFloating && (
+      {/* Mobile Ergonomic Trading Dock (NinjaTrader / TradingView Mobile Style) */}
+      {isMobile && (
+        <div className="w-full bg-[#0c101d]/95 backdrop-blur-md border-t border-slate-800/90 px-2 py-1.5 flex items-center justify-between gap-1.5 shrink-0 z-40 select-none shadow-lg">
+          {/* Seletor Rápido de Lote/Contratos */}
+          <div className="flex items-center bg-slate-900 border border-slate-700/80 rounded-lg overflow-hidden shrink-0">
+            <button
+              type="button"
+              onClick={() => setMobileQty(prev => Math.max(1, prev - 1))}
+              className="px-2.5 py-1 text-slate-300 font-black text-sm active:bg-slate-800 hover:text-white"
+            >
+              -
+            </button>
+            <span className="px-1.5 font-mono font-black text-xs text-blue-300 min-w-[22px] text-center">
+              {mobileQty}
+            </span>
+            <button
+              type="button"
+              onClick={() => setMobileQty(prev => prev + 1)}
+              className="px-2.5 py-1 text-slate-300 font-black text-sm active:bg-slate-800 hover:text-white"
+            >
+              +
+            </button>
+          </div>
+
+          {/* Botões de Ação Imediata Operacional */}
+          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            <button
+              type="button"
+              onClick={() => setIsMobileBoletaOpen(true)}
+              className="flex-1 py-1.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-black text-xs rounded-xl shadow-md active:scale-95 transition flex flex-col items-center justify-center leading-tight min-w-0"
+            >
+              <span className="truncate">COMPRA</span>
+              <span className="text-[9px] font-mono opacity-80">{boletaPrice > 0 ? boletaPrice.toFixed(2) : 'MKT'}</span>
+            </button>
+
+            {activePositionForSymbol ? (
+              <button
+                type="button"
+                onClick={() => setIsMobileBoletaOpen(true)}
+                className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-slate-950 font-black text-[11px] rounded-xl shadow-md active:scale-95 transition flex flex-col items-center justify-center leading-tight shrink-0"
+                title="Zerar Posição Aberta"
+              >
+                <span>ZERAR</span>
+                <span className="text-[9px] font-mono">{pnlFormatted}</span>
+              </button>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => setIsMobileBoletaOpen(true)}
+              className="flex-1 py-1.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-black text-xs rounded-xl shadow-md active:scale-95 transition flex flex-col items-center justify-center leading-tight min-w-0"
+            >
+              <span className="truncate">VENDA</span>
+              <span className="text-[9px] font-mono opacity-80">{boletaPrice > 0 ? boletaPrice.toFixed(2) : 'MKT'}</span>
+            </button>
+          </div>
+
+          {/* Botão Boleta / ATM Drawer */}
+          <button
+            type="button"
+            onClick={() => setIsMobileBoletaOpen(true)}
+            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-600/80 rounded-xl text-xs font-bold active:scale-95 transition flex flex-col items-center justify-center shrink-0"
+            title="Abrir Boleta Completa (SL, TP, ATM)"
+          >
+            <span>📋</span>
+            <span className="text-[8px] uppercase tracking-tighter">Opções</span>
+          </button>
+        </div>
+      )}
+
+      {/* Mobile Boleta Slide-Up Drawer */}
+      {isMobile && isMobileBoletaOpen && (
+        <div className="fixed inset-0 z-[9995] flex flex-col justify-end bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+          <div
+            className="absolute inset-0"
+            onClick={() => setIsMobileBoletaOpen(false)}
+          />
+          <div className="relative w-full max-h-[86vh] bg-[#101422] border-t border-slate-700 rounded-t-2xl shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-250 z-10">
+            {/* Grab Bar Header */}
+            <div className="flex items-center justify-between px-4 py-2 bg-slate-900 border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-1 rounded-full bg-slate-600" />
+                <span className="text-xs font-black text-slate-200 uppercase tracking-wider">
+                  📋 Boleta de Operações — {boletaSymbol}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMobileBoletaOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 text-sm font-bold active:scale-95 transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Boleta Body */}
+            <div className="flex-1 overflow-y-auto p-1 custom-scrollbar">
+              <TradeBoleta
+                selectedAsset={boletaSymbol}
+                currentPrice={boletaPrice}
+                candles={boletaCandles}
+                isFloating={false}
+                onClose={() => setIsMobileBoletaOpen(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Boleta Flutuante Desancorada (Móvel para qualquer lugar da tela conforme Regra 5 - Apenas Desktop) */}
+      {!isMobile && !isRightBoletaCollapsed && isBoletaFloating && (
         <div
           style={{
             position: 'fixed',
