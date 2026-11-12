@@ -1730,6 +1730,53 @@ export const INDICATOR_DEFINITIONS: Record<string, IndicatorDefinition> = {
       }
     ],
     defaultStyle: { color: '#22c55e', secondaryColor: '#ef4444', lineWidth: 2, lineStyle: 'solid' }
+  },
+  MOMENTUM_CONFLUENCE: {
+    type: 'MOMENTUM_CONFLUENCE',
+    name: '🌊 Momentum Matrix (Força de Ações & Confluência)',
+    category: 'Osciladores',
+    description: 'Subpainel com linhas de força percentual de momentum (0 a 100%) a cada 1m. Permite analisar NQ e ES individuais ou combinados, as 7 Big Techs individuais ou somadas na cesta Mag7, além de VIX e DXY individuais, com linha central no 50 para mapear rallies e confluências de reversão.',
+    overlay: false,
+    paramDefs: [
+      {
+        key: 'indicesMode',
+        label: 'Modo Índices Futuros',
+        type: 'select',
+        default: 'combined',
+        options: [
+          { label: '🔗 NQ + ES Somados (Índices Combinados)', value: 'combined' },
+          { label: '📊 NQ e ES Individuais', value: 'individual' },
+          { label: '🚫 Ocultar Índices', value: 'off' }
+        ]
+      },
+      {
+        key: 'stocksMode',
+        label: 'Modo Big Techs (7 Ações)',
+        type: 'select',
+        default: 'combined',
+        options: [
+          { label: '🔥 Cesta das 7 Big Techs Somadas (Mag7 Basket)', value: 'combined' },
+          { label: '🏢 Ações Individuais (Switches Individuais)', value: 'individual' },
+          { label: '🚫 Ocultar Ações', value: 'off' }
+        ]
+      },
+      { key: 'showVix', label: '⚡ Exibir VIX (Volatilidade)', type: 'boolean', default: true },
+      { key: 'invertVix', label: '🔄 Inverter VIX (100 - VIX para correlacionar com alta)', type: 'boolean', default: false },
+      { key: 'showDxy', label: '💵 Exibir DXY / USD Index', type: 'boolean', default: true },
+      { key: 'invertDxy', label: '🔄 Inverter DXY (100 - DXY para correlacionar com alta)', type: 'boolean', default: false },
+      { key: 'showNq', label: 'Exibir NQ (quando no modo individual)', type: 'boolean', default: true },
+      { key: 'showEs', label: 'Exibir ES (quando no modo individual)', type: 'boolean', default: true },
+      { key: 'showNvidia', label: 'Exibir NVIDIA (NVDA)', type: 'boolean', default: true },
+      { key: 'showMicrosoft', label: 'Exibir Microsoft (MSFT)', type: 'boolean', default: true },
+      { key: 'showApple', label: 'Exibir Apple (AAPL)', type: 'boolean', default: true },
+      { key: 'showAmazon', label: 'Exibir Amazon (AMZN)', type: 'boolean', default: true },
+      { key: 'showAlphabet', label: 'Exibir Alphabet (GOOGL)', type: 'boolean', default: true },
+      { key: 'showMeta', label: 'Exibir Meta (META)', type: 'boolean', default: true },
+      { key: 'showTesla', label: 'Exibir Tesla (TSLA)', type: 'boolean', default: true },
+      { key: 'showCenter50', label: 'Linha Central 50 (Equilíbrio Neutro)', type: 'boolean', default: true },
+      { key: 'showExtremeLevels', label: 'Linhas Extremas de Rally (80 / 20)', type: 'boolean', default: true }
+    ],
+    defaultStyle: { color: '#06b6d4', secondaryColor: '#eab308', lineWidth: 2, lineStyle: 'solid' }
   }
 };
 
@@ -5129,6 +5176,20 @@ function _calculateIndicatorInternal(
           showConciliatedArrows,
           showSubPanel,
           showBullBearLines
+        }
+      };
+    }
+
+    case 'MOMENTUM_CONFLUENCE':
+    case 'MOMENTUM_MATRIX': {
+      return {
+        id: cConfig.id,
+        type: 'MOMENTUM_CONFLUENCE',
+        overlay: false,
+        series: [],
+        markers: [],
+        customData: {
+          params: cConfig.params
         }
       };
     }

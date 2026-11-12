@@ -259,10 +259,13 @@
 				private System.Windows.Controls.Grid _cachedChartGrid;
 		        
 		        // ── Conteúdo pendente ─────────────────────────────────────────────────
-		        private string _pAccount = "", _pClock = "", _pParams = "", _pPnL = "", _pStatus = "";
-		        private Brush  _pPnLBrush    = Brushes.White;
-		        private Brush  _pStatusBrush = Brushes.Cyan;
-		        private bool   _pF2dVisible  = false;
+		        private string _pAccount = "", _pClock = "", _pParams = "", _pPnL = "", _pStatus = "", _pPlaybookText = "";
+		        private Brush  _pPnLBrush      = Brushes.White;
+		        private Brush  _pStatusBrush   = Brushes.Cyan;
+		        private Brush  _pPlaybookBrush = Brushes.Lime;
+		        private TextBlock _sepPlaybook;
+		        private TextBlock _tbPlaybook;
+		        private bool   _pF2dVisible    = false;
 		        private string _pF2dBuy = "", _pF2dSell = "", _pF2dMode = "", _pF2dSignal = "";
 		        private Brush  _pF2dBuyBrush = Brushes.Gray, _pF2dSellBrush = Brushes.Gray, _pF2dSignalBrush = Brushes.Gray;
 		
@@ -2084,6 +2087,7 @@
 				        HorizontalAlignment = HorizontalAlignment.Left,
 				        VerticalAlignment   = VerticalAlignment.Top,
 				        Margin              = new Thickness(x, y, 0, 0),
+				        MinWidth            = 275,
 				        Child               = sp,
 				        ClipToBounds        = true
 				    };
@@ -2120,6 +2124,14 @@
 				
 				    _tbStatus = MakeTB("", Brushes.Cyan);
 				    sp.Children.Add(_tbStatus);
+
+				    _sepPlaybook = MakeSep();
+				    _sepPlaybook.Visibility = Visibility.Collapsed;
+				    sp.Children.Add(_sepPlaybook);
+
+				    _tbPlaybook = MakeTB("", Brushes.Lime, 11);
+				    _tbPlaybook.Visibility = Visibility.Collapsed;
+				    sp.Children.Add(_tbPlaybook);
 				
 				    g.Children.Add(_mainBorder);
 				}
@@ -2199,6 +2211,22 @@
 				        _tbPnL.Foreground       = _pPnLBrush;
 				        _tbStatus.Text          = _pStatus;
 				        _tbStatus.Foreground    = _pStatusBrush;
+
+				        if (_tbPlaybook != null && _sepPlaybook != null)
+				        {
+				            if (currentEstrategia == estrategiaMode.PlaybookNasdaq && !string.IsNullOrWhiteSpace(_pPlaybookText))
+				            {
+				                _sepPlaybook.Visibility = Visibility.Visible;
+				                _tbPlaybook.Visibility  = Visibility.Visible;
+				                _tbPlaybook.Text        = _pPlaybookText;
+				                _tbPlaybook.Foreground  = _pPlaybookBrush;
+				            }
+				            else
+				            {
+				                _sepPlaybook.Visibility = Visibility.Collapsed;
+				                _tbPlaybook.Visibility  = Visibility.Collapsed;
+				            }
+				        }
 				    }
 				
 				    if (_f2dBorder == null && _pF2dVisible) CreateForce2DPanel(g);
@@ -2246,6 +2274,8 @@
 				
 				    _mainBorder      = null;
 				    _f2dBorder       = null;
+				    _tbPlaybook      = null;
+				    _sepPlaybook     = null;
 				    _cachedChartGrid = null;
 				}
 				
@@ -2312,13 +2342,13 @@
 				        if (_totalDia >= 0)
 				        {
 				            _pPnLBrush    = Brushes.Lime;
-				            _pStatus      = "STATUS: Meta de Lucro Atingida";
+				            _pStatus      = "Meta de Lucro Atingida";
 				            _pStatusBrush = Brushes.Lime;
 				        }
 				        else
 				        {
 				            _pPnLBrush    = Brushes.Red;
-				            _pStatus      = "STATUS: Meta de Perda Atingida";
+				            _pStatus      = "Meta de Perda Atingida";
 				            _pStatusBrush = Brushes.Red;
 				        }
 				    }
@@ -2334,7 +2364,7 @@
 				
 				        if (!isLiveTrading)
 				        {
-				            _pStatus      = hasReachedRealtime ? "STATUS: Aguardando Tempo Real" : "STATUS: Historico / Backtest";
+				            _pStatus      = hasReachedRealtime ? "Aguardando Tempo Real" : "Historico / Backtest";
 				            _pStatusBrush = Brushes.Gray;
 				        }
 				        else
@@ -2370,38 +2400,38 @@
 				            // 3. Definir status com prioridade correta
 							if (!_dentroHorarioManual)
 							{
-							    _pStatus      = "STATUS: Fora do Horario";
+							    _pStatus      = "Fora do Horario";
 							    _pStatusBrush = Brushes.Orange;
 							}
 							// ✅ CORREÇÃO: Verificar BOTH Automatico E Importar
 							else if ((TS_Mode == tsMode.Automatico || TS_Mode == tsMode.Importar) && !_filtroAutoOK)
 							{
-							    _pStatus      = "STATUS: Fora do Horario";
+							    _pStatus      = "Fora do Horario";
 							    _pStatusBrush = Brushes.OrangeRed;
 							}
 				            else if (QuantOperacoes >= MaxOrderSession)
 				            {
-				                _pStatus      = "STATUS: Limite de Ordens";
+				                _pStatus      = "Limite de Ordens";
 				                _pStatusBrush = Brushes.Orange;
 				            }
 				            else if (!allowTrading)
 				            {
-				                _pStatus      = "STATUS: Aguardando Ativação";
+				                _pStatus      = "Aguardando Ativação";
 				                _pStatusBrush = Brushes.Yellow;
 				            }
 				            else if (currentEstrategia == estrategiaMode.SessaoHILO && !_sessaoHiloCalculada)
 				            {
-				                _pStatus      = "STATUS: Calc Sessao HILO";
+				                _pStatus      = "Calc Sessao HILO";
 				                _pStatusBrush = Brushes.Yellow;
 				            }
 				            else if (currentEstrategia == estrategiaMode.SessaoHILO && !_sessaoHiloRangeValido)
 				            {
-				                _pStatus      = "STATUS: Range HILO Fora";
+				                _pStatus      = "Range HILO Fora";
 				                _pStatusBrush = Brushes.Orange;
 				            }
 				            else
 				            {
-				                _pStatus      = "STATUS: Em Operacao";
+				                _pStatus      = "Em Operacao";
 				                _pStatusBrush = Brushes.Cyan;
 				            }
 				        }
@@ -4625,6 +4655,42 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 						SmaSlope_InvertLogic   = false;
 						UseAIFilter = false;       // Desativado por padrão para segurança
 						MinAIConfidence = 70;      // Exige pelo menos "ALTA" (85) ou um valor customizado
+
+						// ── 26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES) ──
+						PB_PerfilAtivo               = PlaybookAtivoMode.AutoDetectar;
+						PB_InstanceId                = "painel_principal_web";
+						PB_AutoDST_EUA               = true;
+						PB_HoraAberturaManual        = DateTime.Parse("11:30", System.Globalization.CultureInfo.InvariantCulture);
+						PB_HoraAsiaManual            = DateTime.Parse("20:00", System.Globalization.CultureInfo.InvariantCulture);
+						PB_DesenharNiveisOR15        = true;
+						PB_OperarAberturaT0          = true;
+						PB_T0_ModoGestao             = PlaybookT0Mode.Auto_ConformeAtivo;
+						PB_T0_CustomTpTicks          = 28;
+						PB_T0_CustomSlTicks          = 28;
+						PB_T0_CustomMaxMinutos       = 60;
+						PB_T0_ForcaMinCompra         = 52.0;
+						PB_T0_ForcaMaxVenda          = 48.0;
+						PB_OperarConfirmacaoM5       = true;
+						PB_M5_ApenasSeT0NaoEntrou    = true;
+						PB_M5_ModoGestao             = PlaybookM5Mode.Auto_ConformeAtivo;
+						PB_M5_ForcaFinalCompra       = 55.0;
+						PB_M5_ForcaTechCompra        = 52.0;
+						PB_M5_ForcaFinalVenda        = 45.0;
+						PB_M5_ForcaTechVenda         = 48.0;
+						PB_M5_TpPontos               = 110.0;
+						PB_M5_SlPontos               = 75.0;
+						PB_M5_TpTicks                = 0;
+						PB_M5_SlTicks                = 0;
+						PB_M5_DuracaoMaxMinutos      = 55;
+						PB_OperarOR15_Reversao       = true;
+						PB_OperarOR15_Breakout       = true;
+						PB_OR15_ModoGestao           = PlaybookOR15GestaoMode.Parcial25_BE_Final50_Stop25;
+						PB_OR15_ForcaBreakoutMin     = 55.0;
+						PB_OR15_ReversaoMinRangePts  = 0.0; // 0 = Auto conforme ativo (15 pts no ES / 60 pts no NQ)
+						PB_OR15_CaixaComprimidaMaxPts = 0.0; // 0 = Auto conforme ativo (20 pts no ES / 120 pts no NQ)
+						PB_OR15_CaixaExplosivaMinPts = 0.0; // 0 = Auto conforme ativo (30 pts no ES / 180 pts no NQ)
+						PB_OR15_BreakoutQualquerCaixa = false;
+						PB_OR15_JanelaMaxMinutos     = 120;
 						
 		                if (LOTE_Size <= 0)
 		                {
@@ -4779,6 +4845,10 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 			            {
 			                InitializeConectorVM();
 			            }
+			            if (currentEstrategia == estrategiaMode.PlaybookNasdaq)
+			            {
+			                InitializePlaybookNasdaq();
+			            }
 						
 		            }
 		            else if (State == State.Realtime)
@@ -4845,8 +4915,9 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 					
 					if (State == State.Terminated || State == State.Finalized)
 					{
-					    // Encerra polling do Conector VM
+					    // Encerra polling do Conector VM e Playbook Nasdaq
 				        StopVMPolling();
+				        StopPlaybookNasdaqPolling();
 						
 						isLiveTrading = false;
 					    CancelPendingOrders();
@@ -5345,6 +5416,7 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 					    _sessaoHiloTempLow = double.MaxValue;
 					    RemoveDrawObject("SessaoHILO_High");
 					    RemoveDrawObject("SessaoHILO_Low");
+					    ResetPlaybookNasdaqDailyState(_dataHoje);
 					    
 					    if (TS_Mode == tsMode.Automatico)
 					    {
@@ -5410,7 +5482,9 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 					bool isPrecoOuBox = (currentEstrategia == estrategiaMode.Preço ||
 					                     currentEstrategia == estrategiaMode.ManualBox ||
 					                     currentEstrategia == estrategiaMode.SessaoHILO);
-					bool isConectorVM = (currentEstrategia == estrategiaMode.ConectorVM || currentEstrategia == estrategiaMode.ConectorLocal);
+					bool isConectorVM = (currentEstrategia == estrategiaMode.ConectorVM ||
+					                     currentEstrategia == estrategiaMode.ConectorLocal ||
+					                     currentEstrategia == estrategiaMode.PlaybookNasdaq);
 					
 					if (isPrecoOuBox)
 					{
@@ -5896,6 +5970,10 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				            else { ProcessFVGScalperSideSync(-1); }
 				        }
 				    }
+					else if (currentEstrategia == estrategiaMode.PlaybookNasdaq)
+					{
+					    ProcessPlaybookNasdaq();
+					}
 									
 				    
 				    else // Trata as estratégias: Preço e ManualBox
@@ -6147,7 +6225,7 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				    _pClock       = "Aguardando dados do mercado...";
 				    _pPnL         = "P&L Conta:   —\nP&L Aberto:  —\nSaldo Conta: —";
 				    _pPnLBrush    = Brushes.White;
-				    _pStatus      = isValid ? "STATUS: Aguardando Mercado" : "STATUS: Licença Inválida";
+				    _pStatus      = isValid ? "Aguardando Mercado" : "Licença Inválida";
 				    _pStatusBrush = isValid ? Brushes.Yellow : Brushes.Red;
 				}
 				
@@ -7333,6 +7411,1268 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 					if (tp > 0) SetProfitTarget(signalName, CalculationMode.Ticks, tp, false);
 				}
 
+				#region SESSÃO 26: PLAYBOOK NASDAQ FORCE (CRONOLOGIA QUADRO 4 - T0 / M5 / OR15)
+				// =====================================================================
+				// ── ESTRUTURA E CACHE DA TABELA NASDAQ_FORCE (SUPABASE + CSV LOCAL) ──
+				// =====================================================================
+				public struct NasdaqForceSnapshot
+				{
+					public DateTime TimestampBRT;
+					public double ForcaFinalCompra;
+					public double ForcaFinalVenda;
+					public double ForcaNQCompra;
+					public double ForcaSP500Compra;
+					public double ForcaVixCompra;
+					public double ForcaDxyCompra;
+					public double ForcaTechMediaCompra; // Média das 7 Techs (NVDA, MSFT, AAPL, META, AMZN, GOOGL, TSLA)
+					public bool IsValid;
+				}
+
+				public static class AxionNasdaqForceCache
+				{
+					private static readonly object _cacheLock = new object();
+					private static readonly Dictionary<DateTime, NasdaqForceSnapshot> _byMinute = new Dictionary<DateTime, NasdaqForceSnapshot>();
+					private static readonly HashSet<DateTime> _fetchedDays = new HashSet<DateTime>();
+					private static volatile bool _localCsvLoaded = false;
+					private static volatile bool _csvLoadingInProgress = false;
+					public static NasdaqForceSnapshot LatestRealtime = new NasdaqForceSnapshot();
+					public static DateTime LastRealtimeFetchUtc = DateTime.MinValue;
+
+					public static void EnsureLocalCsvLoadedAsync(Action<string> debugPrint)
+					{
+						if (_localCsvLoaded || _csvLoadingInProgress) return;
+						_csvLoadingInProgress = true;
+
+						Task.Run(() =>
+						{
+							try
+							{
+								string[] candidatePaths = new string[]
+								{
+									@"C:\Users\Pichau\Projetos React\VortexWeb\data\databento\nasdaq_force_365d_BRT.csv",
+									@"C:\Users\Pichau\Projetos React\VortexWeb\data\databento\janela_0608_1011\nasdaq_force_0608_1011_BRT.csv",
+									@"C:\NinjaPanel\nasdaq_force_365d_BRT.csv"
+								};
+								foreach (string path in candidatePaths)
+								{
+									if (!File.Exists(path)) continue;
+									using (StreamReader sr = new StreamReader(path))
+									{
+										string headerLine = sr.ReadLine();
+										if (string.IsNullOrEmpty(headerLine)) continue;
+										string[] headers = headerLine.Split(',');
+										int idxTs = Array.IndexOf(headers, "timestamp");
+										int idxFF = Array.IndexOf(headers, "forca_final_compra");
+										int idxNQ = Array.IndexOf(headers, "nasdaq_compra");
+										int idxES = Array.IndexOf(headers, "sp500_compra");
+										int idxVX = Array.IndexOf(headers, "vix_compra");
+										int idxDX = Array.IndexOf(headers, "usdindex_compra");
+										int idxNVDA = Array.IndexOf(headers, "nvidia_compra");
+										int idxMSFT = Array.IndexOf(headers, "microsoft_compra");
+										int idxAAPL = Array.IndexOf(headers, "apple_compra");
+										int idxMETA = Array.IndexOf(headers, "meta_compra");
+										int idxAMZN = Array.IndexOf(headers, "amazon_compra");
+										int idxGOOG = Array.IndexOf(headers, "alphabet_compra");
+										int idxTSLA = Array.IndexOf(headers, "tesla_compra");
+
+										int loaded = 0;
+										string line;
+										while ((line = sr.ReadLine()) != null)
+										{
+											string[] cols = line.Split(',');
+											if (cols.Length <= idxFF || idxTs < 0 || idxFF < 0) continue;
+											if (!DateTimeOffset.TryParse(cols[idxTs], System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTimeOffset dto))
+												continue;
+											DateTime keyMin = new DateTime(dto.Year, dto.Month, dto.Day, dto.Hour, dto.Minute, 0);
+											double ff = ParseDoubleFast(cols, idxFF, 50.0);
+											double nq = ParseDoubleFast(cols, idxNQ, 50.0);
+											double es = ParseDoubleFast(cols, idxES, 50.0);
+											double vx = ParseDoubleFast(cols, idxVX, 50.0);
+											double dx = ParseDoubleFast(cols, idxDX, 50.0);
+											double t1 = ParseDoubleFast(cols, idxNVDA, 50.0);
+											double t2 = ParseDoubleFast(cols, idxMSFT, 50.0);
+											double t3 = ParseDoubleFast(cols, idxAAPL, 50.0);
+											double t4 = ParseDoubleFast(cols, idxMETA, 50.0);
+											double t5 = ParseDoubleFast(cols, idxAMZN, 50.0);
+											double t6 = ParseDoubleFast(cols, idxGOOG, 50.0);
+											double t7 = ParseDoubleFast(cols, idxTSLA, 50.0);
+
+											lock (_cacheLock)
+											{
+												_byMinute[keyMin] = new NasdaqForceSnapshot
+												{
+													TimestampBRT = keyMin,
+													ForcaFinalCompra = ff,
+													ForcaFinalVenda = 100.0 - ff,
+													ForcaNQCompra = nq,
+													ForcaSP500Compra = es,
+													ForcaVixCompra = vx,
+													ForcaDxyCompra = dx,
+													ForcaTechMediaCompra = (t1 + t2 + t3 + t4 + t5 + t6 + t7) / 7.0,
+													IsValid = true
+												};
+												_fetchedDays.Add(keyMin.Date);
+											}
+											loaded++;
+										}
+										debugPrint?.Invoke($"[PLAYBOOK] ✅ Cache histórico carregado em background ({loaded} minutos de {Path.GetFileName(path)}).");
+										break;
+									}
+								}
+							}
+							catch (Exception ex)
+							{
+								debugPrint?.Invoke($"[PLAYBOOK] ⚠️ Aviso ao ler CSV em background: {ex.Message}");
+							}
+							finally
+							{
+								_localCsvLoaded = true;
+								_csvLoadingInProgress = false;
+							}
+						});
+					}
+
+					private static double ParseDoubleFast(string[] cols, int idx, double fallback)
+					{
+						if (idx < 0 || idx >= cols.Length) return fallback;
+						if (double.TryParse(cols[idx].Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double v))
+							return v;
+						return fallback;
+					}
+
+					public static NasdaqForceSnapshot RequestSpecificMinuteAsync(string url, string key, string instanceId, DateTime targetBrt, int lookbackMinutes, Action<string> debugPrint)
+					{
+						NasdaqForceSnapshot cached = GetNearest(targetBrt, lookbackMinutes);
+						if (cached.IsValid) return cached;
+
+						Task.Run(async () =>
+						{
+							try
+							{
+								string cleanInst = string.IsNullOrWhiteSpace(instanceId) ? "painel_principal_web" : instanceId.Trim();
+								DateTime startBrt = targetBrt.AddMinutes(-Math.Max(lookbackMinutes, 15));
+								DateTime endBrt   = targetBrt.AddMinutes(2);
+								string sIso = startBrt.ToString("yyyy-MM-ddTHH:mm:ss") + "-03:00";
+								string eIso = endBrt.ToString("yyyy-MM-ddTHH:mm:ss") + "-03:00";
+
+								string queryUrl = $"{url.TrimEnd('/')}/rest/v1/nasdaq_force?" +
+									$"instance_id=eq.{Uri.EscapeDataString(cleanInst)}&" +
+									$"timestamp=gte.{Uri.EscapeDataString(sIso)}&" +
+									$"timestamp=lte.{Uri.EscapeDataString(eIso)}&" +
+									$"order=timestamp.desc&limit=10";
+
+								HttpWebRequest req = (HttpWebRequest)WebRequest.Create(queryUrl);
+								req.Method = "GET";
+								req.Timeout = 3000;
+								req.ReadWriteTimeout = 3000;
+								req.Headers.Add("apikey", key);
+								req.Headers.Add("Authorization", $"Bearer {key}");
+								req.ContentType = "application/json";
+
+								using (HttpWebResponse resp = (HttpWebResponse)await req.GetResponseAsync())
+								using (StreamReader reader = new StreamReader(resp.GetResponseStream()))
+								{
+									string json = await reader.ReadToEndAsync();
+									ParseAndStoreJsonRows(json, false);
+								}
+							}
+							catch (Exception ex)
+							{
+								debugPrint?.Invoke($"[PLAYBOOK] ⚠️ Busca pontual background ({targetBrt:dd/MM HH:mm}): {ex.Message}");
+							}
+						});
+
+						return cached;
+					}
+
+					public static void RequestDayFetchAsync(string url, string key, string instanceId, DateTime dateBrt, Action<string> debugPrint)
+					{
+						DateTime dKey = dateBrt.Date;
+						lock (_cacheLock)
+						{
+							if (_fetchedDays.Contains(dKey)) return;
+							_fetchedDays.Add(dKey);
+						}
+
+						Task.Run(async () =>
+						{
+							try
+							{
+								string cleanInst = string.IsNullOrWhiteSpace(instanceId) ? "painel_principal_web" : instanceId.Trim();
+								DateTime startBrt = dKey.AddDays(-1).AddHours(18);
+								DateTime endBrt   = dKey.AddHours(20);
+								string sIso = startBrt.ToString("yyyy-MM-ddTHH:mm:ss") + "-03:00";
+								string eIso = endBrt.ToString("yyyy-MM-ddTHH:mm:ss") + "-03:00";
+
+								string queryUrl = $"{url.TrimEnd('/')}/rest/v1/nasdaq_force?" +
+									$"instance_id=eq.{Uri.EscapeDataString(cleanInst)}&" +
+									$"timestamp=gte.{Uri.EscapeDataString(sIso)}&" +
+									$"timestamp=lte.{Uri.EscapeDataString(eIso)}&" +
+									$"order=timestamp.asc&limit=1000";
+
+								HttpWebRequest req = (HttpWebRequest)WebRequest.Create(queryUrl);
+								req.Method = "GET";
+								req.Timeout = 4000;
+								req.ReadWriteTimeout = 4000;
+								req.Headers.Add("apikey", key);
+								req.Headers.Add("Authorization", $"Bearer {key}");
+								req.ContentType = "application/json";
+
+								using (HttpWebResponse resp = (HttpWebResponse)await req.GetResponseAsync())
+								using (StreamReader reader = new StreamReader(resp.GetResponseStream()))
+								{
+									string json = await reader.ReadToEndAsync();
+									int count = ParseAndStoreJsonRows(json, false);
+									debugPrint?.Invoke($"[PLAYBOOK] 🌐 Supabase nasdaq_force ({dKey:dd/MM/yyyy}): {count} registros em background.");
+								}
+							}
+							catch (Exception ex)
+							{
+								debugPrint?.Invoke($"[PLAYBOOK] ⚠️ Falha ao buscar dia {dKey:dd/MM/yyyy} em nasdaq_force: {ex.Message}");
+							}
+						});
+					}
+
+					public static async Task PollLatestFromSupabaseAsync(string url, string key, string instanceId, Action<string> debugPrint)
+					{
+						if ((DateTime.UtcNow - LastRealtimeFetchUtc).TotalSeconds < 4.0) return;
+						LastRealtimeFetchUtc = DateTime.UtcNow;
+
+						try
+						{
+							string cleanInst = string.IsNullOrWhiteSpace(instanceId) ? "painel_principal_web" : instanceId.Trim();
+							string queryUrl = $"{url.TrimEnd('/')}/rest/v1/nasdaq_force?" +
+								$"instance_id=eq.{Uri.EscapeDataString(cleanInst)}&" +
+								$"order=timestamp.desc&limit=5";
+
+							HttpWebRequest req = (HttpWebRequest)WebRequest.Create(queryUrl);
+							req.Method = "GET";
+							req.Timeout = 3000;
+							req.ReadWriteTimeout = 3000;
+							req.Headers.Add("apikey", key);
+							req.Headers.Add("Authorization", $"Bearer {key}");
+							req.ContentType = "application/json";
+
+							using (HttpWebResponse resp = (HttpWebResponse)await req.GetResponseAsync())
+							using (StreamReader reader = new StreamReader(resp.GetResponseStream()))
+							{
+								string json = await reader.ReadToEndAsync();
+								ParseAndStoreJsonRows(json, true);
+							}
+						}
+						catch (Exception ex)
+						{
+							debugPrint?.Invoke($"[PLAYBOOK POLL] ⚠️ {ex.Message}");
+						}
+					}
+
+					private static int ParseAndStoreJsonRows(string json, bool updateLatest)
+					{
+						if (string.IsNullOrWhiteSpace(json) || json == "[]") return 0;
+						int count = 0;
+						int pos = 0;
+						bool firstObj = true;
+
+						while (pos < json.Length)
+						{
+							int objStart = json.IndexOf('{', pos);
+							if (objStart < 0) break;
+							int objEnd = json.IndexOf('}', objStart);
+							if (objEnd < 0) break;
+
+							string obj = json.Substring(objStart, objEnd - objStart + 1);
+							pos = objEnd + 1;
+
+							string tsStr = ExtractJsonStr(obj, "timestamp");
+							if (string.IsNullOrWhiteSpace(tsStr)) tsStr = ExtractJsonStr(obj, "updated_at");
+							if (string.IsNullOrWhiteSpace(tsStr)) continue;
+
+							if (!DateTimeOffset.TryParse(tsStr, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTimeOffset dto))
+								continue;
+
+							// Converte para BRT (UTC-3)
+							DateTimeOffset dtoBrt = dto.ToOffset(TimeSpan.FromHours(-3));
+							DateTime keyMin = new DateTime(dtoBrt.Year, dtoBrt.Month, dtoBrt.Day, dtoBrt.Hour, dtoBrt.Minute, 0);
+
+							double ff   = ExtractJsonDouble(obj, "forca_final_compra", 50.0);
+							double nq   = ExtractJsonDouble(obj, "nasdaq_compra", 50.0);
+							double es   = ExtractJsonDouble(obj, "sp500_compra", 50.0);
+							double vx   = ExtractJsonDouble(obj, "vix_compra", 50.0);
+							double dx   = ExtractJsonDouble(obj, "usdindex_compra", 50.0);
+							double nvda = ExtractJsonDouble(obj, "nvidia_compra", 50.0);
+							double msft = ExtractJsonDouble(obj, "microsoft_compra", 50.0);
+							double aapl = ExtractJsonDouble(obj, "apple_compra", 50.0);
+							double meta = ExtractJsonDouble(obj, "meta_compra", 50.0);
+							double amzn = ExtractJsonDouble(obj, "amazon_compra", 50.0);
+							double goog = ExtractJsonDouble(obj, "alphabet_compra", 50.0);
+							double tsla = ExtractJsonDouble(obj, "tesla_compra", 50.0);
+
+							NasdaqForceSnapshot snap = new NasdaqForceSnapshot
+							{
+								TimestampBRT = keyMin,
+								ForcaFinalCompra = ff,
+								ForcaFinalVenda = 100.0 - ff,
+								ForcaNQCompra = nq,
+								ForcaSP500Compra = es,
+								ForcaVixCompra = vx,
+								ForcaDxyCompra = dx,
+								ForcaTechMediaCompra = (nvda + msft + aapl + meta + amzn + goog + tsla) / 7.0,
+								IsValid = true
+							};
+
+							lock (_cacheLock)
+							{
+								_byMinute[keyMin] = snap;
+								if (updateLatest && firstObj)
+								{
+									LatestRealtime = snap;
+									firstObj = false;
+								}
+							}
+							count++;
+						}
+						return count;
+					}
+
+					private static string ExtractJsonStr(string json, string key)
+					{
+						string pat = "\"" + key + "\":";
+						int idx = json.IndexOf(pat, StringComparison.OrdinalIgnoreCase);
+						if (idx < 0) return "";
+						int st = idx + pat.Length;
+						while (st < json.Length && (char.IsWhiteSpace(json[st]) || json[st] == '"')) st++;
+						int ed = st;
+						while (ed < json.Length && json[ed] != '"' && json[ed] != ',' && json[ed] != '}') ed++;
+						return ed > st ? json.Substring(st, ed - st).Trim() : "";
+					}
+
+					private static double ExtractJsonDouble(string json, string key, double fallback)
+					{
+						string s = ExtractJsonStr(json, key);
+						if (string.IsNullOrWhiteSpace(s)) return fallback;
+						s = s.Replace(',', '.');
+						if (double.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double v))
+							return v;
+						return fallback;
+					}
+
+					public static NasdaqForceSnapshot GetNearest(DateTime timeBrt, int maxToleranceMinutes = 15)
+					{
+						DateTime baseMin = new DateTime(timeBrt.Year, timeBrt.Month, timeBrt.Day, timeBrt.Hour, timeBrt.Minute, 0);
+						lock (_cacheLock)
+						{
+							if (_byMinute.TryGetValue(baseMin, out NasdaqForceSnapshot exact) && exact.IsValid)
+								return exact;
+							for (int m = 1; m <= maxToleranceMinutes; m++)
+							{
+								DateTime p1 = baseMin.AddMinutes(-m);
+								if (_byMinute.TryGetValue(p1, out NasdaqForceSnapshot s1) && s1.IsValid) return s1;
+								DateTime p2 = baseMin.AddMinutes(m);
+								if (_byMinute.TryGetValue(p2, out NasdaqForceSnapshot s2) && s2.IsValid) return s2;
+							}
+						}
+						return new NasdaqForceSnapshot { IsValid = false, ForcaFinalCompra = 50.0, ForcaFinalVenda = 50.0, ForcaTechMediaCompra = 50.0 };
+					}
+
+					public static NasdaqForceSnapshot GetAtOrBefore(DateTime timeBrt, int maxLookbackMinutes = 15, bool allowRealtimeFallback = false)
+					{
+						DateTime baseMin = new DateTime(timeBrt.Year, timeBrt.Month, timeBrt.Day, timeBrt.Hour, timeBrt.Minute, 0);
+						lock (_cacheLock)
+						{
+							for (int m = 0; m <= maxLookbackMinutes; m++)
+							{
+								DateTime probe = baseMin.AddMinutes(-m);
+								if (_byMinute.TryGetValue(probe, out NasdaqForceSnapshot snap) && snap.IsValid)
+									return snap;
+							}
+							if (allowRealtimeFallback && LatestRealtime.IsValid)
+								return LatestRealtime;
+						}
+						return new NasdaqForceSnapshot { IsValid = false, ForcaFinalCompra = 50.0, ForcaFinalVenda = 50.0, ForcaTechMediaCompra = 50.0 };
+					}
+				}
+
+				// =====================================================================
+				// ── VARIÁVEIS DE ESTADO DIÁRIO DO PLAYBOOK NASDAQ FORCE ────────────
+				// =====================================================================
+				private bool _pbPollingActive = false;
+				private Task _pbPollTask = null;
+				private DateTime _pbCurrentSessionDate = DateTime.MinValue;
+
+				private double _pbForcaAsia = -1.0;
+				private double _pbForcaT15m = -1.0;
+				private bool   _pbT0EvaluatedToday = false;
+				private bool   _pbT0TriggeredToday = false;
+				private bool   _pbM5EvaluatedToday = false;
+				private bool   _pbM5TriggeredToday = false;
+
+				private double _pbOr15TempHigh = double.MinValue;
+				private double _pbOr15TempLow  = double.MaxValue;
+				private double _pbOr15High     = 0.0;
+				private double _pbOr15Low      = 0.0;
+				private double _pbOr15Mid      = 0.0;
+				private double _pbOr15RangePts = 0.0;
+				private double _pbOr15Q25Pts   = 0.0;
+				private bool   _pbOr15Consolidated = false;
+				private bool   _pbOr15FirstTouchUsed = false;
+				private bool   _pbOr15BreakoutUsed   = false;
+				private int    _pbLastProcessedOrBar = -1;
+
+				// Controle de saída por tempo (T0 / M5) e Breakeven da Parcial OR15
+				private DateTime _pbActiveTradeMaxExitTime = DateTime.MinValue;
+				private bool     _pbOr15BreakevenArmed     = false;
+				private bool     _pbOr15BreakevenTriggered = false;
+				private double   _pbOr15BreakevenTriggerPrice = 0.0;
+				private double   _pbOr15EntryPrice         = 0.0;
+				private int      _pbOr15Direction          = 0;
+
+				private void InitializePlaybookNasdaq()
+				{
+					// Dispara carregamento assíncrono em background (Zero travamento de thread)
+					AxionNasdaqForceCache.EnsureLocalCsvLoadedAsync(DebugPrint);
+					if (!_pbPollingActive)
+					{
+						_pbPollingActive = true;
+						_pbPollTask = Task.Run(async () =>
+						{
+							while (_pbPollingActive && State != State.Terminated && State != State.Finalized)
+							{
+								try
+								{
+									// 1. Polling contínuo de tempo real diretamente da tabela nasdaq_force
+									await AxionNasdaqForceCache.PollLatestFromSupabaseAsync(supabaseUrl, supabaseServiceKey, PB_InstanceId, DebugPrint);
+
+									DateTime curBrt = DateTime.UtcNow.AddHours(-3);
+									var (nyOpenNow, asiaOpenNow) = GetPlaybookSessionTimes(curBrt);
+
+									// 2. Se a força da Ásia ainda não foi capturada, busca no Supabase
+									if (_pbForcaAsia < 0)
+									{
+										DateTime asiaDt = GetPreviousTradingEvening(curBrt, asiaOpenNow);
+										NasdaqForceSnapshot snapAsia = AxionNasdaqForceCache.RequestSpecificMinuteAsync(supabaseUrl, supabaseServiceKey, PB_InstanceId, asiaDt, 30, DebugPrint);
+										if (snapAsia.IsValid)
+										{
+											_pbForcaAsia = snapAsia.ForcaFinalCompra;
+											DebugPrint($"[PLAYBOOK NQ] 🌏 Força Ásia ({asiaDt:dd/MM HH:mm}) carregada em RAM: {_pbForcaAsia:F1}%");
+										}
+									}
+
+									// 3. Se já passamos de T-15m e ainda não temos T-15m capturada
+									TimeSpan t15Now = nyOpenNow - TimeSpan.FromMinutes(15);
+									if (_pbForcaT15m < 0 && curBrt.TimeOfDay >= t15Now)
+									{
+										DateTime t15Dt = curBrt.Date + t15Now;
+										NasdaqForceSnapshot snapT15 = AxionNasdaqForceCache.RequestSpecificMinuteAsync(supabaseUrl, supabaseServiceKey, PB_InstanceId, t15Dt, 15, DebugPrint);
+										if (snapT15.IsValid)
+										{
+											_pbForcaT15m = snapT15.ForcaFinalCompra;
+											DebugPrint($"[PLAYBOOK NQ] ⏰ Força Pré-Mercado T-15m ({t15Dt:dd/MM HH:mm}) carregada em RAM: {_pbForcaT15m:F1}%");
+										}
+									}
+
+									// 4. Atualiza a telemetria do painel mesmo sem novos ticks
+									UpdatePlaybookStatusTelemetry();
+									ChartControl?.Dispatcher.InvokeAsync(() =>
+									{
+										try
+										{
+											if (_tbPlaybook != null && _sepPlaybook != null && currentEstrategia == estrategiaMode.PlaybookNasdaq && !string.IsNullOrWhiteSpace(_pPlaybookText))
+											{
+												_sepPlaybook.Visibility = Visibility.Visible;
+												_tbPlaybook.Visibility  = Visibility.Visible;
+												_tbPlaybook.Text        = _pPlaybookText;
+												_tbPlaybook.Foreground  = _pPlaybookBrush;
+											}
+										}
+										catch {}
+									});
+
+									await Task.Delay(3000);
+								}
+								catch
+								{
+									await Task.Delay(4000);
+								}
+							}
+						});
+					}
+					DebugPrint("[PLAYBOOK NQ] ✅ Estratégia Playbook Nasdaq Force inicializada.");
+				}
+
+				private void StopPlaybookNasdaqPolling()
+				{
+					_pbPollingActive = false;
+				}
+
+				private void ResetPlaybookNasdaqDailyState(DateTime sessionDate)
+				{
+					_pbCurrentSessionDate = sessionDate.Date;
+					_pbForcaAsia = -1.0;
+					_pbForcaT15m = -1.0;
+					_pbT0EvaluatedToday = false;
+					_pbT0TriggeredToday = false;
+					_pbM5EvaluatedToday = false;
+					_pbM5TriggeredToday = false;
+
+					_pbOr15TempHigh = double.MinValue;
+					_pbOr15TempLow  = double.MaxValue;
+					_pbOr15High     = 0.0;
+					_pbOr15Low      = 0.0;
+					_pbOr15Mid      = 0.0;
+					_pbOr15RangePts = 0.0;
+					_pbOr15Q25Pts   = 0.0;
+					_pbOr15Consolidated = false;
+					_pbOr15FirstTouchUsed = false;
+					_pbOr15BreakoutUsed   = false;
+					_pbLastProcessedOrBar = -1;
+
+					_pbActiveTradeMaxExitTime = DateTime.MinValue;
+					_pbOr15BreakevenArmed     = false;
+					_pbOr15BreakevenTriggered = false;
+					_pbOr15BreakevenTriggerPrice = 0.0;
+					_pbOr15EntryPrice         = 0.0;
+					_pbOr15Direction          = 0;
+
+					RemoveDrawObject("PB_OR15_High");
+					RemoveDrawObject("PB_OR15_Low");
+					RemoveDrawObject("PB_OR15_Mid");
+					RemoveDrawObject("PB_OR15_Q25_Top");
+					RemoveDrawObject("PB_OR15_Q25_Bot");
+				}
+
+				// Detecta horário de verão dos EUA (EDT: 2º domingo de março até 1º domingo de novembro)
+				private bool IsUsDaylightSavingTime(DateTime date)
+				{
+					int year = date.Year;
+					DateTime march1 = new DateTime(year, 3, 1);
+					int daysUntilFirstSundayMarch = ((int)DayOfWeek.Sunday - (int)march1.DayOfWeek + 7) % 7;
+					DateTime secondSundayMarch = march1.AddDays(daysUntilFirstSundayMarch + 7);
+
+					DateTime nov1 = new DateTime(year, 11, 1);
+					int daysUntilFirstSundayNov = ((int)DayOfWeek.Sunday - (int)nov1.DayOfWeek + 7) % 7;
+					DateTime firstSundayNov = nov1.AddDays(daysUntilFirstSundayNov);
+
+					return date.Date >= secondSundayMarch.Date && date.Date < firstSundayNov.Date;
+				}
+
+				private (TimeSpan nyOpen, TimeSpan asiaOpen) GetPlaybookSessionTimes(DateTime date)
+				{
+					if (!PB_AutoDST_EUA)
+					{
+						return (
+							new TimeSpan(PB_HoraAberturaManual.Hour, PB_HoraAberturaManual.Minute, 0),
+							new TimeSpan(PB_HoraAsiaManual.Hour, PB_HoraAsiaManual.Minute, 0)
+						);
+					}
+
+					bool isEdt = IsUsDaylightSavingTime(date);
+					// Em EDT (Verão EUA): Cash NY abre às 10:30 BRT e Sessão Asiática/Globex às 19:00 BRT
+					// Em EST (Inverno EUA): Cash NY abre às 11:30 BRT e Sessão Asiática/Globex às 20:00 BRT
+					return isEdt
+						? (new TimeSpan(10, 30, 0), new TimeSpan(19, 0, 0))
+						: (new TimeSpan(11, 30, 0), new TimeSpan(20, 0, 0));
+				}
+
+				private DateTime GetPreviousTradingEvening(DateTime currentDay, TimeSpan asiaOpen)
+				{
+					DateTime prev = currentDay.Date.AddDays(-1);
+					// Se hoje é segunda-feira, a abertura asiática ocorreu no domingo à noite (mesmo prev = domingo)
+					return prev.Date + asiaOpen;
+				}
+
+				private void UpdatePlaybookStatusTelemetry()
+				{
+					DateTime nowBrt = DateTime.UtcNow.AddHours(-3);
+					var (nyOpen, asiaOpen) = GetPlaybookSessionTimes(nowBrt);
+					TimeSpan ctNow = nowBrt.TimeOfDay;
+					TimeSpan or15End = nyOpen + TimeSpan.FromMinutes(15);
+					TimeSpan t15Horario = nyOpen - TimeSpan.FromMinutes(15);
+
+					NasdaqForceSnapshot liveSnap = AxionNasdaqForceCache.LatestRealtime.IsValid 
+						? AxionNasdaqForceCache.LatestRealtime 
+						: AxionNasdaqForceCache.GetAtOrBefore(nowBrt, 15, true);
+
+					bool isEs = IsEsAsset();
+					string nomeAtivoPerfil = isEs ? "S&P 500 (ES/MES)" : "NASDAQ (NQ/MNQ)";
+					string nomeAtivoCurto  = isEs ? "ES" : "NQ";
+					string faseStr = ctNow < nyOpen ? "PRÉ-ABERTURA" : (ctNow < or15End ? "FORMANDO OR15" : "OPERANDO OR15");
+
+					// 1. Ásia
+					string asiaStr;
+					if (_pbForcaAsia >= 0)
+					{
+						string bias = _pbForcaAsia >= 52.0 ? "Compradora" : (_pbForcaAsia <= 48.0 ? "Vendedora" : "Neutra");
+						asiaStr = $"{_pbForcaAsia:F1}% ({bias})";
+					}
+					else
+					{
+						asiaStr = "Consultando...";
+					}
+
+					// 2. Pré-Mercado T-15m
+					string t15Str;
+					if (_pbForcaT15m >= 0)
+					{
+						string bias = _pbForcaT15m >= 52.0 ? "Compradora" : (_pbForcaT15m <= 48.0 ? "Vendedora" : "Neutra");
+						t15Str = $"{_pbForcaT15m:F1}% ({bias})";
+					}
+					else
+					{
+						t15Str = ctNow < t15Horario ? $"Aguardando {t15Horario:hh\\:mm} BRT" : "Capturando...";
+					}
+
+					// 3. Força Atual do Ativo (Individual) + Cesta Geral
+					string forcaAtualStr;
+					string forcaTechStr;
+					if (liveSnap.IsValid)
+					{
+						double fAtivo = isEs ? liveSnap.ForcaSP500Compra : liveSnap.ForcaNQCompra;
+						forcaAtualStr = $"{fAtivo:F1}% ({nomeAtivoCurto}) | Cesta: {liveSnap.ForcaFinalCompra:F1}%";
+						forcaTechStr  = $"{liveSnap.ForcaTechMediaCompra:F1}% (Média 7 Techs)";
+					}
+					else
+					{
+						forcaAtualStr = "Sincronizando...";
+						forcaTechStr  = "Sincronizando...";
+					}
+
+					// 4. Status T0
+					string statusT0;
+					if (_pbForcaAsia >= 52.0 && _pbForcaT15m >= 52.0)
+						statusT0 = "🟢 ALINHADO COMPRA (T0 Pronto)";
+					else if (_pbForcaAsia <= 48.0 && _pbForcaT15m <= 48.0 && _pbForcaAsia >= 0 && _pbForcaT15m >= 0)
+						statusT0 = "🔴 ALINHADO VENDA (T0 Pronto)";
+					else if (_pbForcaAsia >= 0 && _pbForcaT15m >= 0)
+						statusT0 = "🟡 DIVERGENTE (Aguardará M5/OR15)";
+					else
+						statusT0 = "⚪ Monitorando Sessões";
+
+					_pPlaybookText = $"{nomeAtivoPerfil} • {faseStr} ({nyOpen:hh\\:mm} BRT)\n" +
+					                 $"• Sessão Ásia:        {asiaStr}\n" +
+					                 $"• Pré-Mercado (T-15m): {t15Str}\n" +
+					                 $"• Atual Ativo:        {forcaAtualStr}\n" +
+					                 $"• Big Techs:          {forcaTechStr}\n" +
+					                 $"• Gatilho T0:         {statusT0}" +
+					                 (_pbOr15Consolidated ? $"\n• OR15: Range {_pbOr15RangePts:F1} pts | 50%={_pbOr15Mid:F1} | 25%={_pbOr15Q25Pts:F1}" : "");
+
+					_pPlaybookBrush = (liveSnap.IsValid && liveSnap.ForcaFinalCompra >= 52.0) ? Brushes.Lime : ((liveSnap.IsValid && liveSnap.ForcaFinalCompra <= 48.0) ? Brushes.Red : Brushes.Yellow);
+				}
+
+				private void DrawPlaybookOR15Levels()
+				{
+					if (!PB_DesenharNiveisOR15 || !_pbOr15Consolidated || _pbOr15High <= 0 || _pbOr15Low <= 0) return;
+
+					double q25Top = _pbOr15High - _pbOr15Q25Pts;
+					double q25Bot = _pbOr15Low  + _pbOr15Q25Pts;
+
+					Draw.Line(this, "PB_OR15_High",    false, 15, _pbOr15High, -40, _pbOr15High, Brushes.Crimson,        DashStyleHelper.Solid, 2);
+					Draw.Line(this, "PB_OR15_Low",     false, 15, _pbOr15Low,  -40, _pbOr15Low,  Brushes.SeaGreen,       DashStyleHelper.Solid, 2);
+					Draw.Line(this, "PB_OR15_Mid",     false, 15, _pbOr15Mid,  -40, _pbOr15Mid,  Brushes.Gold,           DashStyleHelper.Dash,  2);
+					Draw.Line(this, "PB_OR15_Q25_Top", false, 15, q25Top,      -40, q25Top,      Brushes.DodgerBlue,     DashStyleHelper.Dot,   1);
+					Draw.Line(this, "PB_OR15_Q25_Bot", false, 15, q25Bot,      -40, q25Bot,      Brushes.DodgerBlue,     DashStyleHelper.Dot,   1);
+				}
+
+				private bool IsEsAsset()
+				{
+					try
+					{
+						if (PB_PerfilAtivo == PlaybookAtivoMode.Sp500_ES_MES) return true;
+						if (PB_PerfilAtivo == PlaybookAtivoMode.Nasdaq_NQ_MNQ) return false;
+						if (Instrument == null) return false;
+						string sym = (Instrument.MasterInstrument != null ? Instrument.MasterInstrument.Name : (Instrument.FullName ?? "")).ToUpperInvariant();
+						if (sym.StartsWith("ES") || sym.StartsWith("MES") || sym.Contains("SP500") || sym.Contains("S&P") || sym.Contains("MICRO S&P"))
+							return true;
+						if (Instrument.MasterInstrument != null && (Math.Abs(Instrument.MasterInstrument.PointValue - 50.0) < 0.01 || Math.Abs(Instrument.MasterInstrument.PointValue - 5.0) < 0.01))
+							return true;
+						return false;
+					}
+					catch { return false; }
+				}
+
+				private double GetOr15ReversaoMinPts()
+				{
+					if (PB_OR15_ReversaoMinRangePts > 0) return PB_OR15_ReversaoMinRangePts;
+					return IsEsAsset() ? 15.0 : 60.0;
+				}
+
+				private double GetOr15CaixaComprimidaMaxPts()
+				{
+					if (PB_OR15_CaixaComprimidaMaxPts > 0) return PB_OR15_CaixaComprimidaMaxPts;
+					return IsEsAsset() ? 20.0 : 120.0;
+				}
+
+				private double GetOr15CaixaExplosivaMinPts()
+				{
+					if (PB_OR15_CaixaExplosivaMinPts > 0) return PB_OR15_CaixaExplosivaMinPts;
+					return IsEsAsset() ? 30.0 : 180.0;
+				}
+
+				private void ProcessPlaybookNasdaq()
+				{
+					if (BarsInProgress != 0 || CurrentBar < 2) return;
+
+
+					DateTime barTime = Time[0];
+					DateTime refTime = (isLiveTrading && currentBrokerTime != DateTime.MinValue) ? currentBrokerTime : barTime;
+					DateTime today   = barTime.Date;
+
+					if (_pbCurrentSessionDate != today)
+					{
+						ResetPlaybookNasdaqDailyState(today);
+					}
+
+					// Sincroniza dia apenas se estiver em LiveTrading e em background (NUNCA bloqueia a thread do gráfico)
+					if (isLiveTrading)
+					{
+						AxionNasdaqForceCache.RequestDayFetchAsync(supabaseUrl, supabaseServiceKey, PB_InstanceId, today, DebugPrint);
+					}
+
+					var (nyOpen, asiaOpen) = GetPlaybookSessionTimes(today);
+					TimeSpan ctBar = barTime.TimeOfDay;
+					TimeSpan ctRef = refTime.TimeOfDay;
+
+					// ── 0. GERENCIAMENTO DE POSIÇÃO ABERTA (SAÍDA POR TEMPO E BREAKEVEN PARCIAL OR15) ──
+					if (Position.MarketPosition != MarketPosition.Flat)
+					{
+						// Saída por tempo (T0 Scalp 5m / Swing 60m / M5 60m)
+						if (_pbActiveTradeMaxExitTime != DateTime.MinValue && barTime >= _pbActiveTradeMaxExitTime)
+						{
+							DebugPrint($"[PLAYBOOK NQ] ⏱️ Tempo máximo da operação atingido ({barTime:HH:mm:ss}). Encerrando posição...");
+							if (Position.MarketPosition == MarketPosition.Long)  ExitLong("PB_TimeExit", "");
+							if (Position.MarketPosition == MarketPosition.Short) ExitShort("PB_TimeExit", "");
+							_pbActiveTradeMaxExitTime = DateTime.MinValue;
+							_pbOr15BreakevenArmed = false;
+							return;
+						}
+
+						// Breakeven automático ao atingir 25% da OR (50% da Metade) na gestão Parcial/BE da OR15
+						if (_pbOr15BreakevenArmed && !_pbOr15BreakevenTriggered)
+						{
+							double currP = Position.MarketPosition == MarketPosition.Long ? GetCurrentBid() : GetCurrentAsk();
+							if (currP <= 0) currP = Close[0];
+
+							bool hitQ25 = (_pbOr15Direction == 1 && (currP >= _pbOr15BreakevenTriggerPrice || High[0] >= _pbOr15BreakevenTriggerPrice))
+							           || (_pbOr15Direction == -1 && (currP <= _pbOr15BreakevenTriggerPrice || Low[0] <= _pbOr15BreakevenTriggerPrice));
+
+							if (hitQ25)
+							{
+								double bePrice = Math.Round(Position.AveragePrice / TickSize) * TickSize;
+								SetStopLossSafe("PB_OR15_P2", CalculationMode.Price, bePrice, false);
+								SetStopLossSafe("PB_OR15_Single", CalculationMode.Price, bePrice, false);
+								_pbOr15BreakevenTriggered = true;
+								DebugPrint($"[PLAYBOOK NQ] 🛡️ Alvo Parcial (25% OR) atingido! Stop movido para Breakeven @ {bePrice:F2}");
+							}
+						}
+					}
+					else
+					{
+						_pbActiveTradeMaxExitTime = DateTime.MinValue;
+						_pbOr15BreakevenArmed     = false;
+						_pbOr15BreakevenTriggered = false;
+					}
+
+					// ── 1. CAPTURA DE FORÇA ÁSIA E FORÇA PRÉ-OPEN (T-15m) ──
+					if (_pbForcaAsia < 0)
+					{
+						DateTime asiaDt = GetPreviousTradingEvening(today, asiaOpen);
+						NasdaqForceSnapshot snapAsia = AxionNasdaqForceCache.RequestSpecificMinuteAsync(supabaseUrl, supabaseServiceKey, PB_InstanceId, asiaDt, 30, DebugPrint);
+						if (snapAsia.IsValid)
+						{
+							_pbForcaAsia = snapAsia.ForcaFinalCompra;
+							DebugPrint($"[PLAYBOOK NQ] 🌏 Força Ásia ({asiaDt:dd/MM HH:mm}) carregada e armazenada em RAM: {_pbForcaAsia:F1}%");
+						}
+					}
+
+					TimeSpan t15Span = nyOpen - TimeSpan.FromMinutes(15);
+					if (_pbForcaT15m < 0 && ctBar >= t15Span)
+					{
+						DateTime t15Dt = today + t15Span;
+						NasdaqForceSnapshot snapT15 = AxionNasdaqForceCache.RequestSpecificMinuteAsync(supabaseUrl, supabaseServiceKey, PB_InstanceId, t15Dt, 15, DebugPrint);
+						if (!snapT15.IsValid && isLiveTrading)
+							snapT15 = AxionNasdaqForceCache.GetAtOrBefore(t15Dt, 15, true);
+						if (snapT15.IsValid)
+						{
+							_pbForcaT15m = snapT15.ForcaFinalCompra;
+							DebugPrint($"[PLAYBOOK NQ] ⏰ Força Pré-Mercado T-15m ({t15Dt:dd/MM HH:mm}) carregada e armazenada em RAM: {_pbForcaT15m:F1}%");
+						}
+					}
+
+					// ── 2. ACUMULAÇÃO DA CAIXA DOS PRIMEIROS 15 MINUTOS (OR15: nyOpen -> nyOpen + 15m) ──
+					TimeSpan or15End = nyOpen + TimeSpan.FromMinutes(15);
+					// Em velas de 1m do NinjaTrader (timestamp de fechamento), a 1ª vela de 1m da abertura fecha em nyOpen + 1m e a 15ª em nyOpen + 15m
+					if (ctBar > nyOpen && ctBar <= or15End)
+					{
+						if (High[0] > _pbOr15TempHigh) _pbOr15TempHigh = High[0];
+						if (Low[0]  < _pbOr15TempLow)  _pbOr15TempLow  = Low[0];
+					}
+
+					if (!_pbOr15Consolidated && ctBar >= or15End && _pbOr15TempHigh > double.MinValue && _pbOr15TempLow < double.MaxValue)
+					{
+						_pbOr15High     = _pbOr15TempHigh;
+						_pbOr15Low      = _pbOr15TempLow;
+						_pbOr15RangePts = _pbOr15High - _pbOr15Low;
+						_pbOr15Mid      = (_pbOr15High + _pbOr15Low) / 2.0; // 50% da OR (OR_Mid)
+						_pbOr15Q25Pts   = 0.25 * _pbOr15RangePts;           // 25% da OR (50% da Metade)
+						_pbOr15Consolidated = true;
+
+						DebugPrint($"[PLAYBOOK NQ] 📦 OR15 Consolidada ({nyOpen:hh\\:mm}-{or15End:hh\\:mm}) | " +
+							$"ORH: {_pbOr15High:F2} | ORL: {_pbOr15Low:F2} | Range: {_pbOr15RangePts:F2} pts | " +
+							$"50% (Mid): {_pbOr15Mid:F2} | 25% (50% da Metade): {_pbOr15Q25Pts:F2} pts");
+
+						DrawPlaybookOR15Levels();
+					}
+
+					// Atualiza painel de status com telemetria ao vivo do Playbook
+					UpdatePlaybookStatusTelemetry();
+
+					// Se já atingiu limite de operações na sessão ou já está posicionado, não abre nova entrada
+					if (QuantOperacoes >= MaxOrderSession || Position.MarketPosition != MarketPosition.Flat || HasAccountPositionOrOrders())
+						return;
+
+					// =================================================================
+					// CRONOLOGIA 1 — ENTRADA NO 1º SEGUNDO DA ABERTURA (T0 = nyOpen)
+					// =================================================================
+					bool naJanelaT0 = (ctRef >= nyOpen && ctRef <= nyOpen + TimeSpan.FromMinutes(2))
+					               || (ctBar >= nyOpen && ctBar <= nyOpen + TimeSpan.FromMinutes(1));
+
+					if (PB_OperarAberturaT0 && !_pbT0EvaluatedToday && naJanelaT0)
+					{
+						_pbT0EvaluatedToday = true;
+
+						if (_pbForcaAsia > 0 && _pbForcaT15m > 0)
+						{
+							int dirT0 = 0;
+							if (_pbForcaAsia >= PB_T0_ForcaMinCompra && _pbForcaT15m >= PB_T0_ForcaMinCompra)
+								dirT0 = 1; // COMPRA T0
+							else if (_pbForcaAsia <= PB_T0_ForcaMaxVenda && _pbForcaT15m <= PB_T0_ForcaMaxVenda)
+								dirT0 = -1; // VENDA T0
+
+							bool dirPermitida = (dirT0 == 1 && (currentOperatingMode == OperatingMode.Comprado || currentOperatingMode == OperatingMode.Ambos))
+							                 || (dirT0 == -1 && (currentOperatingMode == OperatingMode.Vendido || currentOperatingMode == OperatingMode.Ambos));
+
+							if (dirT0 != 0 && dirPermitida)
+							{
+								int slTicksT0 = SL_Ticks;
+								int tpTicksT0 = TP_Ticks;
+								int maxMinT0  = 60;
+								bool isEs     = IsEsAsset();
+
+								switch (PB_T0_ModoGestao)
+								{
+									case PlaybookT0Mode.Auto_ConformeAtivo:
+										if (isEs)
+										{
+											tpTicksT0 = (int)Math.Round(22.0 / TickSize); // 22 pts = 88 ticks
+											slTicksT0 = (int)Math.Round(14.0 / TickSize); // 14 pts = 56 ticks
+											maxMinT0  = 60;
+										}
+										else
+										{
+											tpTicksT0 = (int)Math.Round(130.0 / TickSize); // 130 pts = 520 ticks
+											slTicksT0 = (int)Math.Round(85.0  / TickSize); // 85 pts  = 340 ticks
+											maxMinT0  = 60;
+										}
+										break;
+
+									case PlaybookT0Mode.Auto_Scalp5m:
+										if (isEs)
+										{
+											tpTicksT0 = (int)Math.Round(7.0 / TickSize); // 7 pts = 28 ticks
+											slTicksT0 = (int)Math.Round(7.0 / TickSize); // 7 pts = 28 ticks
+											maxMinT0  = 5;
+										}
+										else
+										{
+											tpTicksT0 = (int)Math.Round(45.0 / TickSize); // 45 pts = 180 ticks
+											slTicksT0 = (int)Math.Round(45.0 / TickSize); // 45 pts = 180 ticks
+											maxMinT0  = 5;
+										}
+										break;
+
+									case PlaybookT0Mode.NQ_Swing60m_130x85pts:
+										tpTicksT0 = (int)Math.Round(130.0 / TickSize);
+										slTicksT0 = (int)Math.Round(85.0  / TickSize);
+										maxMinT0  = 60;
+										break;
+
+									case PlaybookT0Mode.NQ_Scalp5m_45x45pts:
+										tpTicksT0 = (int)Math.Round(45.0 / TickSize);
+										slTicksT0 = (int)Math.Round(45.0 / TickSize);
+										maxMinT0  = 5;
+										break;
+
+									case PlaybookT0Mode.ES_Swing60m_22x14pts:
+										tpTicksT0 = (int)Math.Round(22.0 / TickSize); // 88 ticks
+										slTicksT0 = (int)Math.Round(14.0 / TickSize); // 56 ticks
+										maxMinT0  = 60;
+										break;
+
+									case PlaybookT0Mode.ES_Scalp5m_7x7pts:
+										tpTicksT0 = (int)Math.Round(7.0 / TickSize); // 28 ticks
+										slTicksT0 = (int)Math.Round(7.0 / TickSize); // 28 ticks
+										maxMinT0  = 5;
+										break;
+
+									case PlaybookT0Mode.Customizado_Ticks:
+										tpTicksT0 = Math.Max(1, PB_T0_CustomTpTicks);
+										slTicksT0 = Math.Max(1, PB_T0_CustomSlTicks);
+										maxMinT0  = Math.Max(1, PB_T0_CustomMaxMinutos);
+										break;
+
+									case PlaybookT0Mode.RoboFixoTicks:
+									default:
+										tpTicksT0 = TP_Ticks;
+										slTicksT0 = SL_Ticks;
+										maxMinT0  = 60;
+										break;
+								}
+
+								ExecutarOrdemPlaybookSimples(dirT0, "PB_T0", slTicksT0, tpTicksT0, today + nyOpen + TimeSpan.FromMinutes(maxMinT0));
+								_pbT0TriggeredToday = true;
+								DebugPrint($"[PLAYBOOK NQ] 🚀 [ETAPA 1 - T0] {(dirT0 == 1 ? "COMPRA" : "VENDA")} executada na abertura! " +
+									$"Ásia={_pbForcaAsia:F1}% | T-15m={_pbForcaT15m:F1}% | TP={tpTicksT0}tk | SL={slTicksT0}tk");
+								return;
+							}
+							else
+							{
+								DebugPrint($"[PLAYBOOK NQ] ⏸️ [ETAPA 1 - T0] Sem alinhamento Ásia ({_pbForcaAsia:F1}%) + T-15m ({_pbForcaT15m:F1}%). Aguardando M5/OR15.");
+							}
+						}
+					}
+
+					// =================================================================
+					// CRONOLOGIA 2 — CONFIRMAÇÃO NO M5 (T+5m = nyOpen + 5 min)
+					// =================================================================
+					TimeSpan m5Time = nyOpen + TimeSpan.FromMinutes(5);
+					bool naJanelaM5 = (ctBar >= m5Time && ctBar <= m5Time + TimeSpan.FromMinutes(2));
+
+					if (PB_OperarConfirmacaoM5 && !_pbM5EvaluatedToday && naJanelaM5)
+					{
+						_pbM5EvaluatedToday = true;
+
+						if (PB_M5_ApenasSeT0NaoEntrou && _pbT0TriggeredToday)
+						{
+							DebugPrint("[PLAYBOOK NQ] ℹ️ [ETAPA 2 - M5] Ignorada pois o T0 já operou hoje.");
+						}
+						else
+						{
+							NasdaqForceSnapshot snapM5 = AxionNasdaqForceCache.GetAtOrBefore(today + m5Time, 5, isLiveTrading);
+							if (snapM5.IsValid)
+							{
+								int dirM5 = 0;
+								if (snapM5.ForcaFinalCompra >= PB_M5_ForcaFinalCompra && snapM5.ForcaTechMediaCompra >= PB_M5_ForcaTechCompra)
+									dirM5 = 1; // COMPRA M5
+								else if (snapM5.ForcaFinalCompra <= PB_M5_ForcaFinalVenda && snapM5.ForcaTechMediaCompra <= PB_M5_ForcaTechVenda)
+									dirM5 = -1; // VENDA M5
+
+								bool dirPermitida = (dirM5 == 1 && (currentOperatingMode == OperatingMode.Comprado || currentOperatingMode == OperatingMode.Ambos))
+								                 || (dirM5 == -1 && (currentOperatingMode == OperatingMode.Vendido || currentOperatingMode == OperatingMode.Ambos));
+
+								if (dirM5 != 0 && dirPermitida)
+								{
+									int tpTicksM5 = 0;
+									int slTicksM5 = 0;
+									bool isEsM5   = IsEsAsset();
+
+									if (PB_M5_ModoGestao == PlaybookM5Mode.Customizado_Ticks && PB_M5_TpTicks > 0 && PB_M5_SlTicks > 0)
+									{
+										tpTicksM5 = PB_M5_TpTicks;
+										slTicksM5 = PB_M5_SlTicks;
+									}
+									else if (PB_M5_ModoGestao == PlaybookM5Mode.Customizado_Pontos)
+									{
+										double tpPts = PB_M5_TpPontos;
+										double slPts = PB_M5_SlPontos;
+										if (isEsM5 && (tpPts > 35.0 || slPts > 25.0))
+										{
+											tpPts = 12.0;
+											slPts = 10.0;
+											DebugPrint($"[PLAYBOOK ES] ⚠️ Ajuste defensivo: Pontos M5 ({PB_M5_TpPontos}/{PB_M5_SlPontos}) reduzidos para escala ES (12x10 pts).");
+										}
+										tpTicksM5 = tpPts > 0 ? (int)Math.Round(tpPts / TickSize) : 0;
+										slTicksM5 = slPts > 0 ? (int)Math.Round(slPts / TickSize) : (isEsM5 ? 40 : SL_Ticks);
+									}
+									else // Auto_ConformeAtivo
+									{
+										if (isEsM5)
+										{
+											tpTicksM5 = (int)Math.Round(7.0 / TickSize); // 28 ticks (7.0 pts)
+											slTicksM5 = (int)Math.Round(7.0 / TickSize); // 28 ticks (7.0 pts)
+										}
+										else
+										{
+											tpTicksM5 = (int)Math.Round(110.0 / TickSize); // 440 ticks (110 pts)
+											slTicksM5 = (int)Math.Round(75.0  / TickSize); // 300 ticks (75 pts)
+										}
+									}
+									DateTime exitM5 = today + m5Time + TimeSpan.FromMinutes(PB_M5_DuracaoMaxMinutos);
+
+									ExecutarOrdemPlaybookSimples(dirM5, "PB_M5", slTicksM5, tpTicksM5, exitM5);
+									_pbM5TriggeredToday = true;
+									DebugPrint($"[PLAYBOOK NQ] 🚀 [ETAPA 2 - M5] {(dirM5 == 1 ? "COMPRA" : "VENDA")} confirmada em T+5m! " +
+										$"Força={snapM5.ForcaFinalCompra:F1}% | 7Techs={snapM5.ForcaTechMediaCompra:F1}% | TP={tpTicksM5}tk | SL={slTicksM5}tk");
+									return;
+								}
+								else
+								{
+									DebugPrint($"[PLAYBOOK NQ] ⏸️ [ETAPA 2 - M5] Sem confirmação em T+5m (Força={snapM5.ForcaFinalCompra:F1}%, Techs={snapM5.ForcaTechMediaCompra:F1}%).");
+								}
+							}
+						}
+					}
+
+					// =================================================================
+					// CRONOLOGIA 3 & 4 — OPERAÇÃO NA OR15 (REVERSÃO/FADE & BREAKOUT)
+					// Com Gestão Dinâmica de 50% (OR_Mid) e 25% (50% da Metade)
+					// =================================================================
+					TimeSpan or15Limit = nyOpen + TimeSpan.FromMinutes(PB_OR15_JanelaMaxMinutos);
+					if (!_pbOr15Consolidated || ctBar <= or15End || ctBar > or15Limit)
+						return;
+
+					// Avalia a cada barra fechada (ou 1x por barra) para precisão de fechamento dentro/fora da OR15
+					if (CurrentBar == _pbLastProcessedOrBar) return;
+					if (!IsFirstTickOfBar && isLiveTrading) return;
+					_pbLastProcessedOrBar = CurrentBar;
+
+					int barIdx = isLiveTrading ? 1 : 0; // Em live com IsFirstTickOfBar, avalia a barra [1] recém-fechada
+					double barHigh  = High[barIdx];
+					double barLow   = Low[barIdx];
+					double barClose = Close[barIdx];
+					DateTime evalTime = Time[barIdx];
+
+					NasdaqForceSnapshot snapOr = AxionNasdaqForceCache.GetAtOrBefore(evalTime, 5, isLiveTrading);
+					double fCompra = snapOr.IsValid ? snapOr.ForcaFinalCompra : 50.0;
+					double fVenda  = 100.0 - fCompra;
+					double tolPrice = 2 * TickSize;
+
+					bool tocouHigh = barHigh >= (_pbOr15High - tolPrice);
+					bool tocouLow  = barLow  <= (_pbOr15Low  + tolPrice);
+
+					double revMinPts  = GetOr15ReversaoMinPts();
+					double boxCompMax = GetOr15CaixaComprimidaMaxPts();
+					double boxExplMin = GetOr15CaixaExplosivaMinPts();
+
+					bool caixaComprimida = _pbOr15RangePts <= boxCompMax;
+					bool caixaExplosiva  = _pbOr15RangePts >= boxExplMin;
+					bool caixaElegivelBreakout = PB_OR15_BreakoutQualquerCaixa || caixaComprimida || caixaExplosiva;
+
+					// ── TESTE DA MÁXIMA DOS 15 MINUTOS (ORH_15) ──
+					if (tocouHigh)
+					{
+						bool fechouAcima = barClose > _pbOr15High;
+						bool forcaForteCompra = fCompra >= PB_OR15_ForcaBreakoutMin;
+
+						// CASO A: REVERSÃO / FADE NA MÁXIMA (1º Toque + Rejeitou/Fechou dentro OU Força Compra < 55%)
+						if (PB_OperarOR15_Reversao && !_pbOr15FirstTouchUsed && (!fechouAcima || !forcaForteCompra) && _pbOr15RangePts >= revMinPts)
+						{
+							_pbOr15FirstTouchUsed = true;
+							if (currentOperatingMode == OperatingMode.Vendido || currentOperatingMode == OperatingMode.Ambos)
+							{
+								ExecutarOrdemOR15(-1, "PB_OR15_FadeSell", _pbOr15High, today + or15Limit);
+								DebugPrint($"[PLAYBOOK NQ] 🔄 [ETAPA 3 - OR15 REVERSÃO VENDA] Rejeição na ORH ({_pbOr15High:F2}) | " +
+									$"Close={barClose:F2} | ForçaCompra={fCompra:F1}% | Range={_pbOr15RangePts:F1}pts");
+								return;
+							}
+						}
+						// CASO B: BREAKOUT DE COMPRA NA MÁXIMA (Fechou Fora + Força Compra >= 55% + Caixa Elegível)
+						else if (PB_OperarOR15_Breakout && !_pbOr15BreakoutUsed && fechouAcima && forcaForteCompra && caixaElegivelBreakout)
+						{
+							_pbOr15FirstTouchUsed = true;
+							_pbOr15BreakoutUsed   = true;
+							if (currentOperatingMode == OperatingMode.Comprado || currentOperatingMode == OperatingMode.Ambos)
+							{
+								ExecutarOrdemOR15(1, "PB_OR15_BrkBuy", _pbOr15High, today + or15Limit);
+								DebugPrint($"[PLAYBOOK NQ] 💥 [ETAPA 4 - OR15 BREAKOUT COMPRA] Rompimento da ORH ({_pbOr15High:F2}) | " +
+									$"Close={barClose:F2} | ForçaCompra={fCompra:F1}% | Range={_pbOr15RangePts:F1}pts");
+								return;
+							}
+						}
+						else
+						{
+							_pbOr15FirstTouchUsed = true;
+						}
+					}
+
+					// ── TESTE DA MÍNIMA DOS 15 MINUTOS (ORL_15) ──
+					if (tocouLow)
+					{
+						bool fechouAbaixo = barClose < _pbOr15Low;
+						bool forcaForteVenda = fVenda >= PB_OR15_ForcaBreakoutMin;
+
+						// CASO A: REVERSÃO / FADE NA MÍNIMA (1º Toque + Rejeitou/Fechou dentro OU Força Venda < 55%)
+						if (PB_OperarOR15_Reversao && !_pbOr15FirstTouchUsed && (!fechouAbaixo || !forcaForteVenda) && _pbOr15RangePts >= revMinPts)
+						{
+							_pbOr15FirstTouchUsed = true;
+							if (currentOperatingMode == OperatingMode.Comprado || currentOperatingMode == OperatingMode.Ambos)
+							{
+								ExecutarOrdemOR15(1, "PB_OR15_FadeBuy", _pbOr15Low, today + or15Limit);
+								DebugPrint($"[PLAYBOOK NQ] 🔄 [ETAPA 3 - OR15 REVERSÃO COMPRA] Rejeição na ORL ({_pbOr15Low:F2}) | " +
+									$"Close={barClose:F2} | ForçaVenda={fVenda:F1}% | Range={_pbOr15RangePts:F1}pts");
+								return;
+							}
+						}
+						// CASO B: BREAKOUT DE VENDA NA MÍNIMA (Fechou Fora + Força Venda >= 55% + Caixa Elegível)
+						else if (PB_OperarOR15_Breakout && !_pbOr15BreakoutUsed && fechouAbaixo && forcaForteVenda && caixaElegivelBreakout)
+						{
+							_pbOr15FirstTouchUsed = true;
+							_pbOr15BreakoutUsed   = true;
+							if (currentOperatingMode == OperatingMode.Vendido || currentOperatingMode == OperatingMode.Ambos)
+							{
+								ExecutarOrdemOR15(-1, "PB_OR15_BrkSell", _pbOr15Low, today + or15Limit);
+								DebugPrint($"[PLAYBOOK NQ] 💥 [ETAPA 4 - OR15 BREAKOUT VENDA] Rompimento da ORL ({_pbOr15Low:F2}) | " +
+									$"Close={barClose:F2} | ForçaVenda={fVenda:F1}% | Range={_pbOr15RangePts:F1}pts");
+								return;
+							}
+						}
+						else
+						{
+							_pbOr15FirstTouchUsed = true;
+						}
+					}
+				}
+
+				private void ExecutarOrdemPlaybookSimples(int direction, string signalName, int slTicks, int tpTicks, DateTime maxExitTime)
+				{
+					int qty = Math.Max(1, LOTE_Size);
+					breakEvenTriggered = false;
+					trailStopPrice = 0.0;
+					trailStepCount = 0;
+
+					// ✅ GARANTIA ABSOLUTA DE SL/TP: Aplica com signalName e global para a ordem
+					if (slTicks > 0)
+					{
+						SetStopLoss(signalName, CalculationMode.Ticks, slTicks, false);
+						SetStopLoss(CalculationMode.Ticks, slTicks);
+					}
+					if (tpTicks > 0)
+					{
+						SetProfitTarget(signalName, CalculationMode.Ticks, tpTicks, false);
+						SetProfitTarget(CalculationMode.Ticks, tpTicks);
+					}
+
+					Order o = direction == 1
+						? EnterLong(qty, signalName)
+						: EnterShort(qty, signalName);
+
+					if (o != null)
+					{
+						AddOrderToList(o);
+						realtimeOrderIds.Add(o.Id);
+						IncrementarQuantOperacoes();
+						_pbActiveTradeMaxExitTime = maxExitTime;
+						DebugPrint($"[PLAYBOOK {(IsEsAsset() ? "ES" : "NQ")}] 🎯 ORDEM DISPARADA ({signalName}) | Qtd={qty} | SL={slTicks}tk ({slTicks * TickSize:F2} pts) | TP={tpTicks}tk ({tpTicks * TickSize:F2} pts) | SaídaMax: {maxExitTime:HH:mm:ss}");
+					}
+				}
+
+				// Executa operação na OR15 com a Matriz de Gestão de 50% (OR_Mid) e 25% (50% da Metade)
+				private void ExecutarOrdemOR15(int direction, string baseSignal, double refBorderPrice, DateTime maxExitTime)
+				{
+					int totalLots = Math.Max(1, LOTE_Size);
+					bool isEsOR   = IsEsAsset();
+					int minFloor25 = isEsOR ? 4 : 10;
+					int minFloor50 = isEsOR ? 8 : 20;
+					int maxCap25   = isEsOR ? 40 : 200; // Trava máxima de segurança na OR15
+					int maxCap50   = isEsOR ? 80 : 400;
+
+					int ticks25 = Math.Min(maxCap25, Math.Max(minFloor25, (int)Math.Round(_pbOr15Q25Pts / TickSize)));          // 25% da OR (50% da Metade)
+					int ticks50 = Math.Min(maxCap50, Math.Max(minFloor50, (int)Math.Round((_pbOr15RangePts * 0.50) / TickSize))); // 50% da OR (OR_Mid)
+
+					int slTicks = ticks25;
+					int tpSingleTicks = ticks50;
+					bool usarParcial = false;
+
+					switch (PB_OR15_ModoGestao)
+					{
+						case PlaybookOR15GestaoMode.Parcial25_BE_Final50_Stop25:
+							usarParcial   = true;
+							slTicks       = ticks25;
+							tpSingleTicks = ticks50;
+							break;
+						case PlaybookOR15GestaoMode.Parcial25_BE_Final50_Stop50:
+							usarParcial   = true;
+							slTicks       = ticks50;
+							tpSingleTicks = ticks50;
+							break;
+						case PlaybookOR15GestaoMode.Alvo25_Stop25_1para1:
+							usarParcial   = false;
+							slTicks       = ticks25;
+							tpSingleTicks = ticks25;
+							break;
+						case PlaybookOR15GestaoMode.Alvo50_Stop25_2para1:
+							usarParcial   = false;
+							slTicks       = ticks25;
+							tpSingleTicks = ticks50;
+							break;
+						case PlaybookOR15GestaoMode.Alvo50_Stop50_1para1:
+							usarParcial   = false;
+							slTicks       = ticks50;
+							tpSingleTicks = ticks50;
+							break;
+					}
+
+					breakEvenTriggered = false;
+					trailStopPrice = 0.0;
+					trailStepCount = 0;
+					_pbActiveTradeMaxExitTime = maxExitTime;
+					_pbOr15Direction  = direction;
+					_pbOr15EntryPrice = Close[0];
+
+					if (usarParcial && totalLots >= 2)
+					{
+						int lotsP1 = totalLots / 2;
+						int lotsP2 = totalLots - lotsP1;
+
+						SetStopLoss("PB_OR15_P1", CalculationMode.Ticks, slTicks, false);
+						SetProfitTarget("PB_OR15_P1", CalculationMode.Ticks, ticks25, false);
+						SetStopLoss(CalculationMode.Ticks, slTicks);
+
+						SetStopLoss("PB_OR15_P2", CalculationMode.Ticks, slTicks, false);
+						SetProfitTarget("PB_OR15_P2", CalculationMode.Ticks, ticks50, false);
+
+						Order o1 = direction == 1 ? EnterLong(lotsP1, "PB_OR15_P1") : EnterShort(lotsP1, "PB_OR15_P1");
+						Order o2 = direction == 1 ? EnterLong(lotsP2, "PB_OR15_P2") : EnterShort(lotsP2, "PB_OR15_P2");
+
+						if (o1 != null) { AddOrderToList(o1); realtimeOrderIds.Add(o1.Id); }
+						if (o2 != null) { AddOrderToList(o2); realtimeOrderIds.Add(o2.Id); }
+
+						_pbOr15BreakevenArmed = true;
+						_pbOr15BreakevenTriggered = false;
+						_pbOr15BreakevenTriggerPrice = direction == 1
+							? Close[0] + (ticks25 * TickSize)
+							: Close[0] - (ticks25 * TickSize);
+
+						IncrementarQuantOperacoes();
+						DebugPrint($"[PLAYBOOK OR15 {(isEsOR ? "ES" : "NQ")}] 🎯 PARCIAL ARMADA | P1(Alvo 25%): {ticks25}tk ({ticks25 * TickSize:F2} pts) | P2(Alvo 50%): {ticks50}tk ({ticks50 * TickSize:F2} pts) | SL: {slTicks}tk ({slTicks * TickSize:F2} pts)");
+					}
+					else
+					{
+						SetStopLoss("PB_OR15_Single", CalculationMode.Ticks, slTicks, false);
+						SetProfitTarget("PB_OR15_Single", CalculationMode.Ticks, tpSingleTicks, false);
+						SetStopLoss(CalculationMode.Ticks, slTicks);
+						SetProfitTarget(CalculationMode.Ticks, tpSingleTicks);
+
+						Order o = direction == 1 ? EnterLong(totalLots, "PB_OR15_Single") : EnterShort(totalLots, "PB_OR15_Single");
+						if (o != null)
+						{
+							AddOrderToList(o);
+							realtimeOrderIds.Add(o.Id);
+							IncrementarQuantOperacoes();
+							DebugPrint($"[PLAYBOOK OR15 {(isEsOR ? "ES" : "NQ")}] 🎯 SINGLE ARMADA | TP: {tpSingleTicks}tk ({tpSingleTicks * TickSize:F2} pts) | SL: {slTicks}tk ({slTicks * TickSize:F2} pts)");
+						}
+
+						if (usarParcial)
+						{
+							// Se LOTE_Size == 1 mas modo Parcial+BE está ativo, move para BE ao atingir 25% da OR
+							_pbOr15BreakevenArmed = true;
+							_pbOr15BreakevenTriggered = false;
+							_pbOr15BreakevenTriggerPrice = direction == 1
+								? Close[0] + (ticks25 * TickSize)
+								: Close[0] - (ticks25 * TickSize);
+						}
+					}
+				}
+				#endregion
+
 		        #region Properties
 				// ── 01. GERAL ────────────────────────────────────────
 				[Browsable(true)]
@@ -7404,8 +8744,12 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				[Display(Name="Modo de Operação", Description="Define se o robô opera Comprado, Vendido ou Ambos os sentidos", Order=2, GroupName="03. PARÂMETROS OPERAÇÃO")]
 				public OperatingMode currentOperatingMode { get; set; }
 				
-				public enum estrategiaMode { ManualBox, Preço, GridScalper, FVGScalper, ConectorVM, ConectorLocal, SessaoHILO }
+				public enum estrategiaMode { ManualBox, Preço, GridScalper, FVGScalper, ConectorVM, ConectorLocal, SessaoHILO, PlaybookNasdaq }
 				public enum SessaoHiloGatilhoMode { Toque, ToqueConfirmacaoCandle, FiltrosTecnicos }
+				public enum PlaybookAtivoMode { AutoDetectar, Nasdaq_NQ_MNQ, Sp500_ES_MES, Customizado_Livre }
+				public enum PlaybookT0Mode { Auto_ConformeAtivo, Auto_Scalp5m, NQ_Swing60m_130x85pts, NQ_Scalp5m_45x45pts, ES_Swing60m_22x14pts, ES_Scalp5m_7x7pts, Customizado_Ticks, RoboFixoTicks }
+				public enum PlaybookM5Mode { Auto_ConformeAtivo, Customizado_Pontos, Customizado_Ticks }
+				public enum PlaybookOR15GestaoMode { Parcial25_BE_Final50_Stop25, Parcial25_BE_Final50_Stop50, Alvo25_Stop25_1para1, Alvo50_Stop25_2para1, Alvo50_Stop50_1para1 }
 				
 				[Browsable(true)]
 				[NinjaScriptProperty]
@@ -7880,6 +9224,164 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				[Range(0.5, 10.0)]
 				[Display(Name="TP — Fator Multiplicador (Risco:Retorno)", Description="Ex: 1.5 = TP de 1.5x o Stop; 2.0 = TP de 2.0x o Stop", GroupName="25. STOP LOSS & TAKE PROFIT ESTRUTURAL", Order=6)]
 				public double TP_FatorMultiplicador { get; set; } = 1.5;
+
+				// ── 26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES) ──
+				[NinjaScriptProperty]
+				[Display(Name="01. Perfil do Ativo (NQ vs ES)", Description="AutoDetectar (detecta NQ/MNQ ou ES/MES pelo gráfico) | Nasdaq_NQ_MNQ | Sp500_ES_MES | Customizado_Livre", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=1)]
+				public PlaybookAtivoMode PB_PerfilAtivo { get; set; } = PlaybookAtivoMode.AutoDetectar;
+
+				[NinjaScriptProperty]
+				[Display(Name="02. ID Instância / Painel Web", Description="Identificador da instância no Supabase para buscar força", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=2)]
+				public string PB_InstanceId { get; set; } = "painel_principal_web";
+
+				[NinjaScriptProperty]
+				[Display(Name="03. Horário Abertura NY — Auto DST (EUA)", Description="Detecta automaticamente Horário de Verão EUA (EDT: 10:30 BRT / Ásia 19:00 BRT) e Inverno EUA (EST: 11:30 BRT / Ásia 20:00 BRT)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=3)]
+				public bool PB_AutoDST_EUA { get; set; } = true;
+
+				[NinjaScriptProperty]
+				[PropertyEditor("NinjaTrader.Gui.Tools.TimeEditorKey")]
+				[Display(Name="04. Horário Abertura NY (Manual)", Description="Usado apenas se Auto DST estiver desmarcada (Ex: 11:30 ou 10:30 BRT)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=4)]
+				public DateTime PB_HoraAberturaManual { get; set; }
+
+				[NinjaScriptProperty]
+				[PropertyEditor("NinjaTrader.Gui.Tools.TimeEditorKey")]
+				[Display(Name="05. Horário Abertura Ásia (Manual)", Description="Usado apenas se Auto DST estiver desmarcada (Ex: 20:00 ou 19:00 BRT)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=5)]
+				public DateTime PB_HoraAsiaManual { get; set; }
+
+				[NinjaScriptProperty]
+				[Display(Name="06. Desenhar Níveis OR15 (Max, Min, 50% e 25%)", Description="Traça no gráfico as linhas de Máxima, Mínima, 50% (OR_Mid) e 25% (50% da Metade) dos primeiros 15 minutos", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=6)]
+				public bool PB_DesenharNiveisOR15 { get; set; } = true;
+
+				[NinjaScriptProperty]
+				[Display(Name="07. [FLAG 1] Operar Abertura 1º Segundo (T0)", Description="Ativa a entrada no 1º segundo da abertura Cash NY quando Força Ásia e Força T-15m estão alinhadas", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=7)]
+				public bool PB_OperarAberturaT0 { get; set; } = true;
+
+				[NinjaScriptProperty]
+				[Display(Name="08. [T0] Modo de Gestão (Swing / Scalp / Custom Ticks)", Description="Auto_ConformeAtivo (NQ 130x85pts / ES 22x14pts) | Auto_Scalp5m (NQ 45x45pts / ES 7x7pts) | NQ_Swing | NQ_Scalp | ES_Swing | ES_Scalp | Customizado_Ticks | RoboFixoTicks", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=8)]
+				public PlaybookT0Mode PB_T0_ModoGestao { get; set; } = PlaybookT0Mode.Auto_ConformeAtivo;
+
+				[NinjaScriptProperty]
+				[Range(1, 20000)]
+				[Display(Name="09. [T0 Custom] Take Profit (Ticks)", Description="Take profit em ticks para T0 quando selecionado Customizado_Ticks (Ex: 28 ticks no ES, 180 ticks no NQ)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=9)]
+				public int PB_T0_CustomTpTicks { get; set; } = 28;
+
+				[NinjaScriptProperty]
+				[Range(1, 20000)]
+				[Display(Name="10. [T0 Custom] Stop Loss (Ticks)", Description="Stop loss em ticks para T0 quando selecionado Customizado_Ticks (Ex: 28 ticks no ES, 180 ticks no NQ)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=10)]
+				public int PB_T0_CustomSlTicks { get; set; } = 28;
+
+				[NinjaScriptProperty]
+				[Range(1, 360)]
+				[Display(Name="11. [T0 Custom] Duração Máxima (Minutos)", Description="Tempo de saída por relógio em minutos quando Customizado_Ticks (Padrão: 5 min para scalp, 60 min para swing)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=11)]
+				public int PB_T0_CustomMaxMinutos { get; set; } = 60;
+
+				[NinjaScriptProperty]
+				[Range(50.0, 95.0)]
+				[Display(Name="12. [T0] Força Mínima Compra — Ásia e T-15m (%)", Description="Percentual mínimo em Ásia E em T-15m para validar Compra no 1º segundo (Padrão: 52%)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=12)]
+				public double PB_T0_ForcaMinCompra { get; set; } = 52.0;
+
+				[NinjaScriptProperty]
+				[Range(5.0, 50.0)]
+				[Display(Name="13. [T0] Força Máxima Venda — Ásia e T-15m (%)", Description="Percentual máximo em Ásia E em T-15m para validar Venda no 1º segundo (Padrão: 48%)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=13)]
+				public double PB_T0_ForcaMaxVenda { get; set; } = 48.0;
+
+				[NinjaScriptProperty]
+				[Display(Name="14. [FLAG 2] Aguardar e Operar Confirmação M5 (T+5m)", Description="Ativa a operação após o fechamento dos primeiros 5 minutos (pós-armadilha do 1º minuto) validando Força Final + 7 Techs", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=14)]
+				public bool PB_OperarConfirmacaoM5 { get; set; } = true;
+
+				[NinjaScriptProperty]
+				[Display(Name="15. [M5] Operar M5 Apenas se T0 Não Entrou", Description="Se verdadeiro (fluxograma Quadro 4), só avalia entrada em T+5m nos dias em que o T0 não disparou", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=15)]
+				public bool PB_M5_ApenasSeT0NaoEntrou { get; set; } = true;
+
+				[NinjaScriptProperty]
+				[Display(Name="16. [M5] Modo de Gestão M5", Description="Auto_ConformeAtivo (NQ 110x75pts / ES 7x7pts) | Customizado_Pontos | Customizado_Ticks", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=16)]
+				public PlaybookM5Mode PB_M5_ModoGestao { get; set; } = PlaybookM5Mode.Auto_ConformeAtivo;
+
+				[NinjaScriptProperty]
+				[Range(50.0, 95.0)]
+				[Display(Name="17. [M5] Força Final Mínima Compra (%)", Description="Força Final mínima em T+5m para Compra (Padrão: 55%)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=17)]
+				public double PB_M5_ForcaFinalCompra { get; set; } = 55.0;
+
+				[NinjaScriptProperty]
+				[Range(50.0, 95.0)]
+				[Display(Name="18. [M5] Força 7 Techs Mínima Compra (%)", Description="Média mínima das 7 ações Tech em T+5m para Compra (Padrão: 52%)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=18)]
+				public double PB_M5_ForcaTechCompra { get; set; } = 52.0;
+
+				[NinjaScriptProperty]
+				[Range(5.0, 50.0)]
+				[Display(Name="19. [M5] Força Final Máxima Venda (%)", Description="Força Final máxima em T+5m para Venda (Padrão: 45%)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=19)]
+				public double PB_M5_ForcaFinalVenda { get; set; } = 45.0;
+
+				[NinjaScriptProperty]
+				[Range(5.0, 50.0)]
+				[Display(Name="20. [M5] Força 7 Techs Máxima Venda (%)", Description="Média máxima das 7 ações Tech em T+5m para Venda (Padrão: 48%)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=20)]
+				public double PB_M5_ForcaTechVenda { get; set; } = 48.0;
+
+				[NinjaScriptProperty]
+				[Range(0.0, 2000.0)]
+				[Display(Name="21. [M5 Custom] Take Profit (Pontos)", Description="Alvo em pontos na confirmação de 5 minutos quando Modo=Customizado_Pontos (Ex: 7 pts no ES, 110 pts no NQ)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=21)]
+				public double PB_M5_TpPontos { get; set; } = 110.0;
+
+				[NinjaScriptProperty]
+				[Range(0.0, 2000.0)]
+				[Display(Name="22. [M5 Custom] Stop Loss (Pontos)", Description="Stop Loss em pontos na confirmação de 5 minutos quando Modo=Customizado_Pontos (Ex: 7 pts no ES, 75 pts no NQ)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=22)]
+				public double PB_M5_SlPontos { get; set; } = 75.0;
+
+				[NinjaScriptProperty]
+				[Range(0, 20000)]
+				[Display(Name="23. [M5 Custom] Take Profit (Ticks)", Description="Alvo em ticks diretos para M5 quando Modo=Customizado_Ticks (Ex: 28 ticks no ES, 440 ticks no NQ)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=23)]
+				public int PB_M5_TpTicks { get; set; } = 0;
+
+				[NinjaScriptProperty]
+				[Range(0, 20000)]
+				[Display(Name="24. [M5 Custom] Stop Loss (Ticks)", Description="Stop Loss em ticks diretos para M5 quando Modo=Customizado_Ticks (Ex: 28 ticks no ES, 300 ticks no NQ)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=24)]
+				public int PB_M5_SlTicks { get; set; } = 0;
+
+				[NinjaScriptProperty]
+				[Range(5, 360)]
+				[Display(Name="25. [M5] Duração Máxima (Minutos)", Description="Tempo máximo em minutos para manter a operação do M5 aberta (55 min = encerra em T+60m)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=25)]
+				public int PB_M5_DuracaoMaxMinutos { get; set; } = 55;
+
+				[NinjaScriptProperty]
+				[Display(Name="26. [FLAG 3] Operar OR15 — Reversão / Fade (15 min)", Description="Ativa operação contra a borda da OR15 no 1º toque com rejeição (pavio) ou exaustão de força (< 55%)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=26)]
+				public bool PB_OperarOR15_Reversao { get; set; } = true;
+
+				[NinjaScriptProperty]
+				[Display(Name="27. [FLAG 4] Operar OR15 — Rompimento / Breakout (15 min)", Description="Ativa operação a favor do rompimento da OR15 quando a vela fecha fora com Força >= 55%", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=27)]
+				public bool PB_OperarOR15_Breakout { get; set; } = true;
+
+				[NinjaScriptProperty]
+				[Display(Name="28. [OR15] Modelo de Gestão 50% (OR_Mid) e 25% (50% da Metade)", Description="Define a combinação de Alvo, Parcial, Breakeven e Stop baseada em 50% e 25% da amplitude dos primeiros 15 minutos", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=28)]
+				public PlaybookOR15GestaoMode PB_OR15_ModoGestao { get; set; } = PlaybookOR15GestaoMode.Parcial25_BE_Final50_Stop25;
+
+				[NinjaScriptProperty]
+				[Range(50.0, 95.0)]
+				[Display(Name="29. [OR15] Força Mínima para Validar Breakout (%)", Description="Força mínima a favor do rompimento (Padrão: 55%). Abaixo disso ou com fechamento dentro, aciona Reversão/Fade", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=29)]
+				public double PB_OR15_ForcaBreakoutMin { get; set; } = 55.0;
+
+				[NinjaScriptProperty]
+				[Range(0.0, 500.0)]
+				[Display(Name="30. [OR15 Reversão] Amplitude Mínima da Caixa (Pontos)", Description="Amplitude mínima da OR15 em pontos para permitir Reversão (0 = Auto: 15 pts no ES / 60 pts no NQ)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=30)]
+				public double PB_OR15_ReversaoMinRangePts { get; set; } = 0.0;
+
+				[NinjaScriptProperty]
+				[Range(0.0, 500.0)]
+				[Display(Name="31. [OR15 Breakout] Caixa Comprimida Máx (Pontos)", Description="Teto em pontos para validar Breakout Comprimido (0 = Auto: 20 pts no ES / 120 pts no NQ)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=31)]
+				public double PB_OR15_CaixaComprimidaMaxPts { get; set; } = 0.0;
+
+				[NinjaScriptProperty]
+				[Range(0.0, 1000.0)]
+				[Display(Name="32. [OR15 Breakout] Caixa Explosiva Mín (Pontos)", Description="Piso em pontos para validar Breakout Explosivo (0 = Auto: 30 pts no ES / 180 pts no NQ)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=32)]
+				public double PB_OR15_CaixaExplosivaMinPts { get; set; } = 0.0;
+
+				[NinjaScriptProperty]
+				[Display(Name="33. [OR15 Breakout] Permitir em Qualquer Tamanho de Caixa", Description="Se marcado, opera Breakout mesmo em caixas intermediárias desde que feche fora com Força >= 55%", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=33)]
+				public bool PB_OR15_BreakoutQualquerCaixa { get; set; } = false;
+
+				[NinjaScriptProperty]
+				[Range(30, 390)]
+				[Display(Name="34. [OR15] Janela Máxima após Abertura (Minutos)", Description="Tempo máximo após a abertura NY para buscar entradas na OR15 (Padrão: 120 min)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=34)]
+				public int PB_OR15_JanelaMaxMinutos { get; set; } = 120;
 
 				#endregion
 		    }

@@ -496,30 +496,51 @@ function parseNasdaqForceRow(data: any): NasdaqForce {
  * Busca histórico minuto a minuto das forças (nasdaq_force) para análise comparativa e deltas.
  * Fallback para painelvm_forces_1m se nasdaq_force não possuir histórico suficiente.
  */
-export async function fetchForces1mHistorySupabase(instanceId: string, limit: number = 60): Promise<any[]> {
+export async function fetchForces1mHistorySupabase(instanceId?: string, limit: number = 1000): Promise<any[]> {
   try {
-    const targetId = instanceId || 'painel_principal';
-    // 1. Tentar primeiro na tabela nasdaq_force (novo histórico consolidado)
-    const { data, error } = await supabase
+    const candidateIds = Array.from(new Set(['painel_principal_web', instanceId, 'painel_principal'])).filter(Boolean) as string[];
+    const client = supabaseAdmin || supabase;
+    
+    // 1. Tentar primeiro na tabela nasdaq_force (novo histórico consolidado a cada 1m)
+    for (const targetId of candidateIds) {
+      const { data, error } = await client
+        .from('nasdaq_force')
+        .select('*')
+        .eq('instance_id', targetId)
+        .order('timestamp', { ascending: false })
+        .limit(limit);
+
+      if (!error && data && data.length > 0) {
+        return data;
+      }
+    }
+
+    // 1.1 Se ainda não encontrou com instance_id específico, busca os mais recentes globais
+    const { data: globalData, error: globalErr } = await client
       .from('nasdaq_force')
       .select('*')
-      .eq('instance_id', targetId)
       .order('timestamp', { ascending: false })
       .limit(limit);
 
-    if (!error && data && data.length > 0) {
-      return data;
+    if (!globalErr && globalData && globalData.length > 0) {
+      return globalData;
     }
 
     // 2. Fallback para painelvm_forces_1m se nasdaq_force ainda não tiver histórico
-    const { data: legacyData } = await supabase
-      .from('painelvm_forces_1m')
-      .select('*')
-      .eq('instance_id', targetId)
-      .order('timestamp', { ascending: false })
-      .limit(limit);
+    for (const targetId of candidateIds) {
+      const { data: legacyData } = await client
+        .from('painelvm_forces_1m')
+        .select('*')
+        .eq('instance_id', targetId)
+        .order('timestamp', { ascending: false })
+        .limit(limit);
 
-    return legacyData || [];
+      if (legacyData && legacyData.length > 0) {
+        return legacyData;
+      }
+    }
+
+    return [];
   } catch (err) {
     console.error('[DB] Exceção ao buscar histórico nasdaq_force:', err);
     return [];
@@ -594,27 +615,319 @@ export async function fetchNasdaqForceRange(
   endTime: string | Date | number
 ): Promise<any[]> {
   try {
-    const targetId = instanceId || 'painel_principal';
+    const candidateIds = Array.from(new Set([instanceId, 'painel_principal_web', 'painel_principal'])).filter(Boolean);
     const startIso = new Date(startTime).toISOString();
     const endIso = new Date(endTime).toISOString();
 
-    const { data, error } = await supabase
-      .from('nasdaq_force')
-      .select('*')
-      .eq('instance_id', targetId)
-      .gte('timestamp', startIso)
-      .lte('timestamp', endIso)
-      .order('timestamp', { ascending: true });
+    for (const targetId of candidateIds) {
+      const { data, error } = await supabase
+        .from('nasdaq_force')
+        .select('*')
+        .eq('instance_id', targetId)
+        .gte('timestamp', startIso)
+        .lte('timestamp', endIso)
+        .order('timestamp', { ascending: true });
 
-    if (error) {
-      console.warn(`[DB] Erro ao buscar intervalo em nasdaq_force:`, error);
-      return [];
+      if (!error && data && data.length > 0) {
+        return data;
+      }
     }
-    return data || [];
+    return [];
   } catch (err) {
     console.error('[DB] Exceção em fetchNasdaqForceRange:', err);
     return [];
   }
+}
+
+export interface MomentumMatrixProcessedSeries {
+  combinedIndices: { time: number; value: number }[];
+  combinedStocks: { time: number; value: number }[];
+  vix: { time: number; value: number }[];
+  dxy: { time: number; value: number }[];
+  nq: { time: number; value: number }[];
+  es: { time: number; value: number }[];
+  nvidia: { time: number; value: number }[];
+  microsoft: { time: number; value: number }[];
+  apple: { time: number; value: number }[];
+  amazon: { time: number; value: number }[];
+  alphabet: { time: number; value: number }[];
+  meta: { time: number; value: number }[];
+  tesla: { time: number; value: number }[];
+  latestSnapshot?: {
+    combinedIndices: number;
+    combinedStocks: number;
+    vix: number;
+    dxy: number;
+    nq: number;
+    es: number;
+    timestamp: string;
+    confluenceState: 'bull_rally' | 'bear_rally' | 'divergence' | 'neutral';
+  };
+}
+
+/**
+ * Processa linhas do histórico de 1m de nasdaq_force para gerar séries numéricas para o subpainel.
+ * Se targetCandles for informado, alinha deterministicamente cada ponto com a linha do tempo das velas do gráfico.
+ */
+export function processMomentumMatrixSeries(
+  rows: any[],
+  params?: Record<string, any>,
+  targetCandles?: { time: any }[],
+  liveForces?: { symbol: string; buy: number; sell: number }[]
+): MomentumMatrixProcessedSeries {
+  const invertVix = params?.invertVix === true;
+  const invertDxy = params?.invertDxy === true;
+
+  const combinedIndices: { time: number; value: number }[] = [];
+  const combinedStocks: { time: number; value: number }[] = [];
+  const vixSeries: { time: number; value: number }[] = [];
+  const dxySeries: { time: number; value: number }[] = [];
+  const nqSeries: { time: number; value: number }[] = [];
+  const esSeries: { time: number; value: number }[] = [];
+  const nvdaSeries: { time: number; value: number }[] = [];
+  const msftSeries: { time: number; value: number }[] = [];
+  const aaplSeries: { time: number; value: number }[] = [];
+  const amznSeries: { time: number; value: number }[] = [];
+  const googSeries: { time: number; value: number }[] = [];
+  const metaSeries: { time: number; value: number }[] = [];
+  const tslaSeries: { time: number; value: number }[] = [];
+
+  // Ponderações oficiais das 7 Big Techs (Magnificent 7)
+  const TECH_WEIGHTS: Record<string, number> = {
+    nvidia: 35.0,
+    microsoft: 20.0,
+    apple: 15.0,
+    amazon: 10.0,
+    alphabet: 10.0,
+    meta: 5.0,
+    tesla: 5.0
+  };
+  const totalWeight = Object.values(TECH_WEIGHTS).reduce((a, b) => a + b, 0);
+
+  // Ordenar linhas por timestamp ascendente
+  const sorted = [...(rows || [])].sort((a, b) => {
+    const tA = new Date(a.timestamp).getTime();
+    const tB = new Date(b.timestamp).getTime();
+    return tA - tB;
+  });
+
+  // Função auxiliar para calcular valores de um registro
+  const extractRowMetrics = (r: any) => {
+    const nqVal = Number(r.nasdaq_compra ?? 50);
+    const esVal = Number(r.sp500_compra ?? 50);
+    const combIndices = Math.round(((nqVal + esVal) / 2) * 10) / 10;
+
+    const nvda = Number(r.nvidia_compra ?? 50);
+    const msft = Number(r.microsoft_compra ?? 50);
+    const aapl = Number(r.apple_compra ?? 50);
+    const amzn = Number(r.amazon_compra ?? 50);
+    const goog = Number(r.alphabet_compra ?? 50);
+    const meta = Number(r.meta_compra ?? 50);
+    const tsla = Number(r.tesla_compra ?? 50);
+
+    const weightedTech = (
+      nvda * TECH_WEIGHTS.nvidia +
+      msft * TECH_WEIGHTS.microsoft +
+      aapl * TECH_WEIGHTS.apple +
+      amzn * TECH_WEIGHTS.amazon +
+      goog * TECH_WEIGHTS.alphabet +
+      meta * TECH_WEIGHTS.meta +
+      tsla * TECH_WEIGHTS.tesla
+    ) / totalWeight;
+    const combStocks = Math.round(weightedTech * 10) / 10;
+
+    const rawVix = Number(r.vix_compra ?? 50);
+    const finalVix = invertVix ? (100 - rawVix) : rawVix;
+
+    const rawDxy = Number(r.usdindex_compra ?? 50);
+    const finalDxy = invertDxy ? (100 - rawDxy) : rawDxy;
+
+    return {
+      nqVal, esVal, combIndices,
+      nvda, msft, aapl, amzn, goog, meta, tsla, combStocks,
+      finalVix, finalDxy,
+      timestamp: r.timestamp
+    };
+  };
+
+  let lastIndicesVal = 50;
+  let lastStocksVal = 50;
+  let lastVixVal = 50;
+  let lastDxyVal = 50;
+  let lastNqVal = 50;
+  let lastEsVal = 50;
+  let lastTs = '';
+
+  if (sorted.length > 0) {
+    // Array com os timestamps das linhas em segundos
+    const rowTimes = sorted.map(r => Math.floor(new Date(r.timestamp).getTime() / 1000));
+
+    // Se temos targetCandles do gráfico (ex: candles de 15m, 5m ou 1m)
+    if (targetCandles && targetCandles.length > 0) {
+      let lastCandleTimeSec = -1;
+      // Para cada candle do gráfico, busca a força no instante exato daquele candle
+      targetCandles.forEach(c => {
+        if (!c || c.time === undefined || c.time === null) return;
+        const cTimeSec = typeof c.time === 'number' ? c.time : Math.floor(new Date(c.time).getTime() / 1000);
+        if (isNaN(cTimeSec) || cTimeSec <= 0) return;
+        if (cTimeSec <= lastCandleTimeSec) return;
+        lastCandleTimeSec = cTimeSec;
+
+        // Binary search para encontrar a linha <= cTimeSec
+        let low = 0;
+        let high = rowTimes.length - 1;
+        let best = -1;
+        while (low <= high) {
+          const mid = (low + high) >> 1;
+          if (rowTimes[mid] <= cTimeSec) {
+            best = mid;
+            low = mid + 1;
+          } else {
+            high = mid - 1;
+          }
+        }
+
+        // Se o candle for anterior ao primeiro registro histórico, faz backward-fill suave
+        const targetRow = best !== -1 ? sorted[best] : sorted[0];
+        const m = extractRowMetrics(targetRow);
+
+        combinedIndices.push({ time: cTimeSec, value: m.combIndices });
+        combinedStocks.push({ time: cTimeSec, value: m.combStocks });
+        vixSeries.push({ time: cTimeSec, value: m.finalVix });
+        dxySeries.push({ time: cTimeSec, value: m.finalDxy });
+        nqSeries.push({ time: cTimeSec, value: m.nqVal });
+        esSeries.push({ time: cTimeSec, value: m.esVal });
+        nvdaSeries.push({ time: cTimeSec, value: m.nvda });
+        msftSeries.push({ time: cTimeSec, value: m.msft });
+        aaplSeries.push({ time: cTimeSec, value: m.aapl });
+        amznSeries.push({ time: cTimeSec, value: m.amzn });
+        googSeries.push({ time: cTimeSec, value: m.goog });
+        metaSeries.push({ time: cTimeSec, value: m.meta });
+        tslaSeries.push({ time: cTimeSec, value: m.tsla });
+
+        lastIndicesVal = m.combIndices;
+        lastStocksVal = m.combStocks;
+        lastVixVal = m.finalVix;
+        lastDxyVal = m.finalDxy;
+        lastNqVal = m.nqVal;
+        lastEsVal = m.esVal;
+        lastTs = targetRow.timestamp;
+      });
+    } else {
+      // Sem targetCandles: usa a série temporal direta minuto a minuto
+      const seenTimes = new Set<number>();
+      for (const r of sorted) {
+        if (!r.timestamp) continue;
+        const tSec = Math.floor(new Date(r.timestamp).getTime() / 1000);
+        if (isNaN(tSec) || tSec <= 0 || seenTimes.has(tSec)) continue;
+        seenTimes.add(tSec);
+
+        const m = extractRowMetrics(r);
+        combinedIndices.push({ time: tSec, value: m.combIndices });
+        combinedStocks.push({ time: tSec, value: m.combStocks });
+        vixSeries.push({ time: tSec, value: m.finalVix });
+        dxySeries.push({ time: tSec, value: m.finalDxy });
+        nqSeries.push({ time: tSec, value: m.nqVal });
+        esSeries.push({ time: tSec, value: m.esVal });
+        nvdaSeries.push({ time: tSec, value: m.nvda });
+        msftSeries.push({ time: tSec, value: m.msft });
+        aaplSeries.push({ time: tSec, value: m.aapl });
+        amznSeries.push({ time: tSec, value: m.amzn });
+        googSeries.push({ time: tSec, value: m.goog });
+        metaSeries.push({ time: tSec, value: m.meta });
+        tslaSeries.push({ time: tSec, value: m.tsla });
+
+        lastIndicesVal = m.combIndices;
+        lastStocksVal = m.combStocks;
+        lastVixVal = m.finalVix;
+        lastDxyVal = m.finalDxy;
+        lastNqVal = m.nqVal;
+        lastEsVal = m.esVal;
+        lastTs = r.timestamp;
+      }
+    }
+  }
+
+  // Fallback e atualização em tempo real se liveForces estiver disponível
+  if (liveForces && Array.isArray(liveForces) && liveForces.length > 0) {
+    const getBuy = (sym: string) => {
+      const f = liveForces.find(x => x.symbol?.toUpperCase().includes(sym.toUpperCase()));
+      return f ? Number(f.buy) : 50;
+    };
+
+    const liveNq = getBuy('NASDAQ');
+    const liveEs = getBuy('S&P 500');
+    const liveCombIndices = Math.round(((liveNq + liveEs) / 2) * 10) / 10;
+
+    const lNvda = getBuy('NVIDIA');
+    const lMsft = getBuy('MICROSOFT');
+    const lAapl = getBuy('APPLE');
+    const lAmzn = getBuy('AMAZON');
+    const lGoog = getBuy('ALPHABET');
+    const lMeta = getBuy('META');
+    const lTsla = getBuy('TESLA');
+
+    const liveWeightedTech = (
+      lNvda * TECH_WEIGHTS.nvidia +
+      lMsft * TECH_WEIGHTS.microsoft +
+      lAapl * TECH_WEIGHTS.apple +
+      lAmzn * TECH_WEIGHTS.amazon +
+      lGoog * TECH_WEIGHTS.alphabet +
+      lMeta * TECH_WEIGHTS.meta +
+      lTsla * TECH_WEIGHTS.tesla
+    ) / totalWeight;
+    const liveCombStocks = Math.round(liveWeightedTech * 10) / 10;
+
+    const rawVix = getBuy('VIX');
+    const liveVix = invertVix ? (100 - rawVix) : rawVix;
+
+    const rawDxy = getBuy('USD');
+    const liveDxy = invertDxy ? (100 - rawDxy) : rawDxy;
+
+    lastIndicesVal = liveCombIndices;
+    lastStocksVal = liveCombStocks;
+    lastVixVal = liveVix;
+    lastDxyVal = liveDxy;
+    lastNqVal = liveNq;
+    lastEsVal = liveEs;
+    lastTs = new Date().toISOString();
+  }
+
+  // Determinar confluência atual
+  let confluenceState: 'bull_rally' | 'bear_rally' | 'divergence' | 'neutral' = 'neutral';
+  if (lastIndicesVal >= 55 && lastStocksVal >= 55) {
+    confluenceState = 'bull_rally';
+  } else if (lastIndicesVal <= 45 && lastStocksVal <= 45) {
+    confluenceState = 'bear_rally';
+  } else if ((lastIndicesVal >= 55 && lastStocksVal <= 45) || (lastIndicesVal <= 45 && lastStocksVal >= 55)) {
+    confluenceState = 'divergence';
+  }
+
+  return {
+    combinedIndices,
+    combinedStocks,
+    vix: vixSeries,
+    dxy: dxySeries,
+    nq: nqSeries,
+    es: esSeries,
+    nvidia: nvdaSeries,
+    microsoft: msftSeries,
+    apple: aaplSeries,
+    amazon: amznSeries,
+    alphabet: googSeries,
+    meta: metaSeries,
+    tesla: tslaSeries,
+    latestSnapshot: {
+      combinedIndices: lastIndicesVal,
+      combinedStocks: lastStocksVal,
+      vix: lastVixVal,
+      dxy: lastDxyVal,
+      nq: lastNqVal,
+      es: lastEsVal,
+      timestamp: lastTs || new Date().toISOString(),
+      confluenceState
+    }
+  };
 }
 
 // 3. Buscar Níveis de Gamma (gamma_levels)

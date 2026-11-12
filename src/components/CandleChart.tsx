@@ -2,7 +2,14 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { createChart, LineSeries, CandlestickSeries, HistogramSeries, createSeriesMarkers } from 'lightweight-charts';
 import type { IChartApi } from 'lightweight-charts';
 import type { Candle, GammaLevels } from '../services/db';
-import { resolvePanelTickSize, roundToTick, isSameAsset } from '../services/db';
+import {
+  resolvePanelTickSize,
+  roundToTick,
+  isSameAsset,
+  fetchForces1mHistorySupabase,
+  processMomentumMatrixSeries,
+  type MomentumMatrixProcessedSeries
+} from '../services/db';
 import { useApp, calculateFVGs } from '../context/AppContext';
 import { getAccountManualStrategyId, saveAccountStrategySupabase, updateStrategyReportLevelsSupabase } from '../services/db';
 import { getChartTimeFromDate, parseInputToDate, getTradingSessionKey, isCandleInSessionPause, getSaoPauloDate, formatSaoPauloDayMonth, formatSaoPauloTime } from '../utils/date';
@@ -754,6 +761,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   const emacdContainerRef = useRef<HTMLDivElement>(null);
   const timeHeatmapContainerRef = useRef<HTMLDivElement>(null);
   const axionTrendContainerRef = useRef<HTMLDivElement>(null);
+  const momentumMatrixContainerRef = useRef<HTMLDivElement>(null);
   const bottomControlsRef = useRef<HTMLDivElement>(null);
 
   const [forecastMode, setForecastMode] = useState<'historico' | 'hurst'>(() => {
@@ -775,6 +783,27 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   const emacdChartRef = useRef<IChartApi | null>(null);
   const timeHeatmapChartRef = useRef<IChartApi | null>(null);
   const axionTrendChartRef = useRef<IChartApi | null>(null);
+  const momentumMatrixChartRef = useRef<IChartApi | null>(null);
+
+  // Momentum Matrix Subpanel Refs & Snapshot
+  const momentumCombinedIndicesSeriesRef = useRef<any | null>(null);
+  const momentumCombinedStocksSeriesRef = useRef<any | null>(null);
+  const momentumVixSeriesRef = useRef<any | null>(null);
+  const momentumDxySeriesRef = useRef<any | null>(null);
+  const momentumNqSeriesRef = useRef<any | null>(null);
+  const momentumEsSeriesRef = useRef<any | null>(null);
+  const momentumIndividualTechPoolRef = useRef<Map<string, any>>(new Map());
+  const momentumMatrixDataRef = useRef<MomentumMatrixProcessedSeries | null>(null);
+  const [momentumMatrixSnapshot, setMomentumMatrixSnapshot] = useState<any | null>(() => ({
+    combinedIndices: 50,
+    combinedStocks: 50,
+    vix: 50,
+    dxy: 50,
+    nq: 50,
+    es: 50,
+    timestamp: new Date().toISOString(),
+    confluenceState: 'neutral'
+  }));
 
   // Series Refs
   const candleSeriesRef = useRef<any | null>(null);
@@ -1212,6 +1241,12 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   const effectiveShowAxionTrend = Boolean(axionTrendIndConfig);
   const effectiveShowAxionTrendSubPanel = Boolean(axionTrendIndConfig && axionTrendIndConfig.params?.showSubPanel !== false);
   const effectiveShowAxionTrendColorBars = Boolean(axionTrendIndConfig && axionTrendIndConfig.params?.colorBars !== false);
+
+  const momentumMatrixIndConfig = useMemo(() => {
+    return (activeIndicators || []).find(i => (i.type === 'MOMENTUM_CONFLUENCE' || i.type === 'MOMENTUM_MATRIX') && i.visible);
+  }, [activeIndicators]);
+
+  const effectiveShowMomentumMatrix = Boolean(momentumMatrixIndConfig);
 
   const proposedTradeRef = useRef<any>(proposedTrade);
   useEffect(() => {
@@ -3142,6 +3177,121 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       updateLevelLabelsRef.current();
     }
   }, [timeHeatmapData]);
+
+  // Função para aplicar dados nas séries do gráfico Momentum Matrix
+  const updateMomentumMatrixSeriesOnChart = useCallback((data: MomentumMatrixProcessedSeries | null) => {
+    if (!momentumMatrixChartRef.current || !data) return;
+    try {
+      if (momentumCombinedIndicesSeriesRef.current) {
+        momentumCombinedIndicesSeriesRef.current.setData(sanitizeLineSeriesData(data.combinedIndices || []));
+      }
+      if (momentumCombinedStocksSeriesRef.current) {
+        momentumCombinedStocksSeriesRef.current.setData(sanitizeLineSeriesData(data.combinedStocks || []));
+      }
+      if (momentumVixSeriesRef.current) {
+        momentumVixSeriesRef.current.setData(sanitizeLineSeriesData(data.vix || []));
+      }
+      if (momentumDxySeriesRef.current) {
+        momentumDxySeriesRef.current.setData(sanitizeLineSeriesData(data.dxy || []));
+      }
+      if (momentumNqSeriesRef.current) {
+        momentumNqSeriesRef.current.setData(sanitizeLineSeriesData(data.nq || []));
+      }
+      if (momentumEsSeriesRef.current) {
+        momentumEsSeriesRef.current.setData(sanitizeLineSeriesData(data.es || []));
+      }
+      // Séries individuais das 7 ações
+      const techPool = momentumIndividualTechPoolRef.current;
+      if (techPool) {
+        const keys: (keyof MomentumMatrixProcessedSeries)[] = ['nvidia', 'microsoft', 'apple', 'amazon', 'alphabet', 'meta', 'tesla'];
+        keys.forEach(k => {
+          const s = techPool.get(k);
+          if (s) {
+            s.setData(sanitizeLineSeriesData((data[k] as any[]) || []));
+          }
+        });
+      }
+    } catch (err) {
+      console.warn('[CandleChart] Erro ao aplicar dados nas séries de Momentum Matrix:', err);
+    }
+  }, []);
+
+  const forcesRef = useRef(forces);
+  useEffect(() => {
+    forcesRef.current = forces;
+  }, [forces]);
+
+  const momentumMatrixIndConfigRef = useRef(momentumMatrixIndConfig);
+  useEffect(() => {
+    momentumMatrixIndConfigRef.current = momentumMatrixIndConfig;
+  }, [momentumMatrixIndConfig]);
+
+  // Efeito para carregar histórico e sincronizar dados a cada 1m do MOMENTUM_CONFLUENCE
+  useEffect(() => {
+    if (!effectiveShowMomentumMatrix) {
+      momentumMatrixDataRef.current = null;
+      return;
+    }
+
+    let isDisposed = false;
+    const targetInstId = settings?.instance_id_force || 'painel_principal_web';
+
+    const loadMomentumHistory = async () => {
+      try {
+        console.log('[MOMENTUM_MATRIX] Buscando histórico 1m para:', targetInstId);
+        let rows = await fetchForces1mHistorySupabase(targetInstId, 1000);
+        console.log('[MOMENTUM_MATRIX] Linhas recebidas de nasdaq_force:', rows ? rows.length : 0);
+
+        if (isDisposed) return;
+
+        const currentCandles = chartDataRef.current || [];
+        const currentParams = momentumMatrixIndConfigRef.current?.params;
+        const currentForces = forcesRef.current;
+
+        const processed = processMomentumMatrixSeries(rows || [], currentParams, currentCandles, currentForces);
+        (processed as any)._rawRows = rows || [];
+        momentumMatrixDataRef.current = processed;
+
+        if (processed.latestSnapshot) {
+          setMomentumMatrixSnapshot(processed.latestSnapshot);
+        }
+        updateMomentumMatrixSeriesOnChart(processed);
+      } catch (err) {
+        console.error('[CandleChart] Erro ao carregar histórico de momentum_matrix:', err);
+      }
+    };
+
+    loadMomentumHistory();
+
+    // Polling a cada 10 segundos para atualizar as séries com o novo minuto consolidado
+    const pollTimer = setInterval(() => {
+      if (!isDisposed) {
+        loadMomentumHistory();
+      }
+    }, 10000);
+
+    return () => {
+      isDisposed = true;
+      clearInterval(pollTimer);
+    };
+  }, [
+    effectiveShowMomentumMatrix,
+    settings?.instance_id_force,
+    updateMomentumMatrixSeriesOnChart
+  ]);
+
+  // Sincronização em tempo real do snapshot com base nas forças ao vivo (entre ciclos de 1m)
+  useEffect(() => {
+    if (!effectiveShowMomentumMatrix || !forces || !Array.isArray(forces) || forces.length === 0) return;
+    const rawRows = (momentumMatrixDataRef.current as any)?._rawRows || [];
+    const p = momentumMatrixIndConfigRef.current?.params;
+    const currentCandles = chartDataRef.current || [];
+    const processed = processMomentumMatrixSeries(rawRows, p, currentCandles, forces);
+    (processed as any)._rawRows = rawRows;
+    if (processed.latestSnapshot) {
+      setMomentumMatrixSnapshot(processed.latestSnapshot);
+    }
+  }, [forces, effectiveShowMomentumMatrix]);
 
   const fvgSeriesData = useMemo(() => {
     if (!effectiveShowFvg || chartData.length < 3) return { up: [], down: [] };
@@ -5551,6 +5701,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     if (emacdContainerRef.current) emacdContainerRef.current.innerHTML = '';
     if (timeHeatmapContainerRef.current) timeHeatmapContainerRef.current.innerHTML = '';
     if (axionTrendContainerRef.current) axionTrendContainerRef.current.innerHTML = '';
+    if (momentumMatrixContainerRef.current) momentumMatrixContainerRef.current.innerHTML = '';
     dynamicSeriesPoolRef.current.clear();
 
     const currentThemeKey = settings?.chart_color_theme || localStorage.getItem('vortex_chart_theme') || 'ninja_carbon';
@@ -5654,6 +5805,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     if (effectiveShowEMacd) activeIndicatorCount++;
     if (effectiveShowTimeHeatmap) activeIndicatorCount++;
     if (effectiveShowAxionTrendSubPanel) activeIndicatorCount++;
+    if (effectiveShowMomentumMatrix) activeIndicatorCount++;
 
     const indicatorSpacing = activeIndicatorCount * 5;
 
@@ -5665,7 +5817,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     const indicatorHeight = indicatorHeightRef.current;
     const mainChartHeight = availableHeight - indicatorSpacing - (indicatorHeight * activeIndicatorCount);
 
-    const lastActiveIndicator = effectiveShowAxionTrendSubPanel ? 'axionTrend' : (effectiveShowTimeHeatmap ? 'timeHeatmap' : (effectiveShowEMacd ? 'emacd' : (effectiveShowMacd ? 'macd' : (effectiveShowRsi ? 'rsi' : 'main'))));
+    const lastActiveIndicator = effectiveShowMomentumMatrix ? 'momentumMatrix' : (effectiveShowAxionTrendSubPanel ? 'axionTrend' : (effectiveShowTimeHeatmap ? 'timeHeatmap' : (effectiveShowEMacd ? 'emacd' : (effectiveShowMacd ? 'macd' : (effectiveShowRsi ? 'rsi' : 'main')))));
 
     // Compute a stable root container width (guaranteed to be non-zero)
     const rootWidth = chartRootRef.current && chartRootRef.current.clientWidth > 0
@@ -6200,9 +6352,214 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     axionTrendZeroSeriesRef.current = axionTrendZeroSeries;
     axionTrendMacdbbSeriesRef.current = axionTrendMacdbbSeries;
 
+    // 7. Create Momentum Matrix Sub-panel Chart if enabled
+    let momentumMatrixChart: IChartApi | null = null;
+    let momentumCombinedIndicesSeries: any = null;
+    let momentumCombinedStocksSeries: any = null;
+    let momentumVixSeries: any = null;
+    let momentumDxySeries: any = null;
+    let momentumNqSeries: any = null;
+    let momentumEsSeries: any = null;
+    const individualTechPool = new Map<string, any>();
+
+    if (effectiveShowMomentumMatrix && momentumMatrixContainerRef.current) {
+      momentumMatrixChart = createChart(momentumMatrixContainerRef.current, {
+        ...commonOptions,
+        width: rootWidth,
+        height: indicatorHeight,
+        handleScroll: false,
+        handleScale: false,
+        timeScale: {
+          ...commonOptions.timeScale,
+          visible: lastActiveIndicator === 'momentumMatrix'
+        }
+      });
+      momentumMatrixChartRef.current = momentumMatrixChart;
+
+      const p = momentumMatrixIndConfig?.params || {};
+      const indicesMode = p.indicesMode || 'combined';
+      const stocksMode = p.stocksMode || 'combined';
+      const showVix = p.showVix !== false;
+      const showDxy = p.showDxy !== false;
+      const showCenter50 = p.showCenter50 !== false;
+      const showExtremeLevels = p.showExtremeLevels !== false;
+      const levelHigh = Number(p.levelHigh || 80);
+      const levelLow = Number(p.levelLow || 20);
+
+      // Índices Combinados (NQ + ES)
+      if (indicesMode === 'combined') {
+        momentumCombinedIndicesSeries = momentumMatrixChart.addSeries(LineSeries, {
+          color: p.colorCombinedIndices || '#06b6d4',
+          lineWidth: 2,
+          title: 'NQ+ES',
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false
+        } as any);
+        try { momentumCombinedIndicesSeries.setData([]); } catch (_) {}
+      } else if (indicesMode === 'individual') {
+        if (p.showNq !== false) {
+          momentumNqSeries = momentumMatrixChart.addSeries(LineSeries, {
+            color: p.colorNq || '#38bdf8',
+            lineWidth: 2,
+            title: 'NQ',
+            lastValueVisible: false,
+            priceLineVisible: false,
+            crosshairMarkerVisible: false
+          } as any);
+          try { momentumNqSeries.setData([]); } catch (_) {}
+        }
+        if (p.showEs !== false) {
+          momentumEsSeries = momentumMatrixChart.addSeries(LineSeries, {
+            color: p.colorEs || '#3b82f6',
+            lineWidth: 2,
+            title: 'ES',
+            lastValueVisible: false,
+            priceLineVisible: false,
+            crosshairMarkerVisible: false
+          } as any);
+          try { momentumEsSeries.setData([]); } catch (_) {}
+        }
+      }
+
+      // Cesta Big Techs (Mag7) ou Ações Individuais
+      if (stocksMode === 'combined') {
+        momentumCombinedStocksSeries = momentumMatrixChart.addSeries(LineSeries, {
+          color: p.colorCombinedStocks || '#eab308',
+          lineWidth: 2,
+          title: 'Mag7',
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false
+        } as any);
+        try { momentumCombinedStocksSeries.setData([]); } catch (_) {}
+      } else if (stocksMode === 'individual') {
+        const techDefs = [
+          { key: 'nvidia', label: 'NVDA', color: p.colorNvidia || '#22c55e', flag: p.showNvidia !== false },
+          { key: 'microsoft', label: 'MSFT', color: p.colorMicrosoft || '#0284c7', flag: p.showMicrosoft !== false },
+          { key: 'apple', label: 'AAPL', color: p.colorApple || '#94a3b8', flag: p.showApple !== false },
+          { key: 'amazon', label: 'AMZN', color: p.colorAmazon || '#f97316', flag: p.showAmazon !== false },
+          { key: 'alphabet', label: 'GOOGL', color: p.colorAlphabet || '#ea580c', flag: p.showAlphabet !== false },
+          { key: 'meta', label: 'META', color: p.colorMeta || '#6366f1', flag: p.showMeta !== false },
+          { key: 'tesla', label: 'TSLA', color: p.colorTesla || '#ef4444', flag: p.showTesla !== false },
+        ];
+        techDefs.forEach(td => {
+          if (td.flag) {
+            const s = momentumMatrixChart!.addSeries(LineSeries, {
+              color: td.color,
+              lineWidth: 1,
+              title: td.label,
+              lastValueVisible: false,
+              priceLineVisible: false,
+              crosshairMarkerVisible: false
+            } as any);
+            try { s.setData([]); } catch (_) {}
+            individualTechPool.set(td.key, s);
+          }
+        });
+      }
+
+      // VIX Individual
+      if (showVix) {
+        momentumVixSeries = momentumMatrixChart.addSeries(LineSeries, {
+          color: p.colorVix || '#a855f7',
+          lineWidth: 2,
+          title: 'VIX',
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false
+        } as any);
+        try { momentumVixSeries.setData([]); } catch (_) {}
+      }
+
+      // DXY Individual
+      if (showDxy) {
+        momentumDxySeries = momentumMatrixChart.addSeries(LineSeries, {
+          color: p.colorDxy || '#10b981',
+          lineWidth: 2,
+          title: 'DXY',
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false
+        } as any);
+        try { momentumDxySeries.setData([]); } catch (_) {}
+      }
+
+      // Linhas guias horizontais (Linha Central 50, Níveis 80/20 e limites 0/100)
+      const refSeriesForLines = momentumCombinedIndicesSeries || momentumCombinedStocksSeries || momentumVixSeries || momentumDxySeries || momentumNqSeries;
+      if (refSeriesForLines) {
+        try {
+          refSeriesForLines.createPriceLine({
+            price: 100,
+            color: '#33415530',
+            lineWidth: 1,
+            lineStyle: 0,
+            axisLabelVisible: false,
+            title: ''
+          });
+          refSeriesForLines.createPriceLine({
+            price: 0,
+            color: '#33415530',
+            lineWidth: 1,
+            lineStyle: 0,
+            axisLabelVisible: false,
+            title: ''
+          });
+
+          if (showCenter50) {
+            refSeriesForLines.createPriceLine({
+              price: 50,
+              color: '#94a3b8',
+              lineWidth: 1,
+              lineStyle: 2,
+              axisLabelVisible: true,
+              title: '50'
+            });
+          }
+          if (showExtremeLevels) {
+            refSeriesForLines.createPriceLine({
+              price: levelHigh,
+              color: '#ef444460',
+              lineWidth: 1,
+              lineStyle: 2,
+              axisLabelVisible: false,
+              title: '80'
+            });
+            refSeriesForLines.createPriceLine({
+              price: levelLow,
+              color: '#10b98160',
+              lineWidth: 1,
+              lineStyle: 2,
+              axisLabelVisible: false,
+              title: '20'
+            });
+          }
+        } catch (_) {}
+      }
+
+      // Escala de preço estável [0 a 100]
+      momentumMatrixChart.priceScale('right').applyOptions({
+        autoScale: true,
+        scaleMargins: { top: 0.08, bottom: 0.08 }
+      });
+    }
+
+    momentumCombinedIndicesSeriesRef.current = momentumCombinedIndicesSeries;
+    momentumCombinedStocksSeriesRef.current = momentumCombinedStocksSeries;
+    momentumVixSeriesRef.current = momentumVixSeries;
+    momentumDxySeriesRef.current = momentumDxySeries;
+    momentumNqSeriesRef.current = momentumNqSeries;
+    momentumEsSeriesRef.current = momentumEsSeries;
+    momentumIndividualTechPoolRef.current = individualTechPool;
+
+    // Se já houver dados carregados no ref, aplica imediatamente nas séries
+    if (momentumMatrixDataRef.current) {
+      updateMomentumMatrixSeriesOnChart(momentumMatrixDataRef.current);
+    }
+
     // Synchronize time scales (One-way: Main -> Sub-charts) and update level labels
     const syncHandlers: { timeScale: any; handler: () => void }[] = [];
-    const subCharts = [rsiChart, macdChart, emacdChart, timeHeatmapChart, axionTrendChart].filter(Boolean) as IChartApi[];
+    const subCharts = [rsiChart, macdChart, emacdChart, timeHeatmapChart, axionTrendChart, momentumMatrixChart].filter(Boolean) as IChartApi[];
     const mainTimeScale = mainChart.timeScale();
     let isSyncing = false;
     
@@ -6294,6 +6651,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       if (effectiveShowEMacd) activeIndicatorCount++;
       if (effectiveShowTimeHeatmap) activeIndicatorCount++;
       if (effectiveShowAxionTrendSubPanel) activeIndicatorCount++;
+      if (effectiveShowMomentumMatrix) activeIndicatorCount++;
 
       const indicatorSpacing = activeIndicatorCount * 5;
       const indicatorHeight = indicatorHeightRef.current;
@@ -6317,6 +6675,9 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       }
       if (axionTrendChartRef.current && effectiveShowAxionTrendSubPanel) {
         axionTrendChartRef.current.resize(width, indicatorHeight);
+      }
+      if (momentumMatrixChartRef.current && effectiveShowMomentumMatrix) {
+        momentumMatrixChartRef.current.resize(width, indicatorHeight);
       }
 
       // Update level labels coordinate alignment
@@ -6491,8 +6852,32 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         axionTrendZeroSeriesRef.current = null;
         axionTrendMacdbbSeriesRef.current = null;
       }
+      if (momentumMatrixChart) {
+        momentumMatrixChart.remove();
+        momentumMatrixChartRef.current = null;
+        momentumCombinedIndicesSeriesRef.current = null;
+        momentumCombinedStocksSeriesRef.current = null;
+        momentumVixSeriesRef.current = null;
+        momentumDxySeriesRef.current = null;
+        momentumNqSeriesRef.current = null;
+        momentumEsSeriesRef.current = null;
+        momentumIndividualTechPoolRef.current.clear();
+      }
     };
-  }, [effectiveShowSma9, effectiveShowEma21, effectiveShowEma50, effectiveShowRsi, effectiveShowMacd, effectiveShowEMacd, effectiveShowTimeHeatmap, effectiveShowAxionTrendSubPanel, isZoomed, settings?.chart_color_theme]);
+  }, [
+    effectiveShowSma9,
+    effectiveShowEma21,
+    effectiveShowEma50,
+    effectiveShowRsi,
+    effectiveShowMacd,
+    effectiveShowEMacd,
+    effectiveShowTimeHeatmap,
+    effectiveShowAxionTrendSubPanel,
+    effectiveShowMomentumMatrix,
+    momentumMatrixIndConfig,
+    isZoomed,
+    settings?.chart_color_theme
+  ]);
 
   // Real-time Theme Dynamic Update Effect (Sem recarregar a tela)
   useEffect(() => {
@@ -6554,6 +6939,12 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       }
       if (axionTrendChartRef.current) {
         axionTrendChartRef.current.applyOptions({
+          layout: { background: { color: colors.bg }, textColor: colors.textColor },
+          grid: { vertLines: { color: colors.gridColor }, horzLines: { color: colors.gridColor } }
+        });
+      }
+      if (momentumMatrixChartRef.current) {
+        momentumMatrixChartRef.current.applyOptions({
           layout: { background: { color: colors.bg }, textColor: colors.textColor },
           grid: { vertLines: { color: colors.gridColor }, horzLines: { color: colors.gridColor } }
         });
@@ -7565,6 +7956,13 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       fvgDownSeriesPoolRef.current.forEach(series => { try { series?.setData([]); } catch (_) {} });
     }
 
+    // 8.7 Update Momentum Matrix Sub-panel (NQ+ES, Mag7 Techs, VIX, DXY alinhados por candle)
+    if (momentumMatrixChartRef.current) {
+      if (effectiveShowMomentumMatrix && momentumMatrixDataRef.current) {
+        updateMomentumMatrixSeriesOnChart(momentumMatrixDataRef.current);
+      }
+    }
+
     // Fit content or restore saved zoom level on initial data load
     if (isFirstDataLoadRef.current && mainChartRef.current && chartData.length > 0) {
       applySavedViewport(false);
@@ -7578,7 +7976,14 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       if (mainChartRef.current) {
         const logicalRange = mainChartRef.current.timeScale().getVisibleLogicalRange();
         if (logicalRange) {
-          const subCharts = [rsiChartRef.current, macdChartRef.current, emacdChartRef.current, timeHeatmapChartRef.current, axionTrendChartRef.current].filter(Boolean) as IChartApi[];
+          const subCharts = [
+            rsiChartRef.current,
+            macdChartRef.current,
+            emacdChartRef.current,
+            timeHeatmapChartRef.current,
+            axionTrendChartRef.current,
+            momentumMatrixChartRef.current
+          ].filter(Boolean) as IChartApi[];
           subCharts.forEach(c => {
             try {
               c.timeScale().setVisibleLogicalRange(logicalRange);
@@ -7606,7 +8011,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         panelId: instanceId || 'painel_chart'
       });
     }
-  }, [chartData, timeframe, effectiveShowSma9, effectiveShowEma21, effectiveShowEma50, effectiveShowRsi, effectiveShowMacd, showPva, effectiveShowEMacd, effectiveShowTimeHeatmap, timeHeatmapData, effectiveShowAxionTrendSubPanel, axionTrendData, showFvg, sma9Data, ema21Data, ema50Data, rsiData, macdData, macdDivergences, showMacdDivergence, emacdData, fvgSeriesData, gammaLevels, activeIndicators, settings?.disabled_levels, activeTrade, proposedTrade, showLevels, showTradeMarkers, customSignals, combinedIndicatorSignals, historicalIndicatorSignals, reports, updateTradePriceLines]);
+  }, [chartData, timeframe, effectiveShowSma9, effectiveShowEma21, effectiveShowEma50, effectiveShowRsi, effectiveShowMacd, showPva, effectiveShowEMacd, effectiveShowTimeHeatmap, timeHeatmapData, effectiveShowAxionTrendSubPanel, axionTrendData, effectiveShowMomentumMatrix, momentumMatrixSnapshot, updateMomentumMatrixSeriesOnChart, showFvg, sma9Data, ema21Data, ema50Data, rsiData, macdData, macdDivergences, showMacdDivergence, emacdData, fvgSeriesData, gammaLevels, activeIndicators, settings?.disabled_levels, activeTrade, proposedTrade, showLevels, showTradeMarkers, customSignals, combinedIndicatorSignals, historicalIndicatorSignals, reports, updateTradePriceLines]);
 
   // Mandatory Alignment on Timeframe Change (Always fit rightmost bars to right price scale with saved zoom)
   useEffect(() => {
@@ -8505,6 +8910,84 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                 <div className="h-[2px] bg-slate-800 group-hover:bg-indigo-500 w-16 rounded transition-all" />
               </div>
               <div ref={axionTrendContainerRef} className="w-full h-full border-t border-slate-850 overflow-hidden" />
+            </div>
+          )}
+
+          {/* Momentum Matrix Sub-chart (NQ+ES, Mag7 Techs, VIX, DXY a cada 1m) */}
+          {effectiveShowMomentumMatrix && (
+            <div className="w-full mt-1 relative flex flex-col shrink-0 overflow-hidden bg-slate-950/70 rounded-md border border-slate-800/80 shadow-md" style={{ height: indicatorHeightRef.current || 95 }}>
+              {/* Splitter Resize Handle */}
+              <div 
+                className="h-1.5 hover:bg-cyan-500/50 cursor-ns-resize transition-all w-full flex items-center justify-center group z-20 absolute -top-1"
+                onMouseDown={startResizeDrag}
+                onTouchStart={startResizeDrag}
+              >
+                <div className="h-[2px] bg-slate-800 group-hover:bg-cyan-500 w-16 rounded transition-all" />
+              </div>
+
+              {/* Subpanel Header Overlay with Real-time Badges */}
+              <div className="absolute top-1 left-2 z-10 flex items-center gap-1.5 select-none pointer-events-none flex-wrap">
+                <span className="text-[10px] font-black uppercase tracking-wider text-cyan-400 flex items-center gap-1 bg-slate-900/90 px-1.5 py-0.5 rounded border border-cyan-800/50 shadow-sm">
+                  🌊 MOMENTUM MATRIX (1m)
+                </span>
+
+                {momentumMatrixSnapshot && (
+                  <>
+                    {/* Badge NQ+ES */}
+                    {momentumMatrixIndConfig?.params?.indicesMode !== 'off' && (
+                      <span className={`text-[9.5px] font-bold font-mono px-1.5 py-0.5 rounded border shadow-sm ${
+                        momentumMatrixSnapshot.combinedIndices >= 50
+                          ? 'bg-cyan-950/80 text-cyan-300 border-cyan-700/60'
+                          : 'bg-rose-950/80 text-rose-300 border-rose-700/60'
+                      }`}>
+                        NQ+ES: {momentumMatrixSnapshot.combinedIndices}%
+                      </span>
+                    )}
+
+                    {/* Badge Mag7 Techs */}
+                    {momentumMatrixIndConfig?.params?.stocksMode !== 'off' && (
+                      <span className={`text-[9.5px] font-bold font-mono px-1.5 py-0.5 rounded border shadow-sm ${
+                        momentumMatrixSnapshot.combinedStocks >= 50
+                          ? 'bg-amber-950/80 text-amber-300 border-amber-700/60'
+                          : 'bg-rose-950/80 text-rose-300 border-rose-700/60'
+                      }`}>
+                        Mag7: {momentumMatrixSnapshot.combinedStocks}%
+                      </span>
+                    )}
+
+                    {/* Badge VIX */}
+                    {momentumMatrixIndConfig?.params?.showVix !== false && (
+                      <span className="text-[9.5px] font-bold font-mono px-1.5 py-0.5 rounded bg-purple-950/80 text-purple-300 border border-purple-700/60 shadow-sm">
+                        VIX: {momentumMatrixSnapshot.vix}%
+                      </span>
+                    )}
+
+                    {/* Badge DXY */}
+                    {momentumMatrixIndConfig?.params?.showDxy !== false && (
+                      <span className="text-[9.5px] font-bold font-mono px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 shadow-sm">
+                        DXY: {momentumMatrixSnapshot.dxy}%
+                      </span>
+                    )}
+
+                    {/* Confluence Pill */}
+                    <span className={`text-[9.5px] font-black uppercase px-2 py-0.5 rounded-full border shadow-sm ${
+                      momentumMatrixSnapshot.confluenceState === 'bull_rally'
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 animate-pulse'
+                        : momentumMatrixSnapshot.confluenceState === 'bear_rally'
+                        ? 'bg-red-500/20 text-red-300 border-red-500/50 animate-pulse'
+                        : momentumMatrixSnapshot.confluenceState === 'divergence'
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+                        : 'bg-slate-800/80 text-slate-400 border-slate-700/50'
+                    }`}>
+                      {momentumMatrixSnapshot.confluenceState === 'bull_rally' ? '🟢 RALLY ALTA' :
+                       momentumMatrixSnapshot.confluenceState === 'bear_rally' ? '🔴 RALLY BAIXA' :
+                       momentumMatrixSnapshot.confluenceState === 'divergence' ? '🟡 DIVERGÊNCIA' : '⚪ NEUTRO'}
+                    </span>
+                  </>
+                )}
+              </div>
+
+              <div ref={momentumMatrixContainerRef} className="w-full h-full border-t border-slate-850 overflow-hidden" />
             </div>
           )}
         </div>

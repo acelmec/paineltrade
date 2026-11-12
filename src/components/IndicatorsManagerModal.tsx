@@ -496,6 +496,35 @@ export const IndicatorsManagerModal: React.FC<IndicatorsManagerModalProps> = ({
                   </div>
                 )}
 
+                {editingIndicator.type === 'MOMENTUM_CONFLUENCE' && (
+                  <div className="p-3.5 rounded-xl bg-gradient-to-r from-cyan-950/40 via-blue-950/30 to-purple-950/40 border border-cyan-800/50 text-xs text-cyan-200 flex items-start gap-3 shadow-lg">
+                    <span className="text-2xl shrink-0">🌊</span>
+                    <div className="space-y-1">
+                      <strong className="block text-cyan-100 font-bold text-sm tracking-wide">
+                        Subpainel de Confluência de Força (Momentum Matrix 1m)
+                      </strong>
+                      <p className="text-slate-300 leading-relaxed text-[11.5px]">
+                        Exibe os percentuais de força de momentum calculados e consolidados a cada 1 minuto (escala 0 a 100 com linha de equilíbrio no <strong>50</strong>).
+                        Ideal para observar visualmente a conciliação dos ativos: quando os Índices e as Big Techs rompem juntos o 50 para cima ocorre o <strong>Rally de Alta</strong>; quando caem juntos abaixo de 50 ocorre o <strong>Rally de Baixa</strong>.
+                      </p>
+                      <div className="flex flex-wrap gap-2 pt-1 text-[11px]">
+                        <span className="px-2 py-0.5 rounded bg-cyan-900/40 border border-cyan-700/60 text-cyan-300 font-mono">
+                          📈 NQ + ES: {editingIndicator.params.indicesMode === 'combined' ? '🔗 Somados' : editingIndicator.params.indicesMode === 'individual' ? '📊 Individuais' : '🚫 Ocultos'}
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-amber-900/40 border border-amber-700/60 text-amber-300 font-mono">
+                          🔥 Mag7: {editingIndicator.params.stocksMode === 'combined' ? '🔗 Cesta Somada (7 Techs)' : editingIndicator.params.stocksMode === 'individual' ? '🏢 Individuais' : '🚫 Ocultas'}
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-purple-900/40 border border-purple-700/60 text-purple-300 font-mono">
+                          ⚡ VIX: {editingIndicator.params.showVix !== false ? (editingIndicator.params.invertVix ? 'Invertido (100-x)' : 'Ativo') : 'Oculto'}
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-emerald-900/40 border border-emerald-700/60 text-emerald-300 font-mono">
+                          💵 DXY: {editingIndicator.params.showDxy !== false ? (editingIndicator.params.invertDxy ? 'Invertido (100-x)' : 'Ativo') : 'Oculto'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {editingIndicator.type === 'CANDLE_PATTERNS' ? (
                   <div className="space-y-4">
                     <div className="p-3 rounded-lg bg-blue-950/30 border border-blue-800/40 text-xs text-blue-300 flex items-start gap-2.5">
