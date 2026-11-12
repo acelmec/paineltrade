@@ -390,16 +390,35 @@ export async function fetchForceSupabase(instanceId: string): Promise<NasdaqForc
 
       if (!clientError && clientData) {
         data = clientData;
-      } else if (key !== 'painel_principal') {
-        const { data: fallbackData } = await supabaseAdmin
+      } else {
+        // Fallback para painel_principal_web ou painel_principal
+        const fallbackKeys = ['painel_principal_web', 'painel_principal'].filter(k => k !== key);
+        for (const fbKey of fallbackKeys) {
+          const { data: fallbackData } = await supabaseAdmin
+            .from('nasdaq_force')
+            .select('*')
+            .eq('instance_id', fbKey)
+            .order('id', { ascending: false })
+            .limit(1)
+            .abortSignal(controller.signal)
+            .maybeSingle();
+          if (fallbackData) {
+            data = fallbackData;
+            break;
+          }
+        }
+      }
+
+      // Se ainda não encontrou pela chave exata, pega o registro mais recente geral da tabela
+      if (!data) {
+        const { data: latestAny } = await supabaseAdmin
           .from('nasdaq_force')
           .select('*')
-          .eq('instance_id', 'painel_principal')
           .order('id', { ascending: false })
           .limit(1)
           .abortSignal(controller.signal)
           .maybeSingle();
-        if (fallbackData) data = fallbackData;
+        if (latestAny) data = latestAny;
       }
 
       if (!data) {
@@ -423,8 +442,13 @@ export async function fetchForceSupabase(instanceId: string): Promise<NasdaqForc
           { key: 'amazon', display: 'AMAZON' },
           { key: 'alphabet', display: 'ALPHABET' },
           { key: 'tesla', display: 'TESLA' },
+          { key: 'eurjpy', display: 'EUR/JPY' },
+          { key: 'eurusd', display: 'EUR/USD' },
+          { key: 'usdjpy', display: 'USD/JPY' },
           { key: 'forca_final', display: 'FORÇA FINAL' }
         ];
+
+        let eurJpyBuy = 50, eurUsdBuy = 50, usdJpyBuy = 50, usdIndexBuy = 50;
 
         mapping.forEach(m => {
           const buyVal = data[`${m.key}_compra`];
@@ -435,7 +459,19 @@ export async function fetchForceSupabase(instanceId: string): Promise<NasdaqForc
               buy: Number(buyVal),
               sell: Number(sellVal)
             });
+            if (m.key === 'eurjpy') eurJpyBuy = Number(buyVal);
+            if (m.key === 'eurusd') eurUsdBuy = Number(buyVal);
+            if (m.key === 'usdjpy') usdJpyBuy = Number(buyVal);
+            if (m.key === 'usdindex') usdIndexBuy = Number(buyVal);
           }
+        });
+
+        // Adiciona a Cesta Sintética de Fluxo de Capitais (IndexMoneyFlow - IMF)
+        const fxFlowBuy = Math.round(eurJpyBuy * 0.40 + usdJpyBuy * 0.30 + eurUsdBuy * 0.20 + (100 - usdIndexBuy) * 0.10);
+        forces.push({
+          symbol: 'IMF',
+          buy: fxFlowBuy,
+          sell: 100 - fxFlowBuy
         });
       }
 
@@ -474,8 +510,13 @@ function parseNasdaqForceRow(data: any): NasdaqForce {
       { key: 'amazon', display: 'AMAZON' },
       { key: 'alphabet', display: 'ALPHABET' },
       { key: 'tesla', display: 'TESLA' },
+      { key: 'eurjpy', display: 'EUR/JPY' },
+      { key: 'eurusd', display: 'EUR/USD' },
+      { key: 'usdjpy', display: 'USD/JPY' },
       { key: 'forca_final', display: 'FORÇA FINAL' }
     ];
+
+    let eurJpyBuy = 50, eurUsdBuy = 50, usdJpyBuy = 50, usdIndexBuy = 50;
 
     mapping.forEach(m => {
       const buyVal = data[`${m.key}_compra`];
@@ -486,7 +527,18 @@ function parseNasdaqForceRow(data: any): NasdaqForce {
           buy: Number(buyVal),
           sell: Number(sellVal)
         });
+        if (m.key === 'eurjpy') eurJpyBuy = Number(buyVal);
+        if (m.key === 'eurusd') eurUsdBuy = Number(buyVal);
+        if (m.key === 'usdjpy') usdJpyBuy = Number(buyVal);
+        if (m.key === 'usdindex') usdIndexBuy = Number(buyVal);
       }
+    });
+
+    const fxFlowBuy = Math.round(eurJpyBuy * 0.40 + usdJpyBuy * 0.30 + eurUsdBuy * 0.20 + (100 - usdIndexBuy) * 0.10);
+    forces.push({
+      symbol: 'IMF',
+      buy: fxFlowBuy,
+      sell: 100 - fxFlowBuy
     });
   }
   return { forces };
@@ -644,6 +696,10 @@ export interface MomentumMatrixProcessedSeries {
   combinedStocks: { time: number; value: number }[];
   vix: { time: number; value: number }[];
   dxy: { time: number; value: number }[];
+  fxFlow: { time: number; value: number }[];
+  eurjpy?: { time: number; value: number }[];
+  eurusd?: { time: number; value: number }[];
+  usdjpy?: { time: number; value: number }[];
   nq: { time: number; value: number }[];
   es: { time: number; value: number }[];
   nvidia: { time: number; value: number }[];
@@ -658,6 +714,10 @@ export interface MomentumMatrixProcessedSeries {
     combinedStocks: number;
     vix: number;
     dxy: number;
+    fxFlow: number;
+    eurjpy?: number;
+    eurusd?: number;
+    usdjpy?: number;
     nq: number;
     es: number;
     timestamp: string;
@@ -682,6 +742,10 @@ export function processMomentumMatrixSeries(
   const combinedStocks: { time: number; value: number }[] = [];
   const vixSeries: { time: number; value: number }[] = [];
   const dxySeries: { time: number; value: number }[] = [];
+  const fxFlowSeries: { time: number; value: number }[] = [];
+  const eurjpySeries: { time: number; value: number }[] = [];
+  const eurusdSeries: { time: number; value: number }[] = [];
+  const usdjpySeries: { time: number; value: number }[] = [];
   const nqSeries: { time: number; value: number }[] = [];
   const esSeries: { time: number; value: number }[] = [];
   const nvdaSeries: { time: number; value: number }[] = [];
@@ -742,10 +806,24 @@ export function processMomentumMatrixSeries(
     const rawDxy = Number(r.usdindex_compra ?? 50);
     const finalDxy = invertDxy ? (100 - rawDxy) : rawDxy;
 
+    const eurjpyVal = Number(r.eurjpy_compra ?? 50);
+    const eurusdVal = Number(r.eurusd_compra ?? 50);
+    const usdjpyVal = Number(r.usdjpy_compra ?? 50);
+
+    // Cesta Sintética de Fluxo de Capitais (FX Global Flow)
+    // EURJPY 40%, USDJPY 30%, EURUSD 20%, DXY Invertido 10%
+    const fxFlowVal = Math.round((
+      eurjpyVal * 0.40 +
+      usdjpyVal * 0.30 +
+      eurusdVal * 0.20 +
+      (100 - rawDxy) * 0.10
+    ) * 10) / 10;
+
     return {
       nqVal, esVal, combIndices,
       nvda, msft, aapl, amzn, goog, meta, tsla, combStocks,
       finalVix, finalDxy,
+      eurjpyVal, eurusdVal, usdjpyVal, fxFlowVal,
       timestamp: r.timestamp
     };
   };
@@ -754,6 +832,10 @@ export function processMomentumMatrixSeries(
   let lastStocksVal = 50;
   let lastVixVal = 50;
   let lastDxyVal = 50;
+  let lastFxFlowVal = 50;
+  let lastEurJpyVal = 50;
+  let lastEurUsdVal = 50;
+  let lastUsdJpyVal = 50;
   let lastNqVal = 50;
   let lastEsVal = 50;
   let lastTs = '';
@@ -795,6 +877,10 @@ export function processMomentumMatrixSeries(
         combinedStocks.push({ time: cTimeSec, value: m.combStocks });
         vixSeries.push({ time: cTimeSec, value: m.finalVix });
         dxySeries.push({ time: cTimeSec, value: m.finalDxy });
+        fxFlowSeries.push({ time: cTimeSec, value: m.fxFlowVal });
+        eurjpySeries.push({ time: cTimeSec, value: m.eurjpyVal });
+        eurusdSeries.push({ time: cTimeSec, value: m.eurusdVal });
+        usdjpySeries.push({ time: cTimeSec, value: m.usdjpyVal });
         nqSeries.push({ time: cTimeSec, value: m.nqVal });
         esSeries.push({ time: cTimeSec, value: m.esVal });
         nvdaSeries.push({ time: cTimeSec, value: m.nvda });
@@ -809,6 +895,10 @@ export function processMomentumMatrixSeries(
         lastStocksVal = m.combStocks;
         lastVixVal = m.finalVix;
         lastDxyVal = m.finalDxy;
+        lastFxFlowVal = m.fxFlowVal;
+        lastEurJpyVal = m.eurjpyVal;
+        lastEurUsdVal = m.eurusdVal;
+        lastUsdJpyVal = m.usdjpyVal;
         lastNqVal = m.nqVal;
         lastEsVal = m.esVal;
         lastTs = targetRow.timestamp;
@@ -827,6 +917,10 @@ export function processMomentumMatrixSeries(
         combinedStocks.push({ time: tSec, value: m.combStocks });
         vixSeries.push({ time: tSec, value: m.finalVix });
         dxySeries.push({ time: tSec, value: m.finalDxy });
+        fxFlowSeries.push({ time: tSec, value: m.fxFlowVal });
+        eurjpySeries.push({ time: tSec, value: m.eurjpyVal });
+        eurusdSeries.push({ time: tSec, value: m.eurusdVal });
+        usdjpySeries.push({ time: tSec, value: m.usdjpyVal });
         nqSeries.push({ time: tSec, value: m.nqVal });
         esSeries.push({ time: tSec, value: m.esVal });
         nvdaSeries.push({ time: tSec, value: m.nvda });
@@ -841,11 +935,111 @@ export function processMomentumMatrixSeries(
         lastStocksVal = m.combStocks;
         lastVixVal = m.finalVix;
         lastDxyVal = m.finalDxy;
+        lastFxFlowVal = m.fxFlowVal;
+        lastEurJpyVal = m.eurjpyVal;
+        lastEurUsdVal = m.eurusdVal;
+        lastUsdJpyVal = m.usdjpyVal;
         lastNqVal = m.nqVal;
         lastEsVal = m.esVal;
         lastTs = r.timestamp;
       }
     }
+  } else if (targetCandles && targetCandles.length > 0) {
+    // Sem histórico em nasdaq_force ainda: usa liveForces ou valor neutro 50 para os candles do gráfico
+    let baseIndices = 50;
+    let baseStocks = 50;
+    let baseVix = 50;
+    let baseDxy = 50;
+    let baseFxFlow = 50;
+    let baseEurJpy = 50;
+    let baseEurUsd = 50;
+    let baseUsdJpy = 50;
+    let baseNq = 50;
+    let baseEs = 50;
+    let baseNvda = 50;
+    let baseMsft = 50;
+    let baseAapl = 50;
+    let baseAmzn = 50;
+    let baseGoog = 50;
+    let baseMeta = 50;
+    let baseTsla = 50;
+
+    if (liveForces && Array.isArray(liveForces) && liveForces.length > 0) {
+      const getBuy = (sym: string) => {
+        const f = liveForces.find(x => x.symbol?.toUpperCase().includes(sym.toUpperCase()));
+        return f ? Number(f.buy) : 50;
+      };
+      baseNq = getBuy('NASDAQ');
+      baseEs = getBuy('S&P 500');
+      baseIndices = Math.round(((baseNq + baseEs) / 2) * 10) / 10;
+      baseNvda = getBuy('NVIDIA');
+      baseMsft = getBuy('MICROSOFT');
+      baseAapl = getBuy('APPLE');
+      baseAmzn = getBuy('AMAZON');
+      baseGoog = getBuy('ALPHABET');
+      baseMeta = getBuy('META');
+      baseTsla = getBuy('TESLA');
+      const weightedTech = (
+        baseNvda * TECH_WEIGHTS.nvidia +
+        baseMsft * TECH_WEIGHTS.microsoft +
+        baseAapl * TECH_WEIGHTS.apple +
+        baseAmzn * TECH_WEIGHTS.amazon +
+        baseGoog * TECH_WEIGHTS.alphabet +
+        baseMeta * TECH_WEIGHTS.meta +
+        baseTsla * TECH_WEIGHTS.tesla
+      ) / totalWeight;
+      baseStocks = Math.round(weightedTech * 10) / 10;
+      const rawVix = getBuy('VIX');
+      baseVix = invertVix ? (100 - rawVix) : rawVix;
+      const rawDxy = getBuy('USD');
+      baseDxy = invertDxy ? (100 - rawDxy) : rawDxy;
+      baseEurJpy = getBuy('EUR/JPY');
+      baseEurUsd = getBuy('EUR/USD');
+      baseUsdJpy = getBuy('USD/JPY');
+      baseFxFlow = Math.round((
+        baseEurJpy * 0.40 +
+        baseUsdJpy * 0.30 +
+        baseEurUsd * 0.20 +
+        (100 - rawDxy) * 0.10
+      ) * 10) / 10;
+    }
+
+    let lastCandleTimeSec = -1;
+    targetCandles.forEach(c => {
+      if (!c || c.time === undefined || c.time === null) return;
+      const cTimeSec = typeof c.time === 'number' ? c.time : Math.floor(new Date(c.time).getTime() / 1000);
+      if (isNaN(cTimeSec) || cTimeSec <= 0 || cTimeSec <= lastCandleTimeSec) return;
+      lastCandleTimeSec = cTimeSec;
+
+      combinedIndices.push({ time: cTimeSec, value: baseIndices });
+      combinedStocks.push({ time: cTimeSec, value: baseStocks });
+      vixSeries.push({ time: cTimeSec, value: baseVix });
+      dxySeries.push({ time: cTimeSec, value: baseDxy });
+      fxFlowSeries.push({ time: cTimeSec, value: baseFxFlow });
+      eurjpySeries.push({ time: cTimeSec, value: baseEurJpy });
+      eurusdSeries.push({ time: cTimeSec, value: baseEurUsd });
+      usdjpySeries.push({ time: cTimeSec, value: baseUsdJpy });
+      nqSeries.push({ time: cTimeSec, value: baseNq });
+      esSeries.push({ time: cTimeSec, value: baseEs });
+      nvdaSeries.push({ time: cTimeSec, value: baseNvda });
+      msftSeries.push({ time: cTimeSec, value: baseMsft });
+      aaplSeries.push({ time: cTimeSec, value: baseAapl });
+      amznSeries.push({ time: cTimeSec, value: baseAmzn });
+      googSeries.push({ time: cTimeSec, value: baseGoog });
+      metaSeries.push({ time: cTimeSec, value: baseMeta });
+      tslaSeries.push({ time: cTimeSec, value: baseTsla });
+    });
+
+    lastIndicesVal = baseIndices;
+    lastStocksVal = baseStocks;
+    lastVixVal = baseVix;
+    lastDxyVal = baseDxy;
+    lastFxFlowVal = baseFxFlow;
+    lastEurJpyVal = baseEurJpy;
+    lastEurUsdVal = baseEurUsd;
+    lastUsdJpyVal = baseUsdJpy;
+    lastNqVal = baseNq;
+    lastEsVal = baseEs;
   }
 
   // Fallback e atualização em tempo real se liveForces estiver disponível
@@ -884,16 +1078,30 @@ export function processMomentumMatrixSeries(
     const rawDxy = getBuy('USD');
     const liveDxy = invertDxy ? (100 - rawDxy) : rawDxy;
 
+    const lEurJpy = getBuy('EUR/JPY');
+    const lUsdJpy = getBuy('USD/JPY');
+    const lEurUsd = getBuy('EUR/USD');
+    const liveFxFlow = Math.round((
+      lEurJpy * 0.40 +
+      lUsdJpy * 0.30 +
+      lEurUsd * 0.20 +
+      (100 - rawDxy) * 0.10
+    ) * 10) / 10;
+
     lastIndicesVal = liveCombIndices;
     lastStocksVal = liveCombStocks;
     lastVixVal = liveVix;
     lastDxyVal = liveDxy;
+    lastFxFlowVal = liveFxFlow;
+    lastEurJpyVal = lEurJpy;
+    lastEurUsdVal = lEurUsd;
+    lastUsdJpyVal = lUsdJpy;
     lastNqVal = liveNq;
     lastEsVal = liveEs;
     lastTs = new Date().toISOString();
   }
 
-  // Determinar confluência atual
+  // Determinar confluência atual (com peso adicional da Cesta de Fluxo de Capitais)
   let confluenceState: 'bull_rally' | 'bear_rally' | 'divergence' | 'neutral' = 'neutral';
   if (lastIndicesVal >= 55 && lastStocksVal >= 55) {
     confluenceState = 'bull_rally';
@@ -908,6 +1116,10 @@ export function processMomentumMatrixSeries(
     combinedStocks,
     vix: vixSeries,
     dxy: dxySeries,
+    fxFlow: fxFlowSeries,
+    eurjpy: eurjpySeries,
+    eurusd: eurusdSeries,
+    usdjpy: usdjpySeries,
     nq: nqSeries,
     es: esSeries,
     nvidia: nvdaSeries,
@@ -922,6 +1134,10 @@ export function processMomentumMatrixSeries(
       combinedStocks: lastStocksVal,
       vix: lastVixVal,
       dxy: lastDxyVal,
+      fxFlow: lastFxFlowVal,
+      eurjpy: lastEurJpyVal,
+      eurusd: lastEurUsdVal,
+      usdjpy: lastUsdJpyVal,
       nq: lastNqVal,
       es: lastEsVal,
       timestamp: lastTs || new Date().toISOString(),

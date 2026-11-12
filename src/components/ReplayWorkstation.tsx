@@ -1928,10 +1928,10 @@ export const ReplayWorkstation: React.FC = () => {
               setIndicatorsModalTab('catalog');
               setIsIndicatorsModalOpen(true);
             }}
-            className="bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow"
+            className="bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer shadow"
             title="Gerenciar indicadores do gráfico"
           >
-            <span>📊 Indicadores</span>
+            <span>📊</span>
             {visibleIndicators.length > 0 && (
               <span className="bg-blue-900 text-blue-200 px-1.5 py-0.2 rounded-full text-[10px]">
                 {visibleIndicators.length}
@@ -1942,10 +1942,10 @@ export const ReplayWorkstation: React.FC = () => {
           {/* Widgets Button */}
           <button
             onClick={() => setIsWidgetsModalOpen(true)}
-            className="bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow"
+            className="bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer shadow"
             title="Gerenciar widgets flutuantes"
           >
-            <span>🧩 Widgets</span>
+            <span>🧩</span>
             {activeWidgets.filter(w => w.visible).length > 0 && (
               <span className="bg-purple-900 text-purple-200 px-1.5 py-0.2 rounded-full text-[10px]">
                 {activeWidgets.filter(w => w.visible).length}
@@ -1957,13 +1957,13 @@ export const ReplayWorkstation: React.FC = () => {
           <div className="relative">
             <button
               onClick={() => setIsDrawingsMenuOpen(!isDrawingsMenuOpen)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow ${
+              className={`px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer shadow ${
                 activeDrawingTool
                   ? 'bg-amber-600 text-white border border-amber-400'
                   : 'bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300'
               }`}
             >
-              <span>✏️ {activeDrawingTool ? 'Desenhando...' : 'Desenhos'}</span>
+              <span>✏️</span>
               {drawings.length > 0 && (
                 <span className="bg-emerald-900 text-emerald-200 px-1.5 py-0.2 rounded-full text-[10px]">
                   {drawings.length}

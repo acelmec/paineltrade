@@ -1382,6 +1382,15 @@ interface AppContextType {
   panels: any[];
   activePanel: any | null;
   switchPanel: (panelId: string) => void;
+  getPanelSnapshot: (panelId: string) => {
+    candles: Candle[];
+    marketData: MarketData | null;
+    gammaLevels: GammaLevels | null;
+    isLoading: boolean;
+    loadingProgress: any;
+  };
+  ensurePanelDataLoaded: (panelId: string) => void;
+  panelCacheVersion: number;
 
   // Gestão de Contas Demonstrativas e Copy Trade Globais
   accounts: BrokerAccount[];
@@ -1539,6 +1548,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 const DEFAULT_FORCES_CONFIG = [
   { id: 'nasdaq_impulso', nome: 'Nasdaq', ativo: true },
   { id: 'sp500_impulso', nome: 'S&P 500', ativo: true },
+  { id: 'imf_impulso', nome: 'IndexMoneyFlow', ativo: true },
   { id: 'vix_impulso', nome: 'VIX', ativo: true },
   { id: 'usdindex_impulso', nome: 'USDIndex', ativo: true },
   { id: 'nvidia_impulso', nome: 'NVIDIA', ativo: true },
@@ -1555,6 +1565,9 @@ const migrateAndValidateForcesConfig = (parsedArray: any[]): any[] => {
   const migrated = parsedArray.map(item => {
     if (item && item.id === 'sp505_impulso') {
       return { ...item, id: 'sp500_impulso' };
+    }
+    if (item && (item.id === 'fluxo_impulso' || item.id === 'fluxo de capitais_impulso')) {
+      return { ...item, id: 'imf_impulso', nome: 'IndexMoneyFlow' };
     }
     return item;
   });
@@ -1666,6 +1679,7 @@ const enrichSettingsWithVirtualConfigs = (settingsObj: any) => {
   let general_prompt_telegram_enabled = settingsObj.general_prompt_telegram_enabled !== false;
   let general_prompt_panel_id = settingsObj.general_prompt_panel_id || '';
   let news_background_enabled = settingsObj.news_background_enabled === true;
+  let news_chart_markers = settingsObj.news_chart_markers !== false;
   let manual_prompt_id = settingsObj.manual_prompt_id || '';
   let selected_prompt_id = settingsObj.selected_prompt_id || '';
   let manual_strategy_id = getStableManualStrategyId(settingsObj.panel_id, settingsObj.manual_strategy_id);
@@ -1794,6 +1808,7 @@ const enrichSettingsWithVirtualConfigs = (settingsObj: any) => {
         else if (key === 'general_prompt_telegram_send_image') general_prompt_telegram_send_image = val === 'true';
         else if (key === 'general_prompt_telegram_enabled') general_prompt_telegram_enabled = val === 'true';
         else if (key === 'news_background_enabled') news_background_enabled = val === 'true';
+        else if (key === 'news_chart_markers') news_chart_markers = val !== 'false';
         else if (key === 'selected_prompt_id') selected_prompt_id = val;
         else if (key === 'manual_strategy_id') manual_strategy_id = val;
         else if (key === 'ops_check_interval_ms') ops_check_interval_ms = Number(val) || 2000;
@@ -1944,6 +1959,7 @@ const enrichSettingsWithVirtualConfigs = (settingsObj: any) => {
     general_prompt_telegram_enabled,
     general_prompt_panel_id,
     news_background_enabled,
+    news_chart_markers,
     manual_prompt_id,
     selected_prompt_id,
     manual_strategy_id,
@@ -2584,6 +2600,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     isFetchingScreenshot?: boolean;
   }>>({});
 
+  const [panelCacheVersion, setPanelCacheVersion] = useState<number>(0);
+  const lastPanelCacheBumpRef = useRef<number>(0);
+  const pendingPanelCacheTimerRef = useRef<any>(null);
+  const bumpPanelCacheVersion = useCallback(() => {
+    const now = Date.now();
+    if (now - lastPanelCacheBumpRef.current >= 200) {
+      lastPanelCacheBumpRef.current = now;
+      setPanelCacheVersion(v => (v + 1) % 1000000);
+    } else if (!pendingPanelCacheTimerRef.current) {
+      pendingPanelCacheTimerRef.current = setTimeout(() => {
+        pendingPanelCacheTimerRef.current = null;
+        lastPanelCacheBumpRef.current = Date.now();
+        setPanelCacheVersion(v => (v + 1) % 1000000);
+      }, 200);
+    }
+  }, []);
+
   const lastAutoCancelTriggeredRef = useRef<string>('');
 
   // Mapa de timers para os loops concorrentes de cada painel
@@ -2973,7 +3006,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     currentWindowMinutes: number,
     currentWindowBaseline: { buy: number; sell: number; time: number } | null
   ): MarketData => {
-    const pesos = { nasdaq: 0.35, sp500: 0.15, vix: 0.10, usdindex: 0.10, acoes: 0.20, zscore: 0.10 };
+    const pesos = { nasdaq: 0.35, sp500: 0.15, vix: 0.10, fxFlow: 0.10, acoes: 0.20, zscore: 0.10 };
     const pesosAcoes: { [key: string]: number } = { nvidia: 0.25, tesla: 0.15, meta: 0.15, apple: 0.15, amazon: 0.10, alphabet: 0.10, microsoft: 0.10 };
 
     let sentimentoBruto = 0;
@@ -2996,7 +3029,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     checkAndAdd('nasdaq_impulso', 'NASDAQ', pesos.nasdaq);
     checkAndAdd('sp500_impulso', 'S&P 500', pesos.sp500);
     checkAndAdd('vix_impulso', 'VIX', pesos.vix, true);
-    checkAndAdd('usdindex_impulso', 'USD Index', pesos.usdindex, true);
+
+    // Cesta Sintética de Fluxo de Capitais (IndexMoneyFlow - IMF) com ativação/desativação dinâmica
+    const fxFlowBuy = getCompraForca('IMF') ?? getCompraForca('FLUXO DE CAPITAIS');
+    const cfgImf = currentForcesConfig.find(f => f.id === 'imf_impulso');
+    if (fxFlowBuy !== null) {
+      if (cfgImf ? cfgImf.ativo : true) {
+        sentimentoBruto += fxFlowBuy * pesos.fxFlow;
+        totalPesosAtivos += pesos.fxFlow;
+      }
+    } else {
+      checkAndAdd('usdindex_impulso', 'USD Index', pesos.fxFlow, true);
+    }
 
     for (const [key, weight] of Object.entries(pesosAcoes)) {
       const cfgId = `${key}_impulso`;
@@ -4271,6 +4315,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         `cfg:general_prompt_telegram_enabled:${mergedSettings.general_prompt_telegram_enabled !== false}`,
         `cfg:general_prompt_panel_id:${mergedSettings.general_prompt_panel_id || ''}`,
         `cfg:news_background_enabled:${mergedSettings.news_background_enabled || false}`,
+        `cfg:news_chart_markers:${mergedSettings.news_chart_markers !== false}`,
         `cfg:manual_prompt_id:${mergedSettings.manual_prompt_id || ''}`,
         `cfg:selected_prompt_id:${mergedSettings.selected_prompt_id || ''}`,
         `cfg:chart_show_fvg:${mergedSettings.chart_show_fvg !== false}`,
@@ -8777,7 +8822,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const instanceForce = (adminSet?.instance_id_force) 
         || targetSettings.instance_id_force 
-        || 'painel_principal';
+        || 'painel_principal_web';
 
       const gammaSymbol = adminSet?.gamma_symbol || targetSettings.gamma_symbol;
 
@@ -8844,6 +8889,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             cache.candles = updatedCandles;
             if (isNewBar && checkIsActive()) {
               setCandles([...updatedCandles]);
+            } else if (!checkIsActive()) {
+              bumpPanelCacheVersion();
             }
           }
         }
@@ -8865,9 +8912,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ? Number(targetSettings.screenshot_update_interval)
         : (adminSet?.screenshot_update_interval !== undefined ? Number(adminSet.screenshot_update_interval) : 3000);
 
-      // e. Buscar Força em background (somente se NÃO for WebSocket)
+      // e. Buscar Força em background (atualiza periodicamente as forças da cesta macro/IMF)
       const lastForceFetch = cache.lastForceFetch || 0;
-      if (!isWs && !cache.isFetchingForce && (now - lastForceFetch >= forcesInterval || !cache.forces || cache.forces.length === 0)) {
+      if (!cache.isFetchingForce && (now - lastForceFetch >= forcesInterval || !cache.forces || cache.forces.length === 0)) {
         cache.isFetchingForce = true;
         cache.lastForceFetch = now;
         fetchForceSupabase(instanceForce).then(forceData => {
@@ -9122,6 +9169,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (checkIsActive() && (isDifferent || isForced || prevCandles.length === 0)) {
               setCandles(finalCandlesList);
             } else if (!checkIsActive() && (isDifferent || !hasExisting)) {
+              bumpPanelCacheVersion();
               // Avaliar algoritmos e Prompts Geradores de Sinais em segundo plano assim que as velas forem carregadas/atualizadas
               runMarketLogicForPanel(targetPanel, targetSettings, cache, mData || cache.marketData, cache.forces || [], cache.gammaLevels || null);
             }
@@ -10300,6 +10348,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return 0;
   }, [panels, activePanel, marketData, candles]);
+
+  const getPanelSnapshot = useCallback((panelId: string) => {
+    if (!panelId || panelId === activePanel?.id) {
+      return {
+        candles: candles || [],
+        marketData,
+        gammaLevels,
+        isLoading: isCandlesLoading,
+        loadingProgress: candlesLoadingProgress
+      };
+    }
+    const cache = panelDataCache.current[panelId];
+    return {
+      candles: cache?.candles || [],
+      marketData: cache?.marketData || null,
+      gammaLevels: cache?.gammaLevels || null,
+      isLoading: Boolean(cache?.isFetchingCandles && (!cache?.candles || cache.candles.length === 0)),
+      loadingProgress: null
+    };
+  }, [activePanel?.id, candles, marketData, gammaLevels, isCandlesLoading, candlesLoadingProgress, panelCacheVersion]);
+
+  const ensurePanelDataLoaded = useCallback((panelId: string) => {
+    if (!panelId) return;
+    const targetPanel = (panels || []).find(p => p.id === panelId);
+    if (!targetPanel) return;
+    const cache = panelDataCache.current[panelId];
+    if (!cache || !cache.candles || cache.candles.length === 0) {
+      const pSettings = allSettings?.[panelId] || settings;
+      if (pSettings) {
+        executeMarketCycleForPanel(targetPanel, pSettings).then(() => {
+          bumpPanelCacheVersion();
+        }).catch(() => {});
+      }
+    }
+  }, [panels, allSettings, settings, bumpPanelCacheVersion]);
 
   const updateReportAction = async (
     id: string,
@@ -13435,8 +13518,8 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       }
       const cache = panelDataCache.current[panelId];
 
-      // Busca inicial para Força Nasdaq (apenas se não estiver em WebSocket)
-      if (panelSettings.transmission_mode !== 'websocket' && (cache.forces.length === 0 || isCurrentActive)) {
+      // Busca inicial para Força Nasdaq
+      if (cache.forces.length === 0 || isCurrentActive) {
         fetchForceSupabase(instanceForce).then(forceData => {
           if (forceData && forceData.forces && forceData.forces.length > 0) {
             cache.forces = forceData.forces;
@@ -14077,6 +14160,8 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                     cache.candles = updatedCandles;
                     if (isNewBar && activePanelRef.current?.id === targetPanel.id) {
                       setCandles([...updatedCandles]);
+                    } else if (activePanelRef.current?.id !== targetPanel.id) {
+                      bumpPanelCacheVersion();
                     }
                   }
                 }
@@ -14415,6 +14500,9 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       panels,
       activePanel,
       switchPanel,
+      getPanelSnapshot,
+      ensurePanelDataLoaded,
+      panelCacheVersion,
       accounts,
       setAccounts,
       activeAccount,

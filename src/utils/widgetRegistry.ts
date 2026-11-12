@@ -43,6 +43,7 @@ export interface WidgetDefinition {
 export const MOMENTUM_ASSETS = [
   { symbol: 'NASDAQ', shortName: 'NDAQ', fullName: 'Nasdaq 100' },
   { symbol: 'S&P 500', shortName: 'SP500', fullName: 'S&P 500' },
+  { symbol: 'IMF', shortName: 'IMF', fullName: '🌐 IndexMoneyFlow (IMF)' },
   { symbol: 'USD Index', shortName: 'DXY', fullName: 'Dólar DXY (Invertido)' },
   { symbol: 'VIX', shortName: 'VIX', fullName: 'Volatilidade VIX (Invertido)' },
   { symbol: 'NVIDIA', shortName: 'NVDA', fullName: 'NVIDIA Corp' },
@@ -115,7 +116,7 @@ export const WIDGET_DEFINITIONS: Record<WidgetType, WidgetDefinition> = {
   },
   momentum_overview: {
     type: 'momentum_overview',
-    name: 'Força Momentum (Cesta Geral)',
+    name: 'Força Momentum',
     icon: '📊',
     description: 'Lista completa resumida de todos os ativos da cesta de confluência do mercado.',
     defaultPosition: { x: 540, y: 50 },

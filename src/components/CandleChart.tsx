@@ -117,6 +117,7 @@ interface CandleChartProps {
   setShowRobots?: (show: boolean) => void;
   showTradeMarkers?: boolean;
   setShowTradeMarkers?: (show: boolean) => void;
+  showOrderLines?: boolean;
   showIndicatorsLegend?: boolean;
   setShowIndicatorsLegend?: (show: boolean) => void;
   autoCenter?: boolean;
@@ -135,6 +136,8 @@ interface CandleChartProps {
   customSignals?: any[];
   onOpenIndicatorsManager?: () => void;
   activeWidgets?: any[];
+  panel?: any;
+  marketData?: any;
 }
 
 const LEVEL_CONFIGS: Record<string, { label: string; color: string }> = {
@@ -711,6 +714,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   setShowRobots: setShowRobotsProp,
   showTradeMarkers: showTradeMarkersProp,
   setShowTradeMarkers: setShowTradeMarkersProp,
+  showOrderLines = true,
   showIndicatorsLegend: _showIndicatorsLegend,
   setShowIndicatorsLegend: _setShowIndicatorsLegend,
   autoCenter: autoCenterProp,
@@ -728,7 +732,9 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   onUpdateReportLevels: onUpdateReportLevelsProp,
   customSignals: customSignalsProp,
   onOpenIndicatorsManager,
-  activeWidgets: activeWidgetsRaw
+  activeWidgets: activeWidgetsRaw,
+  panel: panelProp,
+  marketData: marketDataProp
 }) => {
   const activeIndicatorsKey = useMemo(() => {
     if (!activeIndicatorsRaw) return '__undef__';
@@ -788,6 +794,10 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   // Momentum Matrix Subpanel Refs & Snapshot
   const momentumCombinedIndicesSeriesRef = useRef<any | null>(null);
   const momentumCombinedStocksSeriesRef = useRef<any | null>(null);
+  const momentumFxFlowSeriesRef = useRef<any | null>(null);
+  const momentumEurJpySeriesRef = useRef<any | null>(null);
+  const momentumUsdJpySeriesRef = useRef<any | null>(null);
+  const momentumEurUsdSeriesRef = useRef<any | null>(null);
   const momentumVixSeriesRef = useRef<any | null>(null);
   const momentumDxySeriesRef = useRef<any | null>(null);
   const momentumNqSeriesRef = useRef<any | null>(null);
@@ -797,8 +807,12 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   const [momentumMatrixSnapshot, setMomentumMatrixSnapshot] = useState<any | null>(() => ({
     combinedIndices: 50,
     combinedStocks: 50,
+    fxFlow: 50,
     vix: 50,
     dxy: 50,
+    eurjpy: 50,
+    eurusd: 50,
+    usdjpy: 50,
     nq: 50,
     es: 50,
     timestamp: new Date().toISOString(),
@@ -950,16 +964,20 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   const isDocumentVisibleRef = useRef<boolean>(typeof document !== 'undefined' ? !document.hidden : true);
 
   const {
-    gammaLevels: contextGammaLevels, settings, allSettings, saveSettings,
-    screenshot, marketData, reports, prompts, createReportAction, updateReportAction, updateReportLevelsAction, runManualAIAnalysis,
+    gammaLevels: contextGammaLevels, settings: appSettings, allSettings, saveSettings,
+    screenshot, marketData: contextMarketData, reports, prompts, createReportAction, updateReportAction, updateReportLevelsAction, runManualAIAnalysis,
     checkOperationalLimits,
-    user, isAuthenticated, activePanel, panels, switchPanel, setReports,
+    user, isAuthenticated, activePanel: appActivePanel, panels, switchPanel, setReports,
     customStrategies, publicStrategies, pausedStrategyIds,
     customSignals: appCustomSignals,
     accounts, activeAccount, switchAccount,
     accountStrategies, setAccountStrategies,
     forces, addLog
   } = useApp() as any;
+
+  const activePanel = panelProp || appActivePanel;
+  const settings = (panelProp && allSettings?.[panelProp.id]) ? allSettings[panelProp.id] : appSettings;
+  const marketData = marketDataProp !== undefined ? marketDataProp : contextMarketData;
 
   const customSignals = customSignalsProp !== undefined ? customSignalsProp : appCustomSignals;
 
@@ -3182,11 +3200,23 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   const updateMomentumMatrixSeriesOnChart = useCallback((data: MomentumMatrixProcessedSeries | null) => {
     if (!momentumMatrixChartRef.current || !data) return;
     try {
+      if (momentumFxFlowSeriesRef.current) {
+        momentumFxFlowSeriesRef.current.setData(sanitizeLineSeriesData(data.fxFlow || []));
+      }
       if (momentumCombinedIndicesSeriesRef.current) {
         momentumCombinedIndicesSeriesRef.current.setData(sanitizeLineSeriesData(data.combinedIndices || []));
       }
       if (momentumCombinedStocksSeriesRef.current) {
         momentumCombinedStocksSeriesRef.current.setData(sanitizeLineSeriesData(data.combinedStocks || []));
+      }
+      if (momentumEurJpySeriesRef.current) {
+        momentumEurJpySeriesRef.current.setData(sanitizeLineSeriesData(data.eurjpy || []));
+      }
+      if (momentumUsdJpySeriesRef.current) {
+        momentumUsdJpySeriesRef.current.setData(sanitizeLineSeriesData(data.usdjpy || []));
+      }
+      if (momentumEurUsdSeriesRef.current) {
+        momentumEurUsdSeriesRef.current.setData(sanitizeLineSeriesData(data.eurusd || []));
       }
       if (momentumVixSeriesRef.current) {
         momentumVixSeriesRef.current.setData(sanitizeLineSeriesData(data.vix || []));
@@ -3582,6 +3612,12 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   }, [marketData?.price, marketData?.updated_at, simulatedPrice, timeframe, effectiveShowPva]);
 
   const updateLevelLabelsRef = useRef<((immediate?: boolean) => void) | null>(null);
+  const showOrderLinesRef = useRef<boolean>(showOrderLines);
+  showOrderLinesRef.current = showOrderLines;
+  useEffect(() => {
+    if (updateTradePriceLinesRef.current) updateTradePriceLinesRef.current();
+    if (updateLevelLabelsRef.current) updateLevelLabelsRef.current(true);
+  }, [showOrderLines]);
   const drawingsRedrawRef = useRef<(() => void) | null>(null);
   const rafLabelsRef = useRef<number | null>(null);
   const labelsPoolRef = useRef<Map<string, HTMLElement>>(new Map());
@@ -5191,7 +5227,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           }
         }
 
-        tradesToDraw.forEach(tradeToDraw => {
+        if (showOrderLinesRef.current) {
+          tradesToDraw.forEach(tradeToDraw => {
           const tradeId = tradeToDraw.id || 'proposed';
           const isCustomMarker = tradeId === 'custom_marker';
           const isRangeMarker = tradeId === 'range_marker_buy' || tradeId === 'range_marker_sell' || tradeId === 'range_marker';
@@ -5349,6 +5386,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
             }
           }
         });
+        }
       }
 
       cleanupPooledEls(labelPool, usedLabelKeys);
@@ -6356,6 +6394,10 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     let momentumMatrixChart: IChartApi | null = null;
     let momentumCombinedIndicesSeries: any = null;
     let momentumCombinedStocksSeries: any = null;
+    let momentumFxFlowSeries: any = null;
+    let momentumEurJpySeries: any = null;
+    let momentumUsdJpySeries: any = null;
+    let momentumEurUsdSeries: any = null;
     let momentumVixSeries: any = null;
     let momentumDxySeries: any = null;
     let momentumNqSeries: any = null;
@@ -6379,22 +6421,45 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       const p = momentumMatrixIndConfig?.params || {};
       const indicesMode = p.indicesMode || 'combined';
       const stocksMode = p.stocksMode || 'combined';
+      const showFxFlow = p.showFxFlow !== false;
       const showVix = p.showVix !== false;
-      const showDxy = p.showDxy !== false;
+      const showDxy = p.showDxy === true;
+      const showEurJpy = p.showEurJpy === true;
+      const showUsdJpy = p.showUsdJpy === true;
+      const showEurUsd = p.showEurUsd === true;
       const showCenter50 = p.showCenter50 !== false;
       const showExtremeLevels = p.showExtremeLevels !== false;
       const levelHigh = Number(p.levelHigh || 80);
       const levelLow = Number(p.levelLow || 20);
 
+      // Cesta Sintética de Fluxo de Capitais Global (IMF / FX Flow)
+      if (showFxFlow) {
+        momentumFxFlowSeries = momentumMatrixChart.addSeries(LineSeries, {
+          color: p.colorFxFlow || '#06b6d4',
+          lineWidth: 2,
+          title: 'IMF',
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
+          autoscaleInfoProvider: () => ({
+            priceRange: { minValue: 0, maxValue: 100 }
+          })
+        } as any);
+        try { momentumFxFlowSeries.setData([]); } catch (_) {}
+      }
+
       // Índices Combinados (NQ + ES)
       if (indicesMode === 'combined') {
         momentumCombinedIndicesSeries = momentumMatrixChart.addSeries(LineSeries, {
-          color: p.colorCombinedIndices || '#06b6d4',
+          color: p.colorCombinedIndices || '#38bdf8',
           lineWidth: 2,
           title: 'NQ+ES',
           lastValueVisible: false,
           priceLineVisible: false,
-          crosshairMarkerVisible: false
+          crosshairMarkerVisible: false,
+          autoscaleInfoProvider: () => ({
+            priceRange: { minValue: 0, maxValue: 100 }
+          })
         } as any);
         try { momentumCombinedIndicesSeries.setData([]); } catch (_) {}
       } else if (indicesMode === 'individual') {
@@ -6405,7 +6470,10 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
             title: 'NQ',
             lastValueVisible: false,
             priceLineVisible: false,
-            crosshairMarkerVisible: false
+            crosshairMarkerVisible: false,
+            autoscaleInfoProvider: () => ({
+              priceRange: { minValue: 0, maxValue: 100 }
+            })
           } as any);
           try { momentumNqSeries.setData([]); } catch (_) {}
         }
@@ -6416,7 +6484,10 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
             title: 'ES',
             lastValueVisible: false,
             priceLineVisible: false,
-            crosshairMarkerVisible: false
+            crosshairMarkerVisible: false,
+            autoscaleInfoProvider: () => ({
+              priceRange: { minValue: 0, maxValue: 100 }
+            })
           } as any);
           try { momentumEsSeries.setData([]); } catch (_) {}
         }
@@ -6430,7 +6501,10 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           title: 'Mag7',
           lastValueVisible: false,
           priceLineVisible: false,
-          crosshairMarkerVisible: false
+          crosshairMarkerVisible: false,
+          autoscaleInfoProvider: () => ({
+            priceRange: { minValue: 0, maxValue: 100 }
+          })
         } as any);
         try { momentumCombinedStocksSeries.setData([]); } catch (_) {}
       } else if (stocksMode === 'individual') {
@@ -6451,12 +6525,53 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
               title: td.label,
               lastValueVisible: false,
               priceLineVisible: false,
-              crosshairMarkerVisible: false
+              crosshairMarkerVisible: false,
+              autoscaleInfoProvider: () => ({
+                priceRange: { minValue: 0, maxValue: 100 }
+              })
             } as any);
             try { s.setData([]); } catch (_) {}
             individualTechPool.set(td.key, s);
           }
         });
+      }
+
+      // Pares Cambiais Individuais (se habilitados)
+      if (showEurJpy) {
+        momentumEurJpySeries = momentumMatrixChart.addSeries(LineSeries, {
+          color: '#10b981',
+          lineWidth: 1,
+          title: 'EUR/JPY',
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
+          autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } })
+        } as any);
+        try { momentumEurJpySeries.setData([]); } catch (_) {}
+      }
+      if (showUsdJpy) {
+        momentumUsdJpySeries = momentumMatrixChart.addSeries(LineSeries, {
+          color: '#f59e0b',
+          lineWidth: 1,
+          title: 'USD/JPY',
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
+          autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } })
+        } as any);
+        try { momentumUsdJpySeries.setData([]); } catch (_) {}
+      }
+      if (showEurUsd) {
+        momentumEurUsdSeries = momentumMatrixChart.addSeries(LineSeries, {
+          color: '#6366f1',
+          lineWidth: 1,
+          title: 'EUR/USD',
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
+          autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } })
+        } as any);
+        try { momentumEurUsdSeries.setData([]); } catch (_) {}
       }
 
       // VIX Individual
@@ -6467,12 +6582,15 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           title: 'VIX',
           lastValueVisible: false,
           priceLineVisible: false,
-          crosshairMarkerVisible: false
+          crosshairMarkerVisible: false,
+          autoscaleInfoProvider: () => ({
+            priceRange: { minValue: 0, maxValue: 100 }
+          })
         } as any);
         try { momentumVixSeries.setData([]); } catch (_) {}
       }
 
-      // DXY Individual
+      // DXY Individual (Opcional)
       if (showDxy) {
         momentumDxySeries = momentumMatrixChart.addSeries(LineSeries, {
           color: p.colorDxy || '#10b981',
@@ -6480,13 +6598,16 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           title: 'DXY',
           lastValueVisible: false,
           priceLineVisible: false,
-          crosshairMarkerVisible: false
+          crosshairMarkerVisible: false,
+          autoscaleInfoProvider: () => ({
+            priceRange: { minValue: 0, maxValue: 100 }
+          })
         } as any);
         try { momentumDxySeries.setData([]); } catch (_) {}
       }
 
       // Linhas guias horizontais (Linha Central 50, Níveis 80/20 e limites 0/100)
-      const refSeriesForLines = momentumCombinedIndicesSeries || momentumCombinedStocksSeries || momentumVixSeries || momentumDxySeries || momentumNqSeries;
+      const refSeriesForLines = momentumFxFlowSeries || momentumCombinedIndicesSeries || momentumCombinedStocksSeries || momentumVixSeries || momentumDxySeries || momentumNqSeries;
       if (refSeriesForLines) {
         try {
           refSeriesForLines.createPriceLine({
@@ -6546,6 +6667,10 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
     momentumCombinedIndicesSeriesRef.current = momentumCombinedIndicesSeries;
     momentumCombinedStocksSeriesRef.current = momentumCombinedStocksSeries;
+    momentumFxFlowSeriesRef.current = momentumFxFlowSeries;
+    momentumEurJpySeriesRef.current = momentumEurJpySeries;
+    momentumUsdJpySeriesRef.current = momentumUsdJpySeries;
+    momentumEurUsdSeriesRef.current = momentumEurUsdSeries;
     momentumVixSeriesRef.current = momentumVixSeries;
     momentumDxySeriesRef.current = momentumDxySeries;
     momentumNqSeriesRef.current = momentumNqSeries;
@@ -7020,6 +7145,22 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   const updateTradePriceLines = useCallback(() => {
     if (!candleSeriesRef.current) return;
 
+    if (!showOrderLines) {
+      if (lastAppliedLevelsKeyRef.current !== '__hidden_orders__' || activePriceLinesRef.current.length > 0) {
+        lastAppliedLevelsKeyRef.current = '__hidden_orders__';
+        activePriceLinesRef.current.forEach(line => {
+          try {
+            if (candleSeriesRef.current) {
+              candleSeriesRef.current.removePriceLine(line);
+            }
+          } catch (e) {}
+        });
+        activePriceLinesRef.current = [];
+        tradePriceLinesMapRef.current.clear();
+      }
+      return;
+    }
+
     const targetId = activePanel?.instance_id || instanceId || 'painel_principal';
     const activeAccountId = activeAccount?.id || null;
     const isSimulatorMode = isSimulator || (simulatedReports && simulatedReports.length > 0);
@@ -7303,7 +7444,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         tradePriceLinesMapRef.current.set(tradeId, { entry: lineEntry, sl: lineSl, tp: lineTp });
       });
     }
-  }, [activePanel, instanceId, activeAccount, isSimulator, simulatedReports, reports, activePosition, proposedTrade, finalContractsToUse, tempSlPrice, markingSlTpState, customMarkersVersion]);
+  }, [activePanel, instanceId, activeAccount, isSimulator, simulatedReports, reports, activePosition, proposedTrade, finalContractsToUse, tempSlPrice, markingSlTpState, customMarkersVersion, showOrderLines]);
 
   useEffect(() => {
     updateTradePriceLinesRef.current = updateTradePriceLines;
@@ -8933,11 +9074,22 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
                 {momentumMatrixSnapshot && (
                   <>
+                    {/* Badge IndexMoneyFlow (IMF) */}
+                    {momentumMatrixIndConfig?.params?.showFxFlow !== false && typeof momentumMatrixSnapshot.fxFlow === 'number' && (
+                      <span className={`text-[9.5px] font-bold font-mono px-1.5 py-0.5 rounded border shadow-sm ${
+                        momentumMatrixSnapshot.fxFlow >= 50
+                          ? 'bg-cyan-950/80 text-cyan-300 border-cyan-700/60'
+                          : 'bg-rose-950/80 text-rose-300 border-rose-700/60'
+                      }`}>
+                        🌐 IMF: {momentumMatrixSnapshot.fxFlow}%
+                      </span>
+                    )}
+
                     {/* Badge NQ+ES */}
                     {momentumMatrixIndConfig?.params?.indicesMode !== 'off' && (
                       <span className={`text-[9.5px] font-bold font-mono px-1.5 py-0.5 rounded border shadow-sm ${
                         momentumMatrixSnapshot.combinedIndices >= 50
-                          ? 'bg-cyan-950/80 text-cyan-300 border-cyan-700/60'
+                          ? 'bg-sky-950/80 text-sky-300 border-sky-700/60'
                           : 'bg-rose-950/80 text-rose-300 border-rose-700/60'
                       }`}>
                         NQ+ES: {momentumMatrixSnapshot.combinedIndices}%
@@ -8962,10 +9114,27 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                       </span>
                     )}
 
-                    {/* Badge DXY */}
-                    {momentumMatrixIndConfig?.params?.showDxy !== false && (
+                    {/* Badge DXY (Opcional, padrão desligado) */}
+                    {momentumMatrixIndConfig?.params?.showDxy === true && (
                       <span className="text-[9.5px] font-bold font-mono px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 shadow-sm">
                         DXY: {momentumMatrixSnapshot.dxy}%
+                      </span>
+                    )}
+
+                    {/* Badges Pares FX Individuais (se habilitados) */}
+                    {momentumMatrixIndConfig?.params?.showEurJpy === true && typeof momentumMatrixSnapshot.eurjpy === 'number' && (
+                      <span className="text-[9.5px] font-bold font-mono px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 shadow-sm">
+                        EUR/JPY: {momentumMatrixSnapshot.eurjpy}%
+                      </span>
+                    )}
+                    {momentumMatrixIndConfig?.params?.showUsdJpy === true && typeof momentumMatrixSnapshot.usdjpy === 'number' && (
+                      <span className="text-[9.5px] font-bold font-mono px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-700/60 shadow-sm">
+                        USD/JPY: {momentumMatrixSnapshot.usdjpy}%
+                      </span>
+                    )}
+                    {momentumMatrixIndConfig?.params?.showEurUsd === true && typeof momentumMatrixSnapshot.eurusd === 'number' && (
+                      <span className="text-[9.5px] font-bold font-mono px-1.5 py-0.5 rounded bg-indigo-950/80 text-indigo-300 border border-indigo-700/60 shadow-sm">
+                        EUR/USD: {momentumMatrixSnapshot.eurusd}%
                       </span>
                     )}
 

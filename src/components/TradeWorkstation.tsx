@@ -1,11 +1,19 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { CandleChart } from './CandleChart';
 import { TradeBoleta } from './TradeBoleta';
 import { TradeDock } from './TradeDock';
 import { IndicatorsManagerModal } from './IndicatorsManagerModal';
 import { WidgetsManagerModal } from './WidgetsManagerModal';
-import { ChartWidgetsOverlay } from './ChartWidgetsOverlay';
+import { TradeChartGrid } from './TradeChartGrid';
+import { TradeChartSlot } from './TradeChartSlot';
+import { LayoutSelectorMenu } from './LayoutSelectorMenu';
+import {
+  DEFAULT_SPLIT_RATIOS,
+  type ChartLayoutType,
+  type ChartSlotConfig,
+  type ChartSplitRatios,
+  type WorkspaceTemplate
+} from '../types/chartLayout';
 import {
   INDICATOR_DEFINITIONS,
   type IndicatorConfig
@@ -22,36 +30,14 @@ import { getAccountManualStrategyId, fetchChartDrawingsSupabase, saveChartDrawin
 import { evaluateDrawingTrigger } from '../utils/drawingEngine';
 import { calculateTradeManagement } from '../utils/levelPriceResolver';
 
-function getShortIndicatorName(ind: IndicatorConfig): string {
-  switch (ind.type) {
-    case 'EMA': return `EMA ${ind.params.period || 9}`;
-    case 'SMA': return `SMA ${ind.params.period || 20}`;
-    case 'TMA': return `TMA ${ind.params.period || 20}`;
-    case 'RSI': return `RSI ${ind.params.period || 14}`;
-    case 'MACD': return `MACD (${ind.params.fastPeriod || 12},${ind.params.slowPeriod || 26})`;
-    case 'Bollinger': return `BB (${ind.params.period || 20},${ind.params.stdDev || 2})`;
-    case 'Supertrend': return `Supertrend (${ind.params.atrPeriod || 10})`;
-    case 'ElliottWaves': return `Elliott Waves`;
-    case 'SMC_OB': return `SMC Order Blocks`;
-    case 'SMC_BOS_CHOCH': return `SMC BOS/CHoCH`;
-    case 'SMC_Liquidity': return `SMC Liquidity`;
-    case 'VWAP': return `VWAP`;
-    case 'VOLUME_SPIKE_PIVOTS': return `Spike Pivots (${ind.params?.barsToCheck || 5}, ${ind.params?.volumeMultiple || 1.5}x)`;
-    case 'GammaLevels':
-    case 'GAMMA_LEVELS': return `Níveis Gamma`;
-    default: return ind.name.split('(')[0].trim();
-  }
-}
-
 export const TradeWorkstation: React.FC = () => {
   const {
     candles,
-    isCandlesLoading,
-    candlesLoadingProgress,
     marketData,
     panels,
     activePanel,
     switchPanel,
+    getPanelSnapshot,
     setPanelMode,
     settings,
     allSettings,
@@ -123,6 +109,17 @@ export const TradeWorkstation: React.FC = () => {
   const [resetViewTrigger, setResetViewTrigger] = useState<number>(0);
   const [autoCenter, setAutoCenter] = useState<boolean>(false);
   const [showTradeMarkers, setShowTradeMarkers] = useState<boolean>(true);
+  const [showOrderLines, setShowOrderLines] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('vortex_ws_show_order_lines');
+      return saved !== 'false';
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('vortex_ws_show_order_lines', String(showOrderLines)); } catch {}
+  }, [showOrderLines]);
   const [showRobots, setShowRobots] = useState<boolean>(false);
   const [dockHeight, setDockHeight] = useState<number>(180); // Height of bottom dock in pixels
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
@@ -408,7 +405,215 @@ export const TradeWorkstation: React.FC = () => {
     ];
   });
 
-  const visibleIndicators = useMemo(() => activeIndicators.filter(i => i.visible), [activeIndicators]);
+  // =========================================================================
+  // MULTI-GRÁFICOS: Layouts, Divisores Arrastáveis, Foco Ativo e Templates
+  // =========================================================================
+  const [chartLayout, setChartLayout] = useState<ChartLayoutType>(() => {
+    try {
+      const saved = localStorage.getItem('vortex_ws_layout') as ChartLayoutType;
+      return saved || 'single';
+    } catch {
+      return 'single';
+    }
+  });
+
+  const [splitRatios, setSplitRatios] = useState<ChartSplitRatios>(() => {
+    try {
+      const saved = localStorage.getItem('vortex_ws_ratios');
+      if (saved) return { ...DEFAULT_SPLIT_RATIOS, ...JSON.parse(saved) };
+    } catch {}
+    return { ...DEFAULT_SPLIT_RATIOS };
+  });
+
+  const [focusedSlotIndex, setFocusedSlotIndex] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('vortex_ws_focused_slot');
+      const num = saved !== null ? Number(saved) : 0;
+      return !isNaN(num) && num >= 0 && num <= 3 ? num : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const [maximizedSlotIndex, setMaximizedSlotIndex] = useState<number | null>(null);
+  const [isBoletaAssetLocked, setIsBoletaAssetLocked] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('vortex_ws_boleta_locked') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem('vortex_ws_focused_slot', String(focusedSlotIndex)); } catch {}
+  }, [focusedSlotIndex]);
+
+  useEffect(() => {
+    try { localStorage.setItem('vortex_ws_boleta_locked', String(isBoletaAssetLocked)); } catch {}
+  }, [isBoletaAssetLocked]);
+
+  const [multiSlots, setMultiSlots] = useState<ChartSlotConfig[]>(() => {
+    try {
+      const saved = localStorage.getItem('vortex_ws_slots');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length === 4) return parsed;
+      }
+    } catch {}
+    return [
+      { id: 'slot_0', panelId: pKey, timeframe: 5, indicators: [], autoCenter: false, showTradeMarkers: true, showIndicatorsLegend: true, showRobots: false },
+      { id: 'slot_1', panelId: pKey, timeframe: 15, indicators: [], autoCenter: false, showTradeMarkers: true, showIndicatorsLegend: true, showRobots: false },
+      { id: 'slot_2', panelId: pKey, timeframe: 1, indicators: [], autoCenter: false, showTradeMarkers: true, showIndicatorsLegend: true, showRobots: false },
+      { id: 'slot_3', panelId: pKey, timeframe: 60, indicators: [], autoCenter: false, showTradeMarkers: true, showIndicatorsLegend: true, showRobots: false },
+    ];
+  });
+
+  // Garantir que slots secundários sem painel válido herdem o painel ativo na inicialização
+  useEffect(() => {
+    if (!activePanel?.id || !panels || panels.length === 0) return;
+    setMultiSlots(prev => prev.map((s, idx) => {
+      const exists = panels.some((p: any) => p.id === s.panelId);
+      if (!exists || idx === 0) {
+        return {
+          ...s,
+          panelId: idx === 0 ? activePanel.id : (exists ? s.panelId : activePanel.id),
+          indicators: idx === 0 ? activeIndicators : (s.indicators.length === 0 ? JSON.parse(JSON.stringify(activeIndicators)) : s.indicators)
+        };
+      }
+      return s;
+    }));
+  }, [activePanel?.id, panels?.length]);
+
+  // Persistência automática dos slots e proporções
+  useEffect(() => {
+    try { localStorage.setItem('vortex_ws_slots', JSON.stringify(multiSlots)); } catch {}
+  }, [multiSlots]);
+
+  const handleSelectLayout = useCallback((nextLayout: ChartLayoutType) => {
+    setChartLayout(nextLayout);
+    setMaximizedSlotIndex(null);
+    if (nextLayout === 'single') {
+      setFocusedSlotIndex(0);
+    } else if (nextLayout === 'split-v' || nextLayout === 'split-h') {
+      setFocusedSlotIndex(prev => (prev > 1 ? 0 : prev));
+    } else if (nextLayout.startsWith('triple')) {
+      setFocusedSlotIndex(prev => (prev > 2 ? 0 : prev));
+    }
+    try { localStorage.setItem('vortex_ws_layout', nextLayout); } catch {}
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+  }, []);
+
+  const handleChangeRatios = useCallback((next: ChartSplitRatios) => {
+    setSplitRatios(next);
+    try { localStorage.setItem('vortex_ws_ratios', JSON.stringify(next)); } catch {}
+  }, []);
+
+  const handleResetRatios = useCallback(() => {
+    const def = { ...DEFAULT_SPLIT_RATIOS };
+    setSplitRatios(def);
+    try { localStorage.setItem('vortex_ws_ratios', JSON.stringify(def)); } catch {}
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 30);
+  }, []);
+
+  const [workspaceTemplates, setWorkspaceTemplates] = useState<WorkspaceTemplate[]>(() => {
+    try {
+      const saved = localStorage.getItem('vortex_ws_templates');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
+
+  const getEffectiveSlot = useCallback((idx: number): ChartSlotConfig => {
+    if (idx === 0) {
+      return {
+        id: 'slot_0',
+        panelId: activePanel?.id || pKey,
+        timeframe,
+        indicators: activeIndicators,
+        autoCenter,
+        showTradeMarkers,
+        showOrderLines,
+        showIndicatorsLegend,
+        showRobots,
+      };
+    }
+    const base = multiSlots[idx] || multiSlots[0];
+    return {
+      ...base,
+      panelId: (panels || []).some((p: any) => p.id === base.panelId) ? base.panelId : (activePanel?.id || pKey),
+    };
+  }, [activePanel?.id, pKey, timeframe, activeIndicators, autoCenter, showTradeMarkers, showOrderLines, showIndicatorsLegend, showRobots, multiSlots, panels]);
+
+  const effectiveFocusedIdx = chartLayout === 'single' ? 0 : focusedSlotIndex;
+  const focusedSlot = useMemo(() => getEffectiveSlot(effectiveFocusedIdx), [getEffectiveSlot, effectiveFocusedIdx]);
+  const focusedVisibleIndicators = useMemo(() => (focusedSlot.indicators || []).filter(i => i.visible), [focusedSlot.indicators]);
+  const focusedPanel = useMemo(() => (panels || []).find((p: any) => p.id === focusedSlot.panelId) || activePanel, [panels, focusedSlot.panelId, activePanel]);
+
+  const updateSlotByIndex = useCallback((idx: number, updater: (prev: ChartSlotConfig) => ChartSlotConfig) => {
+    if (idx === 0) {
+      const current0 = getEffectiveSlot(0);
+      const next0 = updater(current0);
+      if (next0.panelId !== current0.panelId && switchPanel) {
+        switchPanel(next0.panelId);
+      }
+      if (next0.timeframe !== current0.timeframe) {
+        handleSetTimeframe(next0.timeframe);
+      }
+      if (next0.indicators !== current0.indicators) {
+        setActiveIndicators(next0.indicators);
+      }
+      if (next0.autoCenter !== current0.autoCenter) setAutoCenter(next0.autoCenter);
+      if (next0.showTradeMarkers !== current0.showTradeMarkers) setShowTradeMarkers(next0.showTradeMarkers);
+      if (next0.showOrderLines !== current0.showOrderLines) setShowOrderLines(next0.showOrderLines !== false);
+      if (next0.showIndicatorsLegend !== current0.showIndicatorsLegend) {
+        setShowIndicatorsLegend(next0.showIndicatorsLegend);
+      }
+      if (next0.showRobots !== current0.showRobots) setShowRobots(next0.showRobots);
+      return;
+    }
+    setMultiSlots(prev => prev.map((s, i) => (i === idx ? updater(s) : s)));
+  }, [getEffectiveSlot, switchPanel, handleSetTimeframe]);
+
+  const handleSaveWorkspaceTemplate = useCallback((name: string) => {
+    const snapshotSlots: ChartSlotConfig[] = [0, 1, 2, 3].map(i => JSON.parse(JSON.stringify(getEffectiveSlot(i))));
+    const newTpl: WorkspaceTemplate = {
+      id: `tpl_${Date.now()}`,
+      name,
+      layout: chartLayout,
+      ratios: { ...splitRatios },
+      slots: snapshotSlots,
+      createdAt: Date.now(),
+    };
+    setWorkspaceTemplates(prev => {
+      const next = [newTpl, ...prev];
+      try { localStorage.setItem('vortex_ws_templates', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, [getEffectiveSlot, chartLayout, splitRatios]);
+
+  const handleLoadWorkspaceTemplate = useCallback((tpl: WorkspaceTemplate) => {
+    handleSelectLayout(tpl.layout);
+    handleChangeRatios({ ...DEFAULT_SPLIT_RATIOS, ...tpl.ratios });
+    if (tpl.slots && tpl.slots.length > 0) {
+      const slot0 = tpl.slots[0];
+      if (slot0.panelId && slot0.panelId !== activePanel?.id && switchPanel) {
+        switchPanel(slot0.panelId);
+      }
+      if (slot0.timeframe) handleSetTimeframe(slot0.timeframe);
+      if (slot0.indicators) setActiveIndicators(JSON.parse(JSON.stringify(slot0.indicators)));
+      setAutoCenter(Boolean(slot0.autoCenter));
+      setShowTradeMarkers(slot0.showTradeMarkers !== false);
+      setShowRobots(Boolean(slot0.showRobots));
+      setMultiSlots(prev => prev.map((s, idx) => (tpl.slots[idx] ? JSON.parse(JSON.stringify(tpl.slots[idx])) : s)));
+    }
+  }, [handleSelectLayout, handleChangeRatios, activePanel?.id, switchPanel, handleSetTimeframe]);
+
+  const handleDeleteWorkspaceTemplate = useCallback((id: string) => {
+    setWorkspaceTemplates(prev => {
+      const next = prev.filter(t => t.id !== id);
+      try { localStorage.setItem('vortex_ws_templates', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
 
   // Active Widgets on Chart state initialized with default presets or localStorage
   const [activeWidgets, setActiveWidgets] = useState<WidgetConfig[]>(() => {
@@ -493,10 +698,10 @@ export const TradeWorkstation: React.FC = () => {
     }
   }, [activeIndicators, activeWidgets, timeframe, pKey, currentSymbol]);
 
-  // Indicator Handlers
+  // Indicator Handlers (atuam no gráfico focado)
   const handleAddIndicator = (type: string, customConfig?: IndicatorConfig) => {
     if (customConfig) {
-      setActiveIndicators(prev => [...prev, customConfig]);
+      updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, indicators: [...s.indicators, customConfig] }));
       return;
     }
     const def = INDICATOR_DEFINITIONS[type];
@@ -516,23 +721,41 @@ export const TradeWorkstation: React.FC = () => {
       style: { ...def.defaultStyle }
     };
 
-    setActiveIndicators(prev => [...prev, newInd]);
+    updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, indicators: [...s.indicators, newInd] }));
   };
 
   const handleUpdateIndicator = (updated: IndicatorConfig) => {
-    setActiveIndicators(prev => prev.map(ind => ind.id === updated.id ? updated : ind));
+    updateSlotByIndex(effectiveFocusedIdx, s => ({
+      ...s,
+      indicators: s.indicators.map(ind => ind.id === updated.id ? updated : ind)
+    }));
   };
 
   const handleRemoveIndicator = (id: string) => {
-    setActiveIndicators(prev => prev.filter(ind => ind.id !== id));
+    updateSlotByIndex(effectiveFocusedIdx, s => ({
+      ...s,
+      indicators: s.indicators.filter(ind => ind.id !== id)
+    }));
   };
 
   const handleToggleVisibility = (id: string) => {
-    setActiveIndicators(prev => prev.map(ind => ind.id === id ? { ...ind, visible: !ind.visible } : ind));
+    updateSlotByIndex(effectiveFocusedIdx, s => ({
+      ...s,
+      indicators: s.indicators.map(ind => ind.id === id ? { ...ind, visible: !ind.visible } : ind)
+    }));
   };
 
   const handleLoadTemplate = (indicators: IndicatorConfig[], widgets?: WidgetConfig[], tf?: number) => {
     const cloned = JSON.parse(JSON.stringify(indicators));
+    if (effectiveFocusedIdx > 0) {
+      updateSlotByIndex(effectiveFocusedIdx, s => ({
+        ...s,
+        indicators: cloned,
+        timeframe: (tf && typeof tf === 'number') ? tf : s.timeframe
+      }));
+      return;
+    }
+
     setActiveIndicators(cloned);
     try {
       localStorage.setItem(`vortex_active_indicators_${accKey}_${pKey}`, JSON.stringify(cloned));
@@ -1013,18 +1236,29 @@ export const TradeWorkstation: React.FC = () => {
     ? 'bg-[#152244] border-blue-900/60 text-slate-300 hover:text-white'
     : 'bg-[#2a3244] border-slate-600 text-slate-200 hover:bg-[#38435b] hover:text-white';
 
+  const boletaTargetPanel = isBoletaAssetLocked ? activePanel : (focusedPanel || activePanel);
+  const boletaSnapshot = getPanelSnapshot ? getPanelSnapshot(boletaTargetPanel?.id || pKey) : null;
+  const boletaSymbol = boletaTargetPanel?.name || currentSymbol;
+  const boletaCandles = boletaSnapshot?.candles || candles || [];
+  const rawBoletaPrice = boletaSnapshot?.marketData?.price && boletaSnapshot.marketData.price !== '--'
+    ? parseFloat(String(boletaSnapshot.marketData.price).replace(/[^\d.-]/g, ''))
+    : null;
+  const boletaPrice = (rawBoletaPrice && !isNaN(rawBoletaPrice) && rawBoletaPrice > 0)
+    ? rawBoletaPrice
+    : (boletaCandles.length > 0 ? boletaCandles[boletaCandles.length - 1].close : currentPrice);
+
   return (
     <div className={`w-full h-[calc(100vh-20px)] ${wsRootBg} flex flex-col font-sans overflow-hidden transition-colors duration-200`}>
       {/* Top Workstation Header Toolbar - Single-Line Compact Modern Header */}
       <div className={`${wsHeaderBg} border-b px-3 py-1.5 h-11 flex items-center justify-between gap-2.5 select-none shrink-0 relative z-50 transition-colors duration-200`}>
         {/* Left Section: Clean Asset Selector, Timeframe Dropdown & Indicators */}
         <div className="flex items-center gap-2 shrink-0">
-          {/* Asset Panel Selector (Clean Name without parentheses) */}
-          <div className={`flex items-center gap-1.5 ${wsInputBg} border px-2.5 py-1 rounded-lg`}>
+          {/* Asset Panel Selector (Atua no gráfico focado) */}
+          <div className={`flex items-center gap-1.5 ${wsInputBg} border px-2.5 py-1 rounded-lg`} title={chartLayout !== 'single' ? `Ativo do Gráfico ${effectiveFocusedIdx + 1} (Focado)` : 'Ativo / Painel'}>
             <span className="text-sm">📈</span>
             <select
-              value={activePanel?.id || ''}
-              onChange={(e) => switchPanel(e.target.value)}
+              value={focusedSlot.panelId || ''}
+              onChange={(e) => updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, panelId: e.target.value }))}
               className="bg-transparent text-xs font-black outline-none cursor-pointer"
             >
               {panels?.map((p: any) => {
@@ -1038,14 +1272,14 @@ export const TradeWorkstation: React.FC = () => {
             </select>
           </div>
 
-          {/* Timeframe Dropdown Selector */}
+          {/* Timeframe Dropdown Selector (Atua no gráfico focado) */}
           <div className={`flex items-center gap-1 ${wsInputBg} border px-2 py-1 rounded-lg`}>
             <span className="text-[11px] text-slate-400">⏱️</span>
             <select
-              value={timeframe}
-              onChange={(e) => handleSetTimeframe(Number(e.target.value))}
+              value={focusedSlot.timeframe}
+              onChange={(e) => updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, timeframe: Number(e.target.value) }))}
               className="bg-transparent text-xs font-bold text-blue-400 outline-none cursor-pointer"
-              title="Seletor de Timeframe do Gráfico"
+              title="Seletor de Timeframe do Gráfico Focado"
             >
               <option value={1} className="bg-[#181d28] text-slate-200">1m</option>
               <option value={2} className="bg-[#181d28] text-slate-200">2m</option>
@@ -1064,12 +1298,12 @@ export const TradeWorkstation: React.FC = () => {
           <div className="flex items-center gap-1">
             <button
               onClick={() => setIsIndicatorsModalOpen(true)}
-              className="bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer"
+              className="bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer"
               title="Gerenciar Indicadores e Templates"
             >
-              <span>📊 Indicadores</span>
+              <span>📊</span>
               <span className="bg-blue-900 text-blue-200 px-1.5 py-0.2 rounded-full text-[10px]">
-                {visibleIndicators.length}
+                {focusedVisibleIndicators.length}
               </span>
             </button>
             <button
@@ -1078,17 +1312,16 @@ export const TradeWorkstation: React.FC = () => {
               title="Carregar Template Padrão do Painel 2"
             >
               <span>⭐</span>
-              <span className="hidden xl:inline">Padrão</span>
             </button>
           </div>
 
           {/* Widgets Modal Trigger */}
           <button
             onClick={() => setIsWidgetsModalOpen(true)}
-            className="bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow"
+            className="bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer shadow"
             title="Gerenciar Widgets e Cards Flutuantes do Gráfico"
           >
-            <span>🧩 Widgets</span>
+            <span>🧩</span>
             <span className="bg-purple-900 text-purple-200 px-1.5 py-0.2 rounded-full text-[10px]">
               {activeWidgets.filter(w => w.visible).length}
             </span>
@@ -1098,14 +1331,14 @@ export const TradeWorkstation: React.FC = () => {
           <div className="relative">
             <button
               onClick={() => setIsDrawingsMenuOpen(!isDrawingsMenuOpen)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow ${
+              className={`px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer shadow ${
                 activeDrawingTool
                   ? 'bg-amber-600 text-white border border-amber-400 animate-pulse'
                   : 'bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300'
               }`}
               title="Ferramentas de Desenho Técnico e Automação de Ordens ao Toque"
             >
-              <span>✏️ {activeDrawingTool ? 'Desenhando...' : 'Desenhos'}</span>
+              <span>✏️</span>
               {drawings.length > 0 && (
                 <span className="bg-emerald-900 text-emerald-200 px-1.5 py-0.2 rounded-full text-[10px]">
                   {drawings.length}
@@ -1311,52 +1544,68 @@ export const TradeWorkstation: React.FC = () => {
             R
           </button>
 
-          {/* Botão C (Auto-Center) */}
+          {/* Botão C (Auto-Center no gráfico focado) */}
           <button
             onClick={(e) => {
               e.stopPropagation();
-              setAutoCenter(prev => !prev);
+              updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, autoCenter: !s.autoCenter }));
             }}
             className={`px-2 py-1 rounded-lg border font-bold transition active:scale-95 cursor-pointer flex items-center gap-0.5 text-xs shadow ${
-              autoCenter
+              focusedSlot.autoCenter
                 ? 'border-yellow-500 bg-yellow-950/60 text-yellow-400 hover:bg-yellow-900/60'
                 : `${wsBtnBg}`
             }`}
-            title={autoCenter ? 'Desativar Auto-Center [Ctrl+C]' : 'Centralizar preço atual no meio do gráfico (Auto-Center) [Ctrl+C]'}
+            title={focusedSlot.autoCenter ? 'Desativar Auto-Center [Ctrl+C]' : 'Centralizar preço atual no meio do gráfico (Auto-Center) [Ctrl+C]'}
           >
             C
           </button>
 
-          {/* Botão I (Ocultar/Exibir Legenda de Indicadores) */}
+          {/* Botão I (Ocultar/Exibir Legenda de Indicadores no gráfico focado) */}
           <button
             onClick={(e) => {
               e.stopPropagation();
-              handleToggleIndicatorsLegend(!showIndicatorsLegend);
+              updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, showIndicatorsLegend: !s.showIndicatorsLegend }));
             }}
             className={`px-2 py-1 rounded-lg border font-bold transition active:scale-95 cursor-pointer flex items-center gap-0.5 text-xs shadow ${
-              showIndicatorsLegend
+              focusedSlot.showIndicatorsLegend
                 ? 'border-indigo-500 bg-indigo-600 text-white hover:bg-indigo-700'
                 : `${wsBtnBg}`
             }`}
-            title={showIndicatorsLegend ? 'Ocultar legenda de indicadores no gráfico [Ctrl+I]' : 'Mostrar legenda de indicadores no gráfico [Ctrl+I]'}
+            title={focusedSlot.showIndicatorsLegend ? 'Ocultar legenda de indicadores no gráfico [Ctrl+I]' : 'Mostrar legenda de indicadores no gráfico [Ctrl+I]'}
           >
             I
           </button>
 
-          {/* Botão S (Show/Hide Trade Markers & Lines) */}
+          {/* Botão S (Show/Hide Trade Markers & Lines no gráfico focado) */}
           <button
             onClick={(e) => {
               e.stopPropagation();
-              setShowTradeMarkers(prev => !prev);
+              updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, showTradeMarkers: !s.showTradeMarkers }));
             }}
             className={`px-2 py-1 rounded-lg border font-bold transition active:scale-95 cursor-pointer flex items-center gap-0.5 text-xs shadow ${
-              showTradeMarkers
+              focusedSlot.showTradeMarkers
                 ? 'border-blue-500 bg-blue-600 text-white hover:bg-blue-700'
                 : 'border-red-500 bg-red-600 text-white hover:bg-red-700'
             }`}
-            title={showTradeMarkers ? 'Ocultar setas e legendas de posições [Ctrl+S]' : 'Mostrar setas e legendas de posições [Ctrl+S]'}
+            title={focusedSlot.showTradeMarkers ? 'Ocultar setas e legendas de posições [Ctrl+S]' : 'Mostrar setas e legendas de posições [Ctrl+S]'}
           >
             S
+          </button>
+
+          {/* Botão O (Show/Hide Order Price Lines no gráfico focado) */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, showOrderLines: s.showOrderLines === false ? true : false }));
+            }}
+            className={`px-2 py-1 rounded-lg border font-bold transition active:scale-95 cursor-pointer flex items-center gap-0.5 text-xs shadow ${
+              focusedSlot.showOrderLines !== false
+                ? 'border-blue-500 bg-blue-600 text-white hover:bg-blue-700'
+                : 'border-red-500 bg-red-600 text-white hover:bg-red-700'
+            }`}
+            title={focusedSlot.showOrderLines !== false ? 'Ocultar linhas de ordens abertas neste gráfico' : 'Mostrar linhas de ordens abertas neste gráfico'}
+          >
+            O
           </button>
 
           {/* Botão H (Show/Hide Bottom Dock: Ordens Ativas, Pendentes e Histórico) */}
@@ -1388,17 +1637,51 @@ export const TradeWorkstation: React.FC = () => {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              setShowRobots(prev => !prev);
+              updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, showRobots: !s.showRobots }));
             }}
             className={`px-2 py-1 rounded-lg border font-bold transition active:scale-95 cursor-pointer flex items-center justify-center text-xs shadow ${
-              showRobots
+              focusedSlot.showRobots
                 ? 'border-purple-500 bg-purple-600 text-white hover:bg-purple-700'
                 : `${wsBtnBg}`
             }`}
-            title={showRobots ? 'Ocultar Painel de Robôs' : 'Mostrar Painel de Robôs'}
+            title={focusedSlot.showRobots ? 'Ocultar Painel de Robôs' : 'Mostrar Painel de Robôs'}
           >
             🤖
           </button>
+
+          {/* Seletor de Layouts Multi-Gráfico e Templates */}
+          <LayoutSelectorMenu
+            currentLayout={chartLayout}
+            onSelectLayout={handleSelectLayout}
+            onResetRatios={handleResetRatios}
+            templates={workspaceTemplates}
+            onSaveTemplate={handleSaveWorkspaceTemplate}
+            onLoadTemplate={handleLoadWorkspaceTemplate}
+            onDeleteTemplate={handleDeleteWorkspaceTemplate}
+            wsBtnBg={wsBtnBg}
+          />
+
+          {/* Cadeado da Boleta (Travar ativo na Boleta no modo Multi-Gráfico) */}
+          {chartLayout !== 'single' && !isRightBoletaCollapsed && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsBoletaAssetLocked(prev => !prev);
+              }}
+              className={`px-2 py-1 rounded-lg border font-bold transition active:scale-95 cursor-pointer flex items-center justify-center text-xs shadow ${
+                isBoletaAssetLocked
+                  ? 'border-amber-500 bg-amber-600/30 text-amber-300 hover:bg-amber-600/50'
+                  : wsBtnBg
+              }`}
+              title={
+                isBoletaAssetLocked
+                  ? `Boleta travada no ativo principal (${currentSymbol}). Clique para seguir o gráfico focado.`
+                  : `Boleta seguindo o gráfico focado (${boletaSymbol}). Clique para travar no ativo principal.`
+              }
+            >
+              {isBoletaAssetLocked ? '🔒' : '🔓'}
+            </button>
+          )}
 
           {/* Botão Boleta (📋) */}
           <button
@@ -1435,98 +1718,86 @@ export const TradeWorkstation: React.FC = () => {
       <div className="flex-1 flex overflow-hidden relative">
         {/* Left Container */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Main Chart Area with Ultra Compact Legend & Draggable Widgets */}
+          {/* Main Chart Area (Single ou Multi-Gráficos com Splitters Arrastáveis) */}
           <div ref={chartContainerRef} className={`flex-1 relative ${isLightTheme ? 'bg-[#ffffff]' : 'bg-[#000000]'} overflow-hidden transition-colors duration-200`}>
-            {/* TradingView Style On-Chart Indicator Legend (Top Left - Ultra Compact, Non-bold) */}
-            {showIndicatorsLegend && (
-              <div className="absolute top-1.5 left-2 z-30 flex flex-col gap-0.5 pointer-events-auto select-none">
-                {activeIndicators.map((ind) => (
-                  <div
-                    key={ind.id}
-                    className="bg-slate-950/70 backdrop-blur border border-slate-800/60 px-1.5 py-0.5 rounded text-[9px] leading-tight flex items-center gap-1 font-normal shadow-sm transition text-slate-300"
-                  >
-                    <span
-                      className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                      style={{
-                        backgroundColor: ind.style?.color || '#22c55e',
-                        opacity: ind.visible ? 1 : 0.6
-                      }}
-                    />
-                    <span className="font-normal tracking-tight text-slate-300">
-                      {getShortIndicatorName(ind)}
-                    </span>
-                    
-                    <div className="flex items-center gap-0.5 ml-0.5 border-l border-slate-800/60 pl-1">
-                      <button
-                        onClick={() => {
-                          setEditingIndicatorForModal(ind);
-                          setIsIndicatorsModalOpen(true);
-                        }}
-                        className="text-slate-400 hover:text-blue-400 transition text-[9px] p-0 leading-none cursor-pointer"
-                        title="Configurar Parâmetros"
-                      >
-                        ⚙️
-                      </button>
-                      <button
-                        onClick={() => handleToggleVisibility(ind.id)}
-                        className={`transition text-[9px] p-0 leading-none cursor-pointer ${
-                          ind.visible ? 'text-slate-300 hover:text-white' : 'opacity-40 hover:opacity-100'
-                        }`}
-                        title={ind.visible ? 'Ocultar' : 'Exibir'}
-                      >
-                        {ind.visible ? '👁️' : '🙈'}
-                      </button>
-                      <button
-                        onClick={() => handleRemoveIndicator(ind.id)}
-                        className="text-slate-400 hover:text-rose-400 transition text-[9px] p-0 leading-none cursor-pointer"
-                        title="Excluir Indicador"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Draggable Widgets Overlay on Chart */}
-            <ChartWidgetsOverlay
-              widgets={activeWidgets}
-              onUpdateWidget={handleUpdateWidget}
-              onRemoveWidget={handleRemoveWidget}
-              containerRef={chartContainerRef}
-            />
-
-            <CandleChart
-              candles={candles || []}
-              isLoading={isCandlesLoading}
-              loadingProgress={candlesLoadingProgress}
-              timeframe={timeframe}
-              setTimeframe={handleSetTimeframe}
-              activeIndicators={visibleIndicators}
-              activeWidgets={activeWidgets}
-              gammaLevels={gammaLevels}
-              instanceId={activePanel?.instance_id || 'painel_principal'}
-              fitChartTrigger={fitChartTrigger}
-              resetViewTrigger={resetViewTrigger}
-              autoCenter={autoCenter}
-              setAutoCenter={setAutoCenter}
-              showTradeMarkers={showTradeMarkers}
-              setShowTradeMarkers={setShowTradeMarkers}
-              showIndicatorsLegend={showIndicatorsLegend}
-              setShowIndicatorsLegend={handleToggleIndicatorsLegend}
-              showRobots={showRobots}
-              setShowRobots={setShowRobots}
-              hideManualTradeBar={true}
-              forceCandleView={true}
-              drawings={drawings}
-              onUpdateDrawing={handleUpdateDrawing}
-              onFinishDrawing={handleFinishDrawing}
-              onDeleteDrawing={handleDeleteDrawing}
-              activeDrawingTool={activeDrawingTool}
-              selectedDrawingId={selectedDrawingId}
-              onSelectDrawing={(d) => setSelectedDrawingId(d ? d.id : null)}
-              onOpenDrawingSettings={handleOpenDrawingSettings}
+            <TradeChartGrid
+              layout={chartLayout}
+              ratios={splitRatios}
+              onChangeRatios={handleChangeRatios}
+              maximizedSlotIndex={maximizedSlotIndex}
+              isBlackTheme={isBlackTheme}
+              isLightTheme={isLightTheme}
+              renderSlot={(slotIdx) => {
+                const slotCfg = getEffectiveSlot(slotIdx);
+                const isSlotFocused = effectiveFocusedIdx === slotIdx;
+                const isSlotMulti = chartLayout !== 'single';
+                return (
+                  <TradeChartSlot
+                    key={slotCfg.id}
+                    slot={slotCfg}
+                    isMultiChart={isSlotMulti}
+                    isFocused={isSlotFocused}
+                    isMaximized={maximizedSlotIndex === slotIdx}
+                    onFocus={() => setFocusedSlotIndex(slotIdx)}
+                    onToggleMaximize={() =>
+                      setMaximizedSlotIndex(prev => (prev === slotIdx ? null : slotIdx))
+                    }
+                    onChangePanel={(nextPanelId) =>
+                      updateSlotByIndex(slotIdx, s => ({ ...s, panelId: nextPanelId }))
+                    }
+                    onChangeTimeframe={(nextTf) =>
+                      updateSlotByIndex(slotIdx, s => ({ ...s, timeframe: nextTf }))
+                    }
+                    onEditIndicator={(ind) => {
+                      setFocusedSlotIndex(slotIdx);
+                      setEditingIndicatorForModal(ind);
+                      setIsIndicatorsModalOpen(true);
+                    }}
+                    onToggleIndicatorVisibility={(indId) =>
+                      updateSlotByIndex(slotIdx, s => ({
+                        ...s,
+                        indicators: s.indicators.map(i => i.id === indId ? { ...i, visible: !i.visible } : i)
+                      }))
+                    }
+                    onRemoveIndicator={(indId) =>
+                      updateSlotByIndex(slotIdx, s => ({
+                        ...s,
+                        indicators: s.indicators.filter(i => i.id !== indId)
+                      }))
+                    }
+                    setAutoCenter={(val) =>
+                      updateSlotByIndex(slotIdx, s => ({ ...s, autoCenter: val }))
+                    }
+                    setShowTradeMarkers={(val) =>
+                      updateSlotByIndex(slotIdx, s => ({ ...s, showTradeMarkers: val }))
+                    }
+                    setShowIndicatorsLegend={(val) =>
+                      updateSlotByIndex(slotIdx, s => ({ ...s, showIndicatorsLegend: val }))
+                    }
+                    setShowRobots={(val) =>
+                      updateSlotByIndex(slotIdx, s => ({ ...s, showRobots: val }))
+                    }
+                    fitChartTrigger={fitChartTrigger}
+                    resetViewTrigger={resetViewTrigger}
+                    drawings={drawings}
+                    onUpdateDrawing={handleUpdateDrawing}
+                    onFinishDrawing={handleFinishDrawing}
+                    onDeleteDrawing={handleDeleteDrawing}
+                    activeDrawingTool={activeDrawingTool}
+                    selectedDrawingId={selectedDrawingId}
+                    onSelectDrawing={(d) => setSelectedDrawingId(d ? d.id : null)}
+                    onOpenDrawingSettings={handleOpenDrawingSettings}
+                    activeWidgets={activeWidgets}
+                    onUpdateWidget={handleUpdateWidget}
+                    onRemoveWidget={handleRemoveWidget}
+                    isLightTheme={isLightTheme}
+                    isBlackTheme={isBlackTheme}
+                    isSlateTheme={isSlateTheme}
+                    isMidnightTheme={isMidnightTheme}
+                    showWidgets={isSlotFocused || !isSlotMulti}
+                  />
+                );
+              }}
             />
           </div>
 
@@ -1553,9 +1824,9 @@ export const TradeWorkstation: React.FC = () => {
         {!isRightBoletaCollapsed && !isBoletaFloating && (
           <div className="w-80 h-full flex-shrink-0 border-l border-slate-800 overflow-y-auto relative">
             <TradeBoleta
-              selectedAsset={currentSymbol}
-              currentPrice={currentPrice}
-              candles={candles || []}
+              selectedAsset={boletaSymbol}
+              currentPrice={boletaPrice}
+              candles={boletaCandles}
               isFloating={false}
               onToggleFloating={toggleBoletaFloating}
               onClose={toggleRightBoleta}
@@ -1578,9 +1849,9 @@ export const TradeWorkstation: React.FC = () => {
           className="rounded-xl shadow-2xl border border-slate-700/80 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 backdrop-blur-md"
         >
           <TradeBoleta
-            selectedAsset={currentSymbol}
-            currentPrice={currentPrice}
-            candles={candles || []}
+            selectedAsset={boletaSymbol}
+            currentPrice={boletaPrice}
+            candles={boletaCandles}
             isFloating={true}
             onToggleFloating={toggleBoletaFloating}
             onClose={toggleRightBoleta}
@@ -1597,14 +1868,14 @@ export const TradeWorkstation: React.FC = () => {
           setEditingIndicatorForModal(null);
         }}
         initialEditingIndicator={editingIndicatorForModal}
-        activeIndicators={activeIndicators}
+        activeIndicators={focusedSlot.indicators}
         onAddIndicator={handleAddIndicator}
         onUpdateIndicator={handleUpdateIndicator}
         onRemoveIndicator={handleRemoveIndicator}
         onToggleVisibility={handleToggleVisibility}
         onLoadTemplate={handleLoadTemplate}
         activeWidgets={activeWidgets}
-        currentTimeframe={timeframe}
+        currentTimeframe={focusedSlot.timeframe}
         onAddWidget={handleAddWidget}
         onRemoveWidget={handleRemoveWidget}
         onToggleWidgetVisibility={handleToggleWidgetVisibility}

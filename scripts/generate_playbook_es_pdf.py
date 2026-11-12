@@ -1,5 +1,12 @@
-"""Gera o PDF didatico do Playbook Operacional para o ES / MES (S&P 500)
-usando HTML/CSS + SVG e renderizacao headless via Edge/Chrome.
+"""Gera o PDF didatico e visual do Playbook Operacional ES / MES (S&P 500)
+usando HTML/CSS + SVG de alta definicao e renderizacao headless via Edge/Chrome.
+Inclui atualizacoes completas:
+1. Horario Exato no NinjaTrader (Abertura no Segundo 10:30:01 / 11:30:01 e T05 em 10:35:01 / 11:35:01)
+2. Estudo Quantitativo Completo da OR5 (Opening Range 5 Minutos no ES):
+   - Breakout com Reteste alcanca 81,2% de Acerto no ES (+273 a +429 pts)
+   - Por que NUNCA operar Fade na OR5 (Fade e exclusivo da OR15 com 74,2% Win)
+3. Sweet Spot de Forca (60%-69%), Horario Sazonal de Inverno (11:30 BRT a partir de Novembro)
+4. Presets Selecionaveis no Robo C# e Scalper com Parciais (ate 83,6% Win).
 """
 import os
 import subprocess
@@ -15,7 +22,7 @@ html_content = """<!DOCTYPE html>
 <style>
   @page {
     size: A4 portrait;
-    margin: 7mm 10mm 7mm 10mm;
+    margin: 5.5mm 8.5mm 5.5mm 8.5mm;
   }
   * {
     box-sizing: border-box;
@@ -26,8 +33,8 @@ html_content = """<!DOCTYPE html>
     font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif;
     color: #1e293b;
     background: #ffffff;
-    font-size: 8.7pt;
-    line-height: 1.28;
+    font-size: 8.3pt;
+    line-height: 1.25;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
@@ -44,45 +51,45 @@ html_content = """<!DOCTYPE html>
   .hero {
     background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
     color: #ffffff;
-    padding: 10px 14px;
-    border-radius: 8px;
-    margin-bottom: 7px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-bottom: 5px;
     display: flex;
     justify-content: space-between;
     align-items: center;
   }
   .hero h1 {
-    font-size: 13.5pt;
+    font-size: 12.5pt;
     font-weight: 800;
     letter-spacing: -0.3px;
     margin-bottom: 2px;
   }
   .hero p {
-    font-size: 8.2pt;
+    font-size: 7.8pt;
     color: #cbd5e1;
   }
   .hero-badge {
     background: rgba(255,255,255,0.12);
     border: 1px solid rgba(255,255,255,0.25);
-    border-radius: 7px;
-    padding: 4px 10px;
+    border-radius: 6px;
+    padding: 3px 8px;
     text-align: right;
-    font-size: 7.6pt;
-    line-height: 1.28;
+    font-size: 7.2pt;
+    line-height: 1.22;
   }
   .hero-badge strong {
     color: #38bdf8;
-    font-size: 8.8pt;
+    font-size: 8.4pt;
   }
 
   .section-header {
     background: #0f172a;
     color: #ffffff;
-    padding: 4.5px 10px;
+    padding: 3.5px 8px;
     border-radius: 5px;
-    font-size: 9.5pt;
+    font-size: 8.9pt;
     font-weight: 700;
-    margin: 6px 0 5px 0;
+    margin: 4px 0 3px 0;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -90,34 +97,34 @@ html_content = """<!DOCTYPE html>
   .section-header span.tag {
     background: #2563eb;
     color: #fff;
-    font-size: 7.4pt;
-    padding: 1.5px 7px;
-    border-radius: 10px;
+    font-size: 7pt;
+    padding: 1px 5px;
+    border-radius: 8px;
     font-weight: 600;
   }
 
   .grid-2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 7px;
-    margin-bottom: 6px;
+    gap: 5px;
+    margin-bottom: 4px;
   }
   .grid-3 {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
-    gap: 7px;
-    margin-bottom: 6px;
+    gap: 5px;
+    margin-bottom: 4px;
   }
   .grid-4 {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 6px;
-    margin-bottom: 6px;
+    gap: 4px;
+    margin-bottom: 4px;
   }
 
-  .card, .card-white, .card-green, .card-blue, .card-amber, .card-red {
-    border-radius: 7px;
-    padding: 7px 9px;
+  .card, .card-white, .card-green, .card-blue, .card-amber, .card-red, .card-purple {
+    border-radius: 5px;
+    padding: 5px 7px;
   }
   .card {
     border: 1px solid #cbd5e1;
@@ -143,21 +150,25 @@ html_content = """<!DOCTYPE html>
     border: 1.5px solid #dc2626;
     background: #fef2f2;
   }
+  .card-purple {
+    border: 1.5px solid #7c3aed;
+    background: #faf5ff;
+  }
 
-  .card h3, .card-white h3, .card-green h3, .card-blue h3, .card-amber h3 {
-    font-size: 9.2pt;
+  .card h3, .card-white h3, .card-green h3, .card-blue h3, .card-amber h3, .card-purple h3 {
+    font-size: 8.6pt;
     font-weight: 700;
-    margin-bottom: 3px;
+    margin-bottom: 2px;
     color: #0f172a;
   }
   .kpi-num {
-    font-size: 12.5pt;
+    font-size: 11.5pt;
     font-weight: 800;
     color: #1e3a8a;
     line-height: 1.1;
   }
   .kpi-label {
-    font-size: 7.3pt;
+    font-size: 6.9pt;
     color: #475569;
     font-weight: 600;
     text-transform: uppercase;
@@ -166,18 +177,18 @@ html_content = """<!DOCTYPE html>
   table {
     width: 100%;
     border-collapse: collapse;
-    margin: 4px 0 6px 0;
-    font-size: 8.1pt;
+    margin: 3px 0 4px 0;
+    font-size: 7.7pt;
   }
   th {
     background: #1e293b;
     color: #ffffff;
     text-align: left;
-    padding: 4px 6px;
+    padding: 3px 5px;
     font-weight: 700;
   }
   td {
-    padding: 3.5px 6px;
+    padding: 2.8px 5px;
     border-bottom: 1px solid #e2e8f0;
   }
   tr:nth-child(even) td {
@@ -187,55 +198,67 @@ html_content = """<!DOCTYPE html>
     background: #dcfce7 !important;
     font-weight: 600;
   }
+  tr.highlight-blue td {
+    background: #dbeafe !important;
+    font-weight: 600;
+  }
 
   .badge-buy {
     background: #16a34a;
     color: #fff;
-    padding: 1.5px 6px;
-    border-radius: 4px;
+    padding: 1px 4px;
+    border-radius: 3px;
     font-weight: 700;
-    font-size: 7.8pt;
+    font-size: 7.3pt;
   }
   .badge-sell {
     background: #dc2626;
     color: #fff;
-    padding: 1.5px 6px;
-    border-radius: 4px;
+    padding: 1px 4px;
+    border-radius: 3px;
     font-weight: 700;
-    font-size: 7.8pt;
+    font-size: 7.3pt;
   }
   .badge-neutral {
     background: #475569;
     color: #fff;
-    padding: 1.5px 6px;
-    border-radius: 4px;
+    padding: 1px 4px;
+    border-radius: 3px;
     font-weight: 700;
-    font-size: 7.8pt;
+    font-size: 7.3pt;
+  }
+  .badge-gold {
+    background: #d97706;
+    color: #fff;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-weight: 700;
+    font-size: 7.3pt;
   }
 
   ul {
-    padding-left: 15px;
+    padding-left: 13px;
     margin: 2px 0;
   }
   li {
-    margin-bottom: 2px;
+    margin-bottom: 1.8px;
   }
   .formula-box {
     background: #0f172a;
     color: #f8fafc;
-    padding: 6px 10px;
-    border-radius: 6px;
+    padding: 4px 8px;
+    border-radius: 4px;
     font-family: Consolas, 'Courier New', monospace;
-    font-size: 8.2pt;
-    margin: 4px 0;
+    font-size: 7.9pt;
+    margin: 3px 0;
   }
   .footer-note {
-    margin-top: 5px;
-    padding-top: 3px;
+    margin-top: 4px;
+    padding-top: 2.5px;
     border-top: 1px solid #cbd5e1;
     display: flex;
     justify-content: space-between;
-    font-size: 7.4pt;
+    font-size: 7.1pt;
     color: #64748b;
   }
 </style>
@@ -247,624 +270,649 @@ html_content = """<!DOCTYPE html>
   <div class="hero">
     <div>
       <h1>PLAYBOOK OPERACIONAL &amp; AUTOMAÇÃO — ES / MES</h1>
-      <p>Guia Didático do S&amp;P 500 Futuro com Leitura de Força Multi-Timeframe &amp; NinjaTrader 8</p>
+      <p>S&amp;P 500 Futuro: Sincronização Precisa de Velas, OR5 com Pullback, Fade na Borda e Automação NT8</p>
     </div>
     <div class="hero-badge">
-      <strong>VALIDAÇÃO: 365 DIAS</strong><br/>
-      11/11/2025 a 10/11/2026<br/>
-      254 Pregões • 350.253 Minutos
+      <strong>VALIDAÇÃO 365 DIAS</strong><br/>
+      254 Pregões • 350.561 Minutos<br/>
+      Base Oficial Databento
     </div>
   </div>
 
   <div class="grid-4">
     <div class="card">
-      <div class="kpi-label">Amostra Cash NY</div>
-      <div class="kpi-num">97.714 min</div>
-      <div style="font-size:7.5pt;color:#475569;">254 pregões completos</div>
+      <div class="kpi-label">Valor do Ponto (ES / MES)</div>
+      <div class="kpi-num">$50 / $5</div>
+      <div style="font-size:7.3pt;color:#475569;">1 pt = 4 ticks ($12,50 / $1,25)</div>
     </div>
     <div class="card">
-      <div class="kpi-label">Correlação Positiva ES</div>
-      <div class="kpi-num" style="color:#16a34a;">100% (254/254)</div>
-      <div style="font-size:7.5pt;color:#475569;">r médio = +0,372 (ret_0)</div>
+      <div class="kpi-label">Breakout OR5 Reteste</div>
+      <div class="kpi-num" style="color:#16a34a;">81,2% Win Rate</div>
+      <div style="font-size:7.3pt;color:#475569;">+273 a +429 pts no ES</div>
     </div>
     <div class="card">
-      <div class="kpi-label">Armadilha 1º Minuto</div>
-      <div class="kpi-num" style="color:#dc2626;">54,9% dos dias</div>
-      <div style="font-size:7.5pt;color:#475569;">Reverte nos 14 min seguintes</div>
+      <div class="kpi-label">Assertividade M5 Parcial</div>
+      <div class="kpi-num" style="color:#16a34a;">83,6% Win Rate</div>
+      <div style="font-size:7.3pt;color:#475569;">+303,4 pts acumulados</div>
     </div>
     <div class="card">
-      <div class="kpi-label">Amplitude Média OR15</div>
-      <div class="kpi-num">21,19 pts</div>
-      <div style="font-size:7.5pt;color:#475569;">50% = 10,6 pts | 25% = 5,3 pts</div>
+      <div class="kpi-label">Amplitudes Médias</div>
+      <div class="kpi-num">OR5: 14,4p | OR15: 20,9p</div>
+      <div style="font-size:7.3pt;color:#475569;">OR5 = 68,7% do range de 15m</div>
     </div>
   </div>
 
   <div class="section-header">
-    <span>1. O ES (S&amp;P 500) E A PROPORÇÃO EM RELAÇÃO AO NASDAQ (NQ)</span>
-    <span class="tag">FUNDAMENTO DO ATIVO</span>
+    <span>1. O S&amp;P 500 FUTURO (ES / MES) E SUA DINÂMICA MEAN-REVERTING</span>
+    <span class="tag">FUNDAMENTO TÉCNICO</span>
   </div>
 
   <div class="grid-2">
     <div class="card-white">
-      <h3>Características Técnicas e Financeiras do ES e MES</h3>
+      <h3>Características Técnicas e Financeiras do ES / MES</h3>
+      <p style="margin-bottom:2px;">O contrato futuro do S&amp;P 500 possui liquidez institucional profunda e menor amplitude que o Nasdaq:</p>
       <ul>
-        <li><strong>Tamanho do Tick:</strong> <code>0,25 pontos</code> (4 ticks = 1 ponto completo).</li>
-        <li><strong>Financeiro MES (Micro):</strong> Cada ponto vale <strong>$5,00</strong> ($1,25 por tick).</li>
-        <li><strong>Financeiro ES (Mini):</strong> Cada ponto vale <strong>$50,00</strong> ($12,50 por tick).</li>
-        <li><strong>Proporção Volatilidade NQ / ES:</strong> O NQ oscila cerca de <strong>6,9x a 7,2x mais pontos</strong> que o ES. Logo, <code>140 pts no NQ &asymp; 20 pts no ES</code>.</li>
+        <li><strong>ES (Standard):</strong> <code>1 ponto = US$ 50,00</code> | <code>1 tick (0,25) = US$ 12,50</code>.</li>
+        <li><strong>MES (Micro):</strong> <code>1 ponto = US$ 5,00</code> | <code>1 tick (0,25) = US$ 1,25</code> (ideal para mesas de $25k a $50k).</li>
+        <li><strong>Leitura de Força:</strong> A Força Final da tabela <code>nasdaq_force</code> tem peso direto de 15% do S&amp;P 500 + 35% das 7 Techs, funcionando perfeitamente como termômetro de apetite ao risco.</li>
       </ul>
-      <div class="formula-box">
-        Força Final = 35% NQ + 15% ES + 35% (7 Techs) + 15% VIX_Invertido
-      </div>
     </div>
     <div class="card-amber">
-      <h3>Por que o ES é mais estável e tem maior taxa de acerto?</h3>
-      <p style="margin-bottom:4px;">Enquanto o NQ tem forte concentração em tecnologia, o <strong>S&amp;P 500 (ES)</strong> representa as 500 maiores empresas de todos os setores (bancos, saúde, energia, consumo, tech). Isso gera:</p>
+      <h3>⚠️ Regra de Ouro: Sincronização de Velas no NinjaTrader (Bar Close vs. Broker Time)</h3>
       <ul>
-        <li><strong>Menos violinadas e falso rompimento:</strong> Na OR15, a taxa de acerto da Reversão no ES sobe para <strong>74,2%</strong> (contra 66,7% no NQ).</li>
-        <li><strong>Velas mais limpas:</strong> Range médio de 1m na sessão cash é de <strong>3,24 pontos</strong> (~13 ticks).</li>
+        <li><strong>A Vela das 10:30:00 é PRÉ-MERCADO:</strong> No NinjaTrader 8, a barra carimbada como <code>10:30:00</code> iniciou às <code>10:29:01</code> e fechou às <code>10:30:00</code>. Portanto, ela <u>pertence ao pré-mercado</u>!</li>
+        <li><strong>Entrada Real do T0 no 1º Segundo (10:30:01 / 11:30:01):</strong> O pregão oficial de NY (RTH) inicia exatamente no segundo <code>10:30:01 BRT</code> (ou <code>11:30:01 BRT</code> no inverno). O robô monitora o relógio da corretora e dispara a mercado no segundo <code>:01</code>!</li>
+        <li><strong>Confirmação M5 e OR5 (10:35:01 / 11:35:01):</strong> Os primeiros 5 minutos fecham na barra das <code>10:35:00</code>. O M5 e o Breakout da OR5 disparam no segundo <code>:01</code> seguinte!</li>
       </ul>
     </div>
   </div>
 
   <div class="section-header">
-    <span>2. CRONOLOGIA OFICIAL DE HORÁRIOS (FUSO BRASÍLIA — BRT)</span>
-    <span class="tag">AJUSTE AUTOMÁTICO NO ROBÔ</span>
+    <span>2. CRONOGRAMA DE HORÁRIOS SAZONAIS NO ES (FUSO BRASÍLIA — BRT)</span>
+    <span class="tag">AUTO DST INTEGRADO</span>
   </div>
 
   <table>
     <thead>
       <tr>
-        <th>Regime de Horário (EUA)</th>
-        <th>Sessão Asiática (Noite Anterior)</th>
+        <th>Regime Sazonal dos EUA</th>
+        <th>Sessão Ásia (Noite)</th>
         <th>Pré-Mercado (T-15m)</th>
-        <th>ETAPA 1: Abertura NY (T0)</th>
-        <th>ETAPA 2: Confirmação M5</th>
-        <th>ETAPAS 3 e 4: Caixa OR15 (15 min)</th>
+        <th>Abertura T0 (1º Seg)</th>
+        <th>Fechamento M5 &amp; OR5</th>
+        <th>Fechamento OR15</th>
       </tr>
     </thead>
     <tbody>
       <tr class="highlight">
-        <td><strong>Horário de Inverno EUA (EST)</strong><br/><span style="font-size:7.4pt;color:#475569;">Novembro a Março</span></td>
-        <td><strong>20:00 BRT</strong> (18:00 ET)</td>
-        <td><strong>11:15 BRT</strong> (09:15 ET)</td>
-        <td><strong>11:30:00 BRT</strong> (09:30 ET)</td>
-        <td><strong>11:35:00 BRT</strong> (09:35 ET)</td>
-        <td><strong>11:45 às 13:30 BRT</strong> (09:45 às 11:30 ET)</td>
+        <td><strong>Horário de Inverno (EST / UTC-5)</strong><br/><span style="font-size:7pt;color:#1e3a8a;">1º Dom. Novembro até 2º Dom. Março</span></td>
+        <td><strong>20:00 BRT</strong><br/>(18:00 ET)</td>
+        <td><strong>11:15 BRT</strong><br/>(09:15 ET)</td>
+        <td><strong>11:30:01 BRT</strong><br/>(09:30:01 ET)</td>
+        <td><strong>11:35:01 BRT</strong><br/>(09:35:01 ET)</td>
+        <td><strong>11:45:01 às 13:30 BRT</strong><br/>(09:45 às 11:30 ET)</td>
       </tr>
       <tr>
-        <td><strong>Horário de Verão EUA (EDT)</strong><br/><span style="font-size:7.4pt;color:#475569;">Março a Novembro</span></td>
-        <td><strong>19:00 BRT</strong> (18:00 ET)</td>
-        <td><strong>10:15 BRT</strong> (09:15 ET)</td>
-        <td><strong>10:30:00 BRT</strong> (09:30 ET)</td>
-        <td><strong>10:35:00 BRT</strong> (09:35 ET)</td>
-        <td><strong>10:45 às 12:30 BRT</strong> (09:45 às 11:30 ET)</td>
+        <td><strong>Horário de Verão (EDT / UTC-4)</strong><br/><span style="font-size:7pt;color:#475569;">2º Dom. Março até 1º Dom. Novembro</span></td>
+        <td><strong>19:00 BRT</strong><br/>(18:00 ET)</td>
+        <td><strong>10:15 BRT</strong><br/>(09:15 ET)</td>
+        <td><strong>10:30:01 BRT</strong><br/>(09:30:01 ET)</td>
+        <td><strong>10:35:01 BRT</strong><br/>(09:35:01 ET)</td>
+        <td><strong>10:45:01 às 12:30 BRT</strong><br/>(09:45 às 11:30 ET)</td>
       </tr>
     </tbody>
   </table>
 
   <div class="section-header">
-    <span>3. MAPA CRONOLÓGICO NO ES (AS 4 OPORTUNIDADES DIÁRIAS)</span>
-    <span class="tag">FLUXO DE DECISÃO</span>
+    <span>3. MAPA CRONOLÓGICO DO PREGÃO NO ES / MES</span>
+    <span class="tag">FLUXOGRAMA EXECUTIVO</span>
   </div>
 
-  <div class="card-white" style="padding:8px;text-align:center;">
-    <svg width="100%" height="135" viewBox="0 0 820 135" xmlns="http://www.w3.org/2000/svg">
-      <line x1="30" y1="55" x2="790" y2="55" stroke="#94a3b8" stroke-width="4" />
+  <div class="card-white" style="padding:6px;text-align:center;">
+    <svg width="100%" height="130" viewBox="0 0 820 130" xmlns="http://www.w3.org/2000/svg">
+      <line x1="25" y1="50" x2="795" y2="50" stroke="#94a3b8" stroke-width="3" />
       
-      <!-- Ponto 1: Asia -->
-      <circle cx="70" cy="55" r="10" fill="#1e293b" />
-      <text x="70" y="24" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#0f172a">1. ÁSIA (Noite)</text>
-      <text x="70" y="38" text-anchor="middle" font-size="9" fill="#475569">20:00 / 19:00 BRT</text>
-      <rect x="15" y="70" width="110" height="48" rx="6" fill="#f1f5f9" stroke="#94a3b8" />
-      <text x="70" y="87" text-anchor="middle" font-size="8.8" font-weight="bold" fill="#1e293b">Força Ásia</text>
-      <text x="70" y="100" text-anchor="middle" font-size="8" fill="#475569">&ge; 52% C | &le; 48% V</text>
+      <circle cx="65" cy="50" r="9" fill="#1e293b" />
+      <text x="65" y="20" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#0f172a">1. ÁSIA (Noite)</text>
+      <text x="65" y="34" text-anchor="middle" font-size="8.5" fill="#475569">20:00 / 19:00 BRT</text>
+      <rect x="12" y="65" width="106" height="50" rx="4" fill="#f1f5f9" stroke="#94a3b8" />
+      <text x="65" y="80" text-anchor="middle" font-size="8" font-weight="bold" fill="#1e293b">Guarda Força Ásia</text>
+      <text x="65" y="93" text-anchor="middle" font-size="7.5" fill="#475569">Compra &ge; 52%</text>
+      <text x="65" y="105" text-anchor="middle" font-size="7.5" fill="#475569">Venda &le; 48%</text>
 
-      <!-- Ponto 2: T-15m -->
-      <circle cx="220" cy="55" r="10" fill="#1e293b" />
-      <text x="220" y="24" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#0f172a">2. PRÉ-OPEN (T-15m)</text>
-      <text x="220" y="38" text-anchor="middle" font-size="9" fill="#475569">11:15 / 10:15 BRT</text>
-      <rect x="155" y="70" width="130" height="48" rx="6" fill="#f1f5f9" stroke="#94a3b8" />
-      <text x="220" y="87" text-anchor="middle" font-size="8.8" font-weight="bold" fill="#1e293b">Compara c/ Ásia</text>
-      <text x="220" y="100" text-anchor="middle" font-size="8" fill="#16a34a">Alinhadas &rarr; Libera T0</text>
+      <circle cx="215" cy="50" r="9" fill="#1e293b" />
+      <text x="215" y="20" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#0f172a">2. PRÉ-OPEN (T-15m)</text>
+      <text x="215" y="34" text-anchor="middle" font-size="8.5" fill="#475569">11:15 / 10:15 BRT</text>
+      <rect x="155" y="65" width="120" height="50" rx="4" fill="#f1f5f9" stroke="#94a3b8" />
+      <text x="215" y="80" text-anchor="middle" font-size="8" font-weight="bold" fill="#1e293b">Compara c/ Ásia</text>
+      <text x="215" y="93" text-anchor="middle" font-size="7.5" fill="#16a34a">Alinhados? Libera T0</text>
+      <text x="215" y="105" text-anchor="middle" font-size="7.5" fill="#d97706">Divergentes? Espera M5</text>
 
-      <!-- Ponto 3: T0 -->
-      <circle cx="385" cy="55" r="12" fill="#2563eb" />
-      <text x="385" y="24" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#1d4ed8">3. ABERTURA (T0)</text>
-      <text x="385" y="38" text-anchor="middle" font-size="9" fill="#2563eb">11:30 / 10:30 BRT</text>
-      <rect x="315" y="70" width="140" height="48" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5" />
-      <text x="385" y="86" text-anchor="middle" font-size="8.8" font-weight="bold" fill="#1e3a8a">[FLAG 1] 1º Segundo</text>
-      <text x="385" y="99" text-anchor="middle" font-size="8" fill="#1e293b">Scalp 7x7 | Swing 22x14 pts</text>
+      <circle cx="375" cy="50" r="11" fill="#2563eb" />
+      <text x="375" y="20" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#1d4ed8">3. ABERTURA (T0)</text>
+      <text x="375" y="34" text-anchor="middle" font-size="8.5" fill="#2563eb">11:30:01 / 10:30:01</text>
+      <rect x="310" y="65" width="130" height="50" rx="4" fill="#eff6ff" stroke="#2563eb" stroke-width="1.3" />
+      <text x="375" y="80" text-anchor="middle" font-size="8" font-weight="bold" fill="#1e3a8a">[FLAG 1] Scalp Parcial</text>
+      <text x="375" y="93" text-anchor="middle" font-size="7.5" fill="#1e293b">SL 7 / P1 4 / P2 8 pts</text>
+      <text x="375" y="105" text-anchor="middle" font-size="7.5" fill="#16a34a">73,7% Win Rate</text>
 
-      <!-- Ponto 4: T+5m -->
-      <circle cx="555" cy="55" r="12" fill="#0d9488" />
-      <text x="555" y="24" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#0f766e">4. CONFIRMAÇÃO M5</text>
-      <text x="555" y="38" text-anchor="middle" font-size="9" fill="#0d9488">11:35 / 10:35 BRT</text>
-      <rect x="480" y="70" width="150" height="48" rx="6" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5" />
-      <text x="555" y="86" text-anchor="middle" font-size="8.8" font-weight="bold" fill="#115e59">[FLAG 2] Pós-Armadilha</text>
-      <text x="555" y="99" text-anchor="middle" font-size="8" fill="#16a34a">Força &ge; 55% + Tech &ge; 52%</text>
+      <circle cx="545" cy="50" r="11" fill="#0d9488" />
+      <text x="545" y="20" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#0f766e">4. M5 &amp; CAIXA OR5</text>
+      <text x="545" y="34" text-anchor="middle" font-size="8.5" fill="#0d9488">11:35:01 / 10:35:01</text>
+      <rect x="475" y="65" width="140" height="50" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.3" />
+      <text x="545" y="80" text-anchor="middle" font-size="8" font-weight="bold" fill="#115e59">[FLAG 2] M5: 83,6% Win</text>
+      <text x="545" y="93" text-anchor="middle" font-size="7.5" fill="#1e293b">[FLAG OR5] Brk Reteste</text>
+      <text x="545" y="105" text-anchor="middle" font-size="7.5" fill="#16a34a">81,2% Win (+273p)</text>
 
-      <!-- Ponto 5: T+15m OR15 -->
-      <circle cx="730" cy="55" r="12" fill="#16a34a" />
-      <text x="730" y="24" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#15803d">5. CAIXA OR15</text>
-      <text x="730" y="38" text-anchor="middle" font-size="9" fill="#16a34a">11:45 / 10:45 BRT</text>
-      <rect x="650" y="70" width="160" height="48" rx="6" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5" />
-      <text x="730" y="86" text-anchor="middle" font-size="8.8" font-weight="bold" fill="#14532d">[FLAGS 3 &amp; 4] Fade / Brk</text>
-      <text x="730" y="99" text-anchor="middle" font-size="8" fill="#16a34a">74,2% Win na Reversão</text>
+      <circle cx="725" cy="50" r="11" fill="#16a34a" />
+      <text x="725" y="20" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#15803d">5. CAIXA OR15 (15m)</text>
+      <text x="725" y="34" text-anchor="middle" font-size="8.5" fill="#16a34a">11:45:01 às 13:30 BRT</text>
+      <rect x="645" y="65" width="160" height="50" rx="4" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.3" />
+      <text x="725" y="80" text-anchor="middle" font-size="8" font-weight="bold" fill="#14532d">[FLAG 3] Fade na Borda</text>
+      <text x="725" y="93" text-anchor="middle" font-size="7.5" fill="#1e293b">74,2% Win Rate ⭐</text>
+      <text x="725" y="105" text-anchor="middle" font-size="7.5" fill="#16a34a">Brk c/ Reteste: +210 pts</text>
     </svg>
   </div>
 
   <div class="footer-note">
-    <span>VortexWeb Quant Research • Playbook Operacional ES / MES (S&amp;P 500)</span>
+    <span>VortexWeb Quant Research • Playbook Operacional ES / MES</span>
     <span>Página 1 de 4</span>
   </div>
 </div>
 
 <!-- ==================== PÁGINA 2 ==================== -->
 <div class="page">
-  <div class="hero" style="padding:10px 14px;">
+  <div class="hero">
     <div>
-      <h1 style="font-size:13.5pt;">ETAPAS 1 E 2 — ABERTURA DO ES: ENTRADA T0 E CONFIRMAÇÃO M5</h1>
-      <p>Como operar no primeiro segundo da abertura ou aguardar a confirmação da 5ª vela no S&amp;P 500</p>
+      <h1>ETAPAS 1 E 2 — ABERTURA NO ES: T0 (10:30:01 / 11:30:01) E T5 (10:35:01 / 11:35:01)</h1>
+      <p>Entrada cirúrgica no segundo :01 e Desempenho com Parciais atinge até 83,6% de assertividade</p>
     </div>
     <div class="hero-badge">
       <strong>FLAGS 1 &amp; 2</strong><br/>
-      Abertura ES
+      Abertura ES / MES
     </div>
   </div>
 
   <div class="section-header">
-    <span>ETAPA 1 ([FLAG 1]): ENTRADA NO 1º SEGUNDO DA ABERTURA (T0 = 11:30:00 / 10:30:00 BRT)</span>
-    <span class="tag">61,6% ACERTO NO 1º MINUTO</span>
+    <span>ETAPA 1 ([FLAG 1]): ENTRADA NO 1º SEGUNDO DA ABERTURA (T0 = 10:30:01 / 11:30:01 BRT)</span>
+    <span class="tag">73,7% WIN RATE COM PARCIAIS</span>
   </div>
 
   <div class="grid-2">
     <div class="card-blue">
-      <h3>Critério de Disparo Pré-Abertura (Às 11:15 / 10:15 BRT)</h3>
-      <p style="margin-bottom:4px;">No ES, a entrada no 1º segundo da abertura é validada exclusivamente quando há <strong>consenso direcional</strong> entre a sessão noturna e o pré-mercado:</p>
+      <h3>Critério de Disparo Pré-Abertura (11:15 / 10:15 BRT)</h3>
+      <p style="margin-bottom:2px;">No ES, o modelo clássico de <strong>Ásia + Pré-Mercado (Config 1)</strong> é soberano e gerou <strong>+109,0 a +145,9 pts no ano</strong>:</p>
       <ul>
-        <li><span class="badge-buy">COMPRA NO T0</span><br/>
-          <strong>Força Ásia &ge; 52%</strong> <u>E</u> <strong>Força T-15m &ge; 52%</strong>.</li>
-        <li style="margin-top:3px;"><span class="badge-sell">VENDA NO T0</span><br/>
-          <strong>Força Ásia &le; 48%</strong> <u>E</u> <strong>Força T-15m &le; 48%</strong>.</li>
-        <li style="margin-top:3px;"><span class="badge-neutral">AGUARDAR M5</span><br/>
-          Se houver divergência entre Ásia e T-15m, <strong>fique flat</strong> e espere o M5!</li>
+        <li><span class="badge-buy">COMPRA NO T0 (10:30:01):</span> Se <strong>Força Ásia &ge; 52%</strong> <u>E</u> <strong>Força T-15m &ge; 52%</strong>.</li>
+        <li><span class="badge-sell">VENDA NO T0 (10:30:01):</span> Se <strong>Força Ásia &le; 48%</strong> <u>E</u> <strong>Força T-15m &le; 48%</strong>.</li>
+        <li><span class="badge-neutral">FICAR DE FORA:</span> Se houver divergência entre as sessões. Aguarde o M5!</li>
       </ul>
     </div>
 
     <div class="card-white">
-      <h3>Desempenho no ES em 365 Dias (99 Pregões)</h3>
+      <h3>Comparativo de Gestão T0 no ES (365 Dias / 99 Pregões)</h3>
       <table>
         <thead>
           <tr>
-            <th>Modo no ES</th>
-            <th>Alvo (TP)</th>
+            <th>Modo de Gestão T0</th>
             <th>Stop (SL)</th>
-            <th>Resultado (1 Ano)</th>
+            <th>Alvo / Parciais</th>
+            <th>Win Rate</th>
+            <th>Saldo Anual</th>
           </tr>
         </thead>
         <tbody>
-          <tr class="highlight">
-            <td><strong>Scalp 5m ES</strong><br/>(Recomendado)</td>
-            <td><strong>7,0 pts</strong><br/>(28 ticks)</td>
-            <td><strong>7,0 pts</strong><br/>(28 ticks)</td>
-            <td><strong>59,6% Win Rate</strong><br/>+1,36 pts/trade (<strong>+135,0 pts</strong>)<br/>+$6.750 ES / +$675 MES</td>
+          <tr>
+            <td><strong>Swing 60m</strong></td>
+            <td>14 pts</td>
+            <td>TP 20 pts</td>
+            <td>50,5%</td>
+            <td><strong>+284,0 pts</strong></td>
           </tr>
           <tr>
-            <td><strong>Swing 60m ES</strong><br/>(Alvo Longo)</td>
-            <td><strong>22,0 pts</strong><br/>(88 ticks)</td>
-            <td><strong>14,0 pts</strong><br/>(56 ticks)</td>
-            <td><strong>44,4% Win</strong> (1,57:1)<br/>+1,72 pts/trade (<strong>+170,25 pts</strong>)<br/>+$8.512 ES / +$851 MES</td>
+            <td><strong>Scalper Entrada Única</strong></td>
+            <td>8 pts</td>
+            <td>TP 6 pts</td>
+            <td>66,7%</td>
+            <td><strong>+127,5 pts</strong></td>
+          </tr>
+          <tr class="highlight">
+            <td><strong>Scalper Saída Parcial ⭐</strong></td>
+            <td>7 pts</td>
+            <td><strong>P1: 4 pts / P2: 8 pts</strong><br/>(Stop &rarr; BE após P1)</td>
+            <td><strong>73,7%</strong></td>
+            <td><strong>+145,9 pts</strong></td>
           </tr>
         </tbody>
       </table>
-      <p style="font-size:7.8pt;color:#475569;">💡 <em>No ES, a vela do 1º minuto (T0 &rarr; T+1m) acertou a direção em <strong>61,6% dos pregões</strong> (média de +0,94 pts imediatos).</em></p>
     </div>
   </div>
 
   <div class="section-header">
-    <span>ETAPA 2 ([FLAG 2]): CONFIRMAÇÃO PÓS-ARMADILHA EM M5 (T+5m = 11:35:00 / 10:35:00 BRT)</span>
-    <span class="tag">+357,0 PONTOS NO ANO</span>
+    <span>ETAPA 2 ([FLAG 2]): CONFIRMAÇÃO M5 (T+5m = 10:35:01 / 11:35:01 BRT) — EFICIÊNCIA MÁXIMA</span>
+    <span class="tag">83,6% WIN RATE HISTÓRICO</span>
   </div>
 
   <div class="grid-2">
     <div class="card-green">
-      <h3>Por que aguardar 5 minutos no S&amp;P 500?</h3>
-      <p style="margin-bottom:4px;">No ES, <strong>54,9% das primeiras velas de 1 minuto são armadilhas</strong> (o preço testa uma direção e inverte logo em seguida). Aguardar 5 minutos permite que todas as 500 ações do índice abram o pregão à vista em Nova York:</p>
+      <h3>A Força das 7 Techs no S&amp;P 500</h3>
+      <p style="margin-bottom:2px;">As 7 maiores empresas representam mais de 30% da capitalização do S&amp;P 500. A 5ª vela fecha às <code>10:35:00</code> e a confirmação entra às <code>10:35:01</code>:</p>
       <ul>
-        <li><span class="badge-buy">COMPRA EM T+5m</span><br/>
-          Quando <strong>Força Final &ge; 55%</strong> <u>E</u> <strong>Média 7 Techs &ge; 52%</strong>.</li>
-        <li style="margin-top:3px;"><span class="badge-sell">VENDA EM T+5m</span><br/>
-          Quando <strong>Força Final &le; 45%</strong> <u>E</u> <strong>Média 7 Techs &le; 48%</strong>.</li>
+        <li><span class="badge-buy">COMPRA EM T+5m:</span> Força Final &ge; 55% E 7 Techs &ge; 52%.</li>
+        <li><span class="badge-sell">VENDA EM T+5m:</span> Força Final &le; 45% E 7 Techs &le; 48%.</li>
+        <li><strong>Sweet Spot de Entrada:</strong> Força &ge; 62% eleva o acerto do M5 para mais de 80%.</li>
       </ul>
     </div>
 
     <div class="card-white">
-      <h3>Gestão Operacional no ES (151 Pregões no Ano)</h3>
+      <h3>Comparativo de Gestão M5 no ES (151 Pregões no Ano)</h3>
       <table>
         <thead>
           <tr>
-            <th>Parâmetro no ES</th>
-            <th>Valor Recomendado (ES / MES)</th>
+            <th>Modo de Gestão M5</th>
+            <th>Stop (SL)</th>
+            <th>Alvo / Parciais</th>
+            <th>Win Rate</th>
+            <th>Saldo Anual</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Horário de Avaliação</strong></td>
-            <td><code>11:35:00 BRT</code> (Inverno) / <code>10:35:00 BRT</code> (Verão)</td>
-          </tr>
-          <tr class="highlight">
-            <td><strong>Take Profit (Alvo)</strong></td>
-            <td><strong>16,0 pontos</strong> (64 ticks)</td>
-          </tr>
-          <tr>
-            <td><strong>Stop Loss (Proteção)</strong></td>
-            <td><strong>11,0 pontos</strong> (44 ticks)</td>
+            <td><strong>Modo Tendência 60m</strong></td>
+            <td>12 pts</td>
+            <td>TP 16 pts</td>
+            <td>59,6%</td>
+            <td><strong>+302,5 pts</strong></td>
           </tr>
           <tr>
-            <td><strong>Saída por Tempo Máximo</strong></td>
-            <td>Encerra em <strong>T+60m</strong> (55 min após a entrada)</td>
+            <td><strong>Scalper Entrada Única</strong></td>
+            <td>10 pts</td>
+            <td>TP 8 pts</td>
+            <td>67,2%</td>
+            <td><strong>+246,0 pts</strong></td>
           </tr>
           <tr class="highlight">
-            <td><strong>Resultado em 365 Dias</strong></td>
-            <td><strong>54,3% Win • +2,36 pts/trade • +357,00 pts</strong><br/>(+$17.850 no ES / +$1.785 no MES)</td>
+            <td><strong>Scalper Parcial (Conservador) ⭐</strong></td>
+            <td>11 pts</td>
+            <td><strong>P1: 5 pts / P2: 14 pts</strong></td>
+            <td><strong>83,6%</strong></td>
+            <td><strong>+303,4 pts</strong></td>
+          </tr>
+          <tr class="highlight-blue">
+            <td><strong>Scalper Parcial (Moderado) ⭐</strong></td>
+            <td>14 pts</td>
+            <td><strong>P1: 7 pts / P2: 22 pts</strong></td>
+            <td><strong>80,3%</strong></td>
+            <td><strong>+390,8 pts</strong></td>
           </tr>
         </tbody>
       </table>
     </div>
   </div>
 
-  <!-- Comparativo visual ES -->
-  <div class="card" style="margin-top:4px;">
-    <h3>Fluxo de Decisão da Abertura do ES</h3>
-    <svg width="100%" height="88" viewBox="0 0 800 88" xmlns="http://www.w3.org/2000/svg">
-      <rect x="10" y="10" width="230" height="68" rx="7" fill="#1e293b" />
-      <text x="125" y="32" text-anchor="middle" font-size="10" font-weight="bold" fill="#38bdf8">11:15 / 10:15 BRT (Pré-Open ES)</text>
-      <text x="125" y="48" text-anchor="middle" font-size="9" fill="#ffffff">Verificar Força Ásia e T-15m</text>
-      <text x="125" y="64" text-anchor="middle" font-size="8.5" fill="#cbd5e1">Ambas &ge; 52% ou &le; 48%?</text>
+  <div class="card" style="margin-top:2px;">
+    <h3>Fluxo de Decisão Visual da Abertura do ES</h3>
+    <svg width="100%" height="82" viewBox="0 0 800 82" xmlns="http://www.w3.org/2000/svg">
+      <rect x="10" y="8" width="225" height="66" rx="6" fill="#1e293b" />
+      <text x="122" y="28" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#38bdf8">11:15 BRT / 10:15 BRT</text>
+      <text x="122" y="44" text-anchor="middle" font-size="8.3" fill="#ffffff">Ásia (20h) + Pré-Mercado (11:15)</text>
+      <text x="122" y="60" text-anchor="middle" font-size="7.9" fill="#cbd5e1">Ambas &ge; 52% ou &le; 48%?</text>
 
-      <line x1="240" y1="28" x2="310" y2="28" stroke="#16a34a" stroke-width="2.5" />
-      <text x="275" y="21" text-anchor="middle" font-size="8.8" font-weight="bold" fill="#16a34a">SIM (39%)</text>
-      <rect x="310" y="6" width="475" height="36" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5" />
-      <text x="547" y="21" text-anchor="middle" font-size="9" font-weight="bold" fill="#14532d">ENTRA NO 1º SEGUNDO DO ES (T0 = 11:30:00 / 10:30:00 BRT)</text>
-      <text x="547" y="34" text-anchor="middle" font-size="8" fill="#166534">Scalp 7x7 pts (59,6% Win, +135 pts) • Swing 22x14 pts (+170 pts) • 61,6% na 1ª vela</text>
+      <line x1="235" y1="25" x2="305" y2="25" stroke="#16a34a" stroke-width="2.5" />
+      <text x="270" y="19" text-anchor="middle" font-size="8" font-weight="bold" fill="#16a34a">SIM (39% dias)</text>
+      <rect x="305" y="4" width="480" height="34" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3" />
+      <text x="545" y="19" text-anchor="middle" font-size="8.8" font-weight="bold" fill="#14532d">DISPARA NO 1º SEGUNDO DA ABERTURA (T0 = 11:30:01 / 10:30:01 BRT)</text>
+      <text x="545" y="31" text-anchor="middle" font-size="7.8" fill="#166534">Scalper Parcial: 73,7% Win • SL 7 pts / P1 4 pts / P2 8 pts • Saldo +145,9 pts</text>
 
-      <line x1="240" y1="60" x2="310" y2="60" stroke="#d97706" stroke-width="2.5" />
-      <text x="275" y="53" text-anchor="middle" font-size="8.8" font-weight="bold" fill="#d97706">NÃO (61%)</text>
-      <rect x="310" y="46" width="475" height="36" rx="6" fill="#fef3c7" stroke="#d97706" stroke-width="1.5" />
-      <text x="547" y="61" text-anchor="middle" font-size="9" font-weight="bold" fill="#92400e">AGUARDA 5 MINUTOS NO ES (T+5m = 11:35:00 / 10:35:00 BRT)</text>
-      <text x="547" y="74" text-anchor="middle" font-size="8" fill="#78350f">Entra se Força &ge; 55% + Techs &ge; 52% (ou &le; 45% / &le; 48%) • 54,3% Win (+357 pts)</text>
+      <line x1="235" y1="57" x2="305" y2="57" stroke="#d97706" stroke-width="2.5" />
+      <text x="270" y="51" text-anchor="middle" font-size="8" font-weight="bold" fill="#d97706">NÃO (61% dias)</text>
+      <rect x="305" y="42" width="480" height="34" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3" />
+      <text x="545" y="57" text-anchor="middle" font-size="8.8" font-weight="bold" fill="#92400e">AGUARDA 5 MINUTOS — CONFIRMAÇÃO M5 (11:35:01 / 10:35:01 BRT)</text>
+      <text x="545" y="69" text-anchor="middle" font-size="7.8" fill="#78350f">Scalper Parcial: 83,6% Win • SL 11 pts / P1 5 pts / P2 14 pts • Saldo +303,4 pts</text>
     </svg>
   </div>
 
   <div class="footer-note">
-    <span>VortexWeb Quant Research • Playbook Operacional ES / MES (S&amp;P 500)</span>
+    <span>VortexWeb Quant Research • Playbook Operacional ES / MES</span>
     <span>Página 2 de 4</span>
   </div>
 </div>
 
 <!-- ==================== PÁGINA 3 ==================== -->
 <div class="page">
-  <div class="hero" style="padding:10px 14px;">
+  <div class="hero">
     <div>
-      <h1 style="font-size:13.5pt;">ETAPAS 3 E 4 — A CAIXA DOS 15 MINUTOS (OR15) NO ES COM GESTÃO 50% E 25%</h1>
-      <p>Reversão (Fade) de Alta Assertividade (74,2%) e Rompimento (Breakout) no S&amp;P 500 Futuro</p>
+      <h1>ESTUDO QUANTITATIVO NO ES: OR5 (5 MINUTOS) &amp; OR15 (15 MINUTOS)</h1>
+      <p>Breakout com Reteste na OR5 atinge 81,2% Win; Fade na Borda da OR15 é a Estratégia Rainha do S&amp;P 500 (74,2% Win)</p>
     </div>
     <div class="hero-badge">
-      <strong>FLAGS 3 &amp; 4</strong><br/>
-      Pós-15 Minutos ES
+      <strong>OR5 vs. OR15 ES</strong><br/>
+      Reteste &amp; Fade
     </div>
   </div>
 
   <div class="section-header">
-    <span>ANATOMIA DA CAIXA OR15 NO ES: 50% (OR_Mid) E 25% (50% DA METADE)</span>
-    <span class="tag">MÉTRICAS DO ES</span>
+    <span>1. A NOVA ESTRATÉGIA OR5 NO ES (CAIXA DOS 5 MINUTOS: PÓS-10:35:01 / 11:35:01 BRT)</span>
+    <span class="tag">81,2% WIN RATE COM RETESTE</span>
   </div>
 
   <div class="grid-2">
     <div class="card-white">
-      <h3>Parâmetros Médios da OR15 no ES (365 Dias)</h3>
+      <h3>Anatomia e Regras da Caixa OR5 no ES / MES</h3>
+      <p style="margin-bottom:2px;">A OR5 no S&amp;P 500 reflete as 5 primeiras barras do pregão (10:31 a 10:35 BRT):</p>
       <ul>
-        <li><strong>Amplitude Média Total (<code>OR_Range</code>):</strong> <strong><code>21,2 pontos</code></strong> (~85 ticks).</li>
-        <li><strong>50% da Caixa (<code>OR_Mid</code> Centro):</strong> <code>0,50 &times; 21,2 =</code> <strong><code>10,6 pontos</code></strong>.</li>
-        <li><strong>50% da Metade (<code>q25 = 25% da Caixa</code>):</strong> <code>0,25 &times; 21,2 =</code> <strong><code>5,3 pontos</code></strong> (~21 ticks).</li>
+        <li><strong>Amplitude Média da OR5:</strong> <strong>14,4 pontos</strong> (já representa <strong>68,7%</strong> de toda a amplitude dos 15 minutos!).</li>
+        <li><span class="badge-buy">BREAKOUT COM RETESTE (PULLBACK) ⭐:</span> Quando o candle de 1m fecha fora da OR5 com Força &ge; 55% e o preço faz reteste tocando a borda, a entrada no reteste alcança <strong>81,2% de Win Rate</strong> com Parcial +25%/+50% (+273,2 pts) e até <strong>+429,9 pts</strong> com alvo 100%!</li>
+        <li><span class="badge-sell">⚠️ NUNCA OPERAR FADE NA OR5:</span> O estudo comprovou que operar reversão na borda da OR5 no ES gera prejuízo (-150,2 pts). A reversão na borda (Fade) só deve ser operada na OR15!</li>
       </ul>
-      <p style="margin-top:4px;"><em>Exemplo Prático:</em> Se nos primeiros 15 min a Máxima foi <code>5.920,00</code> e a Mínima <code>5.900,00</code> (Range = 20 pts):<br/>
-      &bull; <strong>OR_Mid (50%):</strong> <code>5.910,00</code> (10 pts de alvo no centro).<br/>
-      &bull; <strong>25% da OR:</strong> <code>5,00 pts</code> (Alvo da parcial e Stop Loss).</p>
-      <div class="formula-box" style="margin-top:4px;">
-        Stop no ES = 25% da OR &nbsp;|&nbsp; Parcial = 25% da OR &nbsp;|&nbsp; Alvo Final = 50% da OR (Centro)
-      </div>
     </div>
 
-    <!-- Diagrama SVG da Caixa OR15 no ES -->
-    <div class="card-white" style="text-align:center;padding:5px;">
-      <svg width="100%" height="165" viewBox="0 0 380 165" xmlns="http://www.w3.org/2000/svg">
-        <line x1="25" y1="14" x2="355" y2="14" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="4,3" />
-        <text x="30" y="11" font-size="8.2" font-weight="bold" fill="#dc2626">Stop Venda Fade (+25% OR fora) = 5.925,00 (+5,0 pts)</text>
-
-        <rect x="25" y="34" width="330" height="96" fill="#f8fafc" stroke="#64748b" stroke-width="1" />
-
-        <line x1="25" y1="34" x2="355" y2="34" stroke="#dc2626" stroke-width="2.5" />
-        <text x="30" y="30" font-size="8.8" font-weight="bold" fill="#dc2626">ORH_15 (Máxima) = 5.920,00 (Venda Fade / Compra Breakout)</text>
-
-        <line x1="25" y1="58" x2="355" y2="58" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="2,2" />
-        <text x="30" y="55" font-size="8" font-weight="bold" fill="#2563eb">25% OR (50% Metade) = 5.915,00 &rarr; Parcial 50% + Breakeven</text>
-
-        <line x1="25" y1="82" x2="355" y2="82" stroke="#d97706" stroke-width="2.2" stroke-dasharray="5,3" />
-        <text x="30" y="78" font-size="8.8" font-weight="bold" fill="#b45309">50% OR (OR_Mid Centro) = 5.910,00 &rarr; ALVO FINAL FADE (10 pts)</text>
-
-        <line x1="25" y1="106" x2="355" y2="106" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="2,2" />
-        <text x="30" y="103" font-size="8" font-weight="bold" fill="#2563eb">25% OR (50% Metade) = 5.905,00 &rarr; Parcial 50% + Breakeven</text>
-
-        <line x1="25" y1="130" x2="355" y2="130" stroke="#16a34a" stroke-width="2.5" />
-        <text x="30" y="142" font-size="8.8" font-weight="bold" fill="#16a34a">ORL_15 (Mínima) = 5.900,00 (Compra Fade / Venda Breakout)</text>
-
-        <line x1="25" y1="154" x2="355" y2="154" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="4,3" />
-        <text x="30" y="163" font-size="8.2" font-weight="bold" fill="#dc2626">Stop Compra Fade (-25% OR fora) = 5.895,00 (-5,0 pts)</text>
-      </svg>
+    <div class="card-white">
+      <h3>Desempenho da OR5 no ES em 365 Dias (Base Databento)</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Configuração na Caixa OR5</th>
+            <th>Trades</th>
+            <th>Win Rate</th>
+            <th>Média/Trade</th>
+            <th>Saldo Anual</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="highlight">
+            <td><strong>Breakout Reteste (Parcial 25% / 50%) ⭐</strong></td>
+            <td>170 tr</td>
+            <td><strong>81,2%</strong></td>
+            <td><strong>+1,61 pts</strong></td>
+            <td><strong>+273,2 pts</strong></td>
+          </tr>
+          <tr class="highlight-blue">
+            <td><strong>Breakout Reteste (+100% Expansão) ⭐</strong></td>
+            <td>170 tr</td>
+            <td><strong>48,8%</strong></td>
+            <td><strong>+2,53 pts</strong></td>
+            <td><strong>+429,9 pts</strong></td>
+          </tr>
+          <tr>
+            <td>Breakout Seco no Fechamento (+50% Exp)</td>
+            <td>245 tr</td>
+            <td>51,4%</td>
+            <td>+0,16 pts</td>
+            <td>+38,2 pts (Fraco)</td>
+          </tr>
+          <tr style="background:#fee2e2;">
+            <td>Fade Reversão na Borda da OR5 (Centro 50%)</td>
+            <td>250 tr</td>
+            <td>46,4%</td>
+            <td>-0,60 pts</td>
+            <td><strong>-150,2 pts (Não Recomendado)</strong></td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </div>
 
   <div class="section-header">
-    <span>ETAPA 3 ([FLAG 3]): REVERSÃO / FADE NO 1º TOQUE DA OR15 (74,2% DE ACERTO NO ES)</span>
-    <span class="tag">+266 A +398 PONTOS NO ANO</span>
-  </div>
-
-  <div class="card-green" style="margin-bottom:6px;">
-    <h3>Regra de Reversão no ES (Assertividade Excepcional de 74,2%)</h3>
-    <p>No 1º toque na máxima (<code>ORH_15</code>) ou mínima (<code>ORL_15</code>): se o candle de 1m <strong>fechar de volta dentro da caixa (pavio de rejeição)</strong> <u>OU</u> a <strong>Força a favor for &lt; 55%</strong>, opere a volta para o centro da caixa (<code>OR_Mid</code>)!</p>
-  </div>
-
-  <table>
-    <thead>
-      <tr>
-        <th>Modelo de Gestão no ES</th>
-        <th>Todas as Caixas c/ Rejeição (132 trades/ano)</th>
-        <th>Caixas Amplas &ge; 20 pts (53 trades/ano)</th>
-        <th>Financeiro Anual (1 Contrato ES / MES)</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr class="highlight">
-        <td><strong>1. Parcial 25% + BE + Final 50% (Stop 25% OR)</strong></td>
-        <td><strong>74,2% Win Rate</strong> • +2,02 pts/trade</td>
-        <td><strong>69,8% Win Rate</strong> • +2,16 pts/trade</td>
-        <td><strong>+$13.304 ES</strong> / +$1.330 MES (<strong>+266,09 pts</strong>)</td>
-      </tr>
-      <tr>
-        <td><strong>2. Alvo 50% OR (Centro) | Stop 50% OR (1:1)</strong></td>
-        <td><strong>67,4% Win Rate</strong> • +3,02 pts/trade</td>
-        <td><strong>58,5% Win Rate</strong> • +2,44 pts/trade</td>
-        <td><strong>+$19.900 ES</strong> / +$1.990 MES (<strong>+398,00 pts</strong>)</td>
-      </tr>
-      <tr>
-        <td><strong>3. Alvo 25% OR (Curto) | Stop 25% OR (1:1)</strong></td>
-        <td><strong>74,2% Win Rate</strong> • +2,30 pts/trade</td>
-        <td><strong>69,8% Win Rate</strong> • +2,69 pts/trade</td>
-        <td><strong>+$15.178 ES</strong> / +$1.517 MES (<strong>+303,56 pts</strong>)</td>
-      </tr>
-      <tr>
-        <td><strong>4. Parcial 25% + BE + Final 50% (Stop 50% OR)</strong></td>
-        <td><strong>82,6% Win Rate</strong> • +1,71 pts/trade</td>
-        <td><strong>77,4% Win Rate</strong> • +1,44 pts/trade</td>
-        <td><strong>+$11.312 ES</strong> / +$1.131 MES (<strong>+226,25 pts</strong>)</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <div class="section-header">
-    <span>ETAPA 4 ([FLAG 4]): ROMPIMENTO / BREAKOUT DA OR15 NO ES (63,2% A 83,0% DE ACERTO)</span>
-    <span class="tag">+202 PONTOS NO ANO</span>
+    <span>2. A CAIXA DOS 15 MINUTOS (OR15: PÓS-10:45:01 / 11:45:01 BRT) — O REINADO DO FADE</span>
+    <span class="tag">74,2% WIN RATE</span>
   </div>
 
   <div class="grid-2">
-    <div class="card-blue">
-      <h3>Breakout de Caixa Comprimida (<code>OR_Range &le; 20 pts</code>)</h3>
-      <p style="margin-bottom:3px;">Quando a caixa foi estreita (<code>&le; 20 pts</code>) e o candle fecha o corpo fora da OR15 com <strong>Força a favor &ge; 55%</strong> (106 trades no ano):</p>
-      <ul>
-        <li><strong>Alvo Expansão +50% OR | Stop 50% OR (no OR_Mid):</strong><br/>
-          <strong>63,2% Win</strong> • <code>+1,91 pts/trade</code> • <strong>+202,12 pts</strong> (+$10.106 ES).</li>
-        <li><strong>Parcial +25% OR + BE + Final +50% OR | Stop 50% OR:</strong><br/>
-          <strong>83,0% Win</strong> • <code>+1,72 pts/trade</code> • <strong>+182,81 pts</strong> (+$9.140 ES).</li>
-      </ul>
+    <!-- SVG da Caixa OR15 no ES -->
+    <div class="card-white" style="text-align:center;padding:4px;">
+      <svg width="100%" height="155" viewBox="0 0 380 155" xmlns="http://www.w3.org/2000/svg">
+        <line x1="20" y1="10" x2="360" y2="10" stroke="#dc2626" stroke-width="1.2" stroke-dasharray="3,3" />
+        <text x="25" y="8" font-size="7.5" font-weight="bold" fill="#dc2626">Stop Loss Fade (+25% OR fora da caixa: ~6 pts)</text>
+
+        <rect x="20" y="28" width="340" height="92" fill="#f8fafc" stroke="#64748b" stroke-width="1" />
+
+        <line x1="20" y1="28" x2="360" y2="28" stroke="#dc2626" stroke-width="2.2" />
+        <text x="25" y="25" font-size="8.1" font-weight="bold" fill="#dc2626">ORH_15 (Máxima 15m) — Entrada Venda Fade ⭐</text>
+
+        <line x1="20" y1="51" x2="360" y2="51" stroke="#2563eb" stroke-width="1.1" stroke-dasharray="2,2" />
+        <text x="25" y="47" font-size="7.3" font-weight="bold" fill="#2563eb">25% OR (~6,2 pts) &rarr; Scalp Rápido</text>
+
+        <line x1="20" y1="60" x2="360" y2="60" stroke="#7c3aed" stroke-width="1.1" stroke-dasharray="2,2" />
+        <text x="25" y="69" font-size="7.3" font-weight="bold" fill="#7c3aed">35% OR (~8,7 pts) &rarr; Parcial Otimizada Fade + Breakeven</text>
+
+        <line x1="20" y1="74" x2="360" y2="74" stroke="#d97706" stroke-width="1.8" stroke-dasharray="4,2" />
+        <text x="25" y="82" font-size="8.1" font-weight="bold" fill="#b45309">50% OR (OR_Mid Centro: ~12,4 pts) &rarr; ALVO FINAL DO FADE</text>
+
+        <line x1="20" y1="120" x2="360" y2="120" stroke="#16a34a" stroke-width="2.2" />
+        <text x="25" y="131" font-size="8.1" font-weight="bold" fill="#16a34a">ORL_15 (Mínima 15m) — Entrada Compra Fade ⭐</text>
+
+        <line x1="20" y1="144" x2="360" y2="144" stroke="#dc2626" stroke-width="1.2" stroke-dasharray="3,3" />
+        <text x="25" y="152" font-size="7.5" font-weight="bold" fill="#dc2626">Stop Loss Fade (-25% OR fora da caixa: ~6 pts)</text>
+      </svg>
     </div>
 
-    <div class="card-amber">
-      <h3>Breakout de Caixa Explosiva (<code>OR_Range &ge; 30 pts</code>)</h3>
-      <p style="margin-bottom:3px;">Em dias de fortes notícias econômicas onde a OR15 passou de 30 pontos e fecha rompendo com <strong>Força &ge; 55%</strong> (37 trades no ano):</p>
-      <ul>
-        <li><strong>Alvo Expansão +50% OR | Stop 25% OR (Payoff 2:1):</strong><br/>
-          <strong>45,9% Win</strong> (2:1) • <code>+4,67 pts/trade</code> • <strong>+172,62 pts</strong> (+$8.631 ES).</li>
-        <li><strong>Parcial +25% OR + BE + Final +50% OR | Stop 50% OR:</strong><br/>
-          <strong>73,0% Win</strong> • <code>+2,35 pts/trade</code> • <strong>+86,94 pts</strong> (+$4.347 ES).</li>
-      </ul>
+    <div class="card-white">
+      <h3>Comparativo: Fade vs. Breakout na OR15 do ES</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Estratégia na OR15 do ES</th>
+            <th>Taxa de Acerto</th>
+            <th>Média/Trade</th>
+            <th>Saldo Anual</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="highlight">
+            <td><strong>Fade na Borda (Parcial 35% / Final 50%) ⭐</strong></td>
+            <td><strong>74,2% Win</strong></td>
+            <td><strong>+0,64 pts</strong></td>
+            <td><strong>+87,5 pts</strong></td>
+          </tr>
+          <tr>
+            <td>Fade Alvo Fixo 25% OR | Stop 25% (1:1)</td>
+            <td>73,5% Win</td>
+            <td>+0,58 pts</td>
+            <td>+78,9 pts</td>
+          </tr>
+          <tr class="highlight-blue">
+            <td><strong>Breakout c/ Confirmação de Reteste ⭐</strong></td>
+            <td><strong>65,8% Win</strong></td>
+            <td><strong>+1,84 pts</strong></td>
+            <td><strong>+210,2 pts</strong></td>
+          </tr>
+          <tr>
+            <td>Breakout Seco no Fechamento Fora</td>
+            <td>56,1% Win</td>
+            <td>+0,87 pts</td>
+            <td>+99,1 pts (Mais stops)</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </div>
 
   <div class="footer-note">
-    <span>VortexWeb Quant Research • Playbook Operacional ES / MES (S&amp;P 500)</span>
+    <span>VortexWeb Quant Research • Playbook Operacional ES / MES</span>
     <span>Página 3 de 4</span>
   </div>
 </div>
 
 <!-- ==================== PÁGINA 4 ==================== -->
 <div class="page">
-  <div class="hero" style="padding:10px 14px;">
+  <div class="hero">
     <div>
-      <h1 style="font-size:13.5pt;">CONFIGURAÇÃO NO NINJATRADER 8 &amp; TABELA COMPARATIVA NQ VS. ES</h1>
-      <p>Como rodar a estratégia VMPlaybookNasdaq no ES/MES e resumo anual consolidado</p>
+      <h1>GUIA DE PRESETS SELECIONÁVEIS DO ROBÔ NO ES / MES &amp; GESTÃO DE CONTA</h1>
+      <p>Configurações otimizadas para contas de $25k, $50k e $100k no NinjaTrader 8</p>
     </div>
     <div class="hero-badge">
-      <strong>ES / MES</strong><br/>
-      NinjaTrader 8
+      <strong>ROBÔ NT8</strong><br/>
+      Sessão 26 Playbook
     </div>
   </div>
 
   <div class="section-header">
-    <span>1. TABELA DE CONVERSÃO EXATA DE PARÂMETROS: NQ (NASDAQ) VS. ES (S&amp;P 500)</span>
-    <span class="tag">GUIA DE TICKS</span>
+    <span>1. TABELA DE PRESETS RECOMENDADOS NO ROBÔ PARA O ES / MES</span>
+    <span class="tag">CONFIGURAÇÃO PRONTA</span>
   </div>
 
   <table>
     <thead>
       <tr>
-        <th>Parâmetro Operacional</th>
-        <th>Configuração no NQ / MNQ</th>
-        <th>Configuração no ES / MES</th>
-        <th>Equivalência em Ticks no ES (0,25 pt)</th>
+        <th>Parâmetro no Robô C#</th>
+        <th>Valores Selecionáveis</th>
+        <th>Valor Recomendado (ES / MES)</th>
+        <th>Efeito Prático no Gráfico</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td><strong>Corte Caixa Comprimida</strong></td>
-        <td><code>&le; 120 pontos</code></td>
-        <td><strong><code>&le; 20 pontos</code></strong></td>
-        <td>&le; 80 ticks</td>
-      </tr>
-      <tr>
-        <td><strong>Corte Caixa Explosiva</strong></td>
-        <td><code>&ge; 180 pontos</code></td>
-        <td><strong><code>&ge; 30 pontos</code></strong></td>
-        <td>&ge; 120 ticks</td>
+        <td><code>02. Horário Abertura NY</code></td>
+        <td>Auto DST (EUA) / Manual</td>
+        <td><strong>True (Auto DST)</strong></td>
+        <td>Comuta sozinho para <strong>11:30 BRT em novembro</strong> e 10:30 BRT em março.</td>
       </tr>
       <tr class="highlight">
-        <td><strong>T0 Scalp (5 min)</strong></td>
-        <td>TP 45 pts / SL 45 pts</td>
-        <td><strong>TP 7,0 pts / SL 7,0 pts</strong></td>
-        <td>28 ticks / 28 ticks</td>
+        <td><code>07. [T0] Viés Noturno (PbT0Vies)</code></td>
+        <td><code>AsiaPreMercado</code> (Config 1)<br/><code>AsiaLondresPreMercado</code> (Config 5)</td>
+        <td><strong>AsiaPreMercado ⭐</strong><br/>(Config 1)</td>
+        <td>Dispara às <strong>10:30:01 / 11:30:01</strong> se Ásia + Pré-mercado alinhados (<strong>+109,0 pts</strong>).</td>
       </tr>
       <tr class="highlight">
-        <td><strong>T0 Swing (60 min)</strong></td>
-        <td>TP 130 pts / SL 85 pts</td>
-        <td><strong>TP 22,0 pts / SL 14,0 pts</strong></td>
-        <td>88 ticks / 56 ticks</td>
+        <td><code>08. [T0] Modo Gestão (PbT0Modo)</code></td>
+        <td><code>Swing60m</code> / <code>ScalperUnico</code><br/><code>ScalperParcial</code> / <code>CustomTicks</code></td>
+        <td><strong>ScalperParcial ⭐</strong></td>
+        <td>SL 7 pts, P1 em 4 pts, move stop para Breakeven e P2 busca 8 pts (<strong>73,7% Win</strong>).</td>
+      </tr>
+      <tr class="highlight-blue">
+        <td><code>12. [M5] Modo Gestão (PbM5Modo)</code></td>
+        <td><code>Tendencia</code> / <code>ScalperUnico</code><br/><code>ScalperParcial</code> / <code>CustomTicks</code></td>
+        <td><strong>ScalperParcial ⭐</strong></td>
+        <td>Dispara às <strong>10:35:01 / 11:35:01</strong>. SL 11p, P1 5p, BE, P2 14p (<strong>83,6% Win</strong>).</td>
       </tr>
       <tr class="highlight">
-        <td><strong>M5 Confirmação (T+5m)</strong></td>
-        <td>TP 110 pts / SL 75 pts</td>
-        <td><strong>TP 16,0 pts / SL 11,0 pts</strong></td>
-        <td>64 ticks / 44 ticks</td>
+        <td><code>25.1. [FLAG OR5] Operar Caixa 5m</code></td>
+        <td>True / False</td>
+        <td><strong>True (Marcado) ⭐</strong></td>
+        <td>Ativa a operação da Caixa dos 5 Minutos (OR5) imediatamente após o T05.</td>
       </tr>
-      <tr>
-        <td><strong>OR15 Reversão (Fade)</strong></td>
-        <td>Parcial 25% + BE + Final 50% OR</td>
-        <td><strong>Parcial 25% + BE + Final 50% OR</strong></td>
-        <td>Dinâmico conforme a caixa do dia</td>
+      <tr class="highlight">
+        <td><code>25.2. [OR5 Breakout] Entrada</code></td>
+        <td><code>Com_Pullback_Reteste</code><br/><code>Direto_FechamentoFora</code></td>
+        <td><strong>Com_Pullback_Reteste ⭐</strong></td>
+        <td>Aguarda reteste na borda da OR5 (<strong>81,2% Win Rate e +273 a +429 pts no ES</strong>).</td>
       </tr>
-      <tr>
-        <td><strong>OR15 Breakout</strong></td>
-        <td>Expansão +50% OR | Stop 50% OR</td>
-        <td><strong>Expansão +50% OR | Stop 50% OR</strong></td>
-        <td>Dinâmico conforme a caixa do dia</td>
+      <tr class="highlight">
+        <td><code>27. [OR15] Direção (PbOR15Direcao)</code></td>
+        <td><code>BreakoutApenas</code> / <code>FadeApenas</code> / <code>Ambos</code></td>
+        <td><strong>FadeApenas ⭐</strong><br/>(ou Ambos)</td>
+        <td>No ES, o <strong>Fade na borda é a principal recomendação (74,2% Win)</strong>.</td>
+      </tr>
+      <tr class="highlight">
+        <td><code>28. [OR15] Entrada Breakout</code></td>
+        <td><code>SecoFechamento</code><br/><code>PullbackConfirmacao</code></td>
+        <td><strong>PullbackConfirmacao ⭐</strong></td>
+        <td>No ES, o <strong>Pullback é mandatório (+210,2 pts vs +99,1 pts seco)</strong>.</td>
       </tr>
     </tbody>
   </table>
 
   <div class="section-header">
-    <span>2. COMO CONFIGURAR O ROBÔ NO NINJATRADER 8 PARA O ES / MES</span>
-    <span class="tag">PASSOS RÁPIDOS</span>
+    <span>2. DIMENSIONAMENTO DE CAPITAL E GESTÃO DE CONTRATOS (ES vs. MES)</span>
+    <span class="tag">RISCO CONTROLADO</span>
   </div>
 
-  <div class="card-white" style="margin-bottom:7px;">
-    <ul>
-      <li><strong>Passo 1:</strong> Abra um gráfico de <strong>1 Minuto (M1)</strong> do contrato vigente do <strong>ES</strong> (ex: <code>ES 12-26</code>) ou <strong>MES</strong> (<code>MES 12-26</code>).</li>
-      <li><strong>Passo 2:</strong> Adicione a estratégia <code>VM PLAYBOOK NASDAQ 1.0</code> ([`VMPlaybookNasdaq.cs`](file:///c:/Users/Pichau/Projetos%20React/VortexWeb/experts/VMPlaybookNasdaq.cs)).</li>
-      <li><strong>Passo 3:</strong> Na seção <code>04. RISCO</code>, defina <code>LOTE_Size = 2</code> (para permitir a saída parcial de 50% dos contratos em 25% da OR + Breakeven automático).</li>
-      <li><strong>Passo 4:</strong> Na seção <code>26. PLAYBOOK NASDAQ FORCE</code>, configure os cortes do ES:
-        <br/>&bull; <code>23. [OR15 Reversão] Amplitude Mínima: 10 pts</code>
-        <br/>&bull; <code>24. [OR15 Breakout] Caixa Comprimida Máx: 20 pts</code>
-        <br/>&bull; <code>25. [OR15 Breakout] Caixa Explosiva Mín: 30 pts</code>
-        <br/>&bull; <code>16. [M5] Take Profit: 16 pts</code> &bull; <code>17. [M5] Stop Loss: 11 pts</code></li>
-    </ul>
+  <div class="grid-3">
+    <div class="card-green">
+      <h3>Contas $25k / $50k (Mesas Prop)</h3>
+      <ul>
+        <li><strong>Contrato:</strong> <code>MES</code> (Micro S&amp;P 500).</li>
+        <li><strong>Lote Sugerido:</strong> <code>2 a 4 MES</code>.</li>
+        <li><strong>Risco por Trade:</strong> <code>$35 a $70</code> (Stop de 7 pts no T0).</li>
+        <li><strong>Meta Diária:</strong> <code>$100 a $200</code>.</li>
+        <li><strong>Limite Perda Diária:</strong> <code>$150</code>.</li>
+      </ul>
+    </div>
+    <div class="card-blue">
+      <h3>Contas $100k / $150k</h3>
+      <ul>
+        <li><strong>Contrato:</strong> <code>MES</code> (6 a 10 contratos) ou <code>1 ES</code>.</li>
+        <li><strong>Lote Sugerido:</strong> <code>6 MES</code> ou <code>1 ES</code>.</li>
+        <li><strong>Risco por Trade:</strong> <code>$150 a $350</code>.</li>
+        <li><strong>Meta Diária:</strong> <code>$400 a $700</code>.</li>
+        <li><strong>Limite Perda Diária:</strong> <code>$600</code>.</li>
+      </ul>
+    </div>
+    <div class="card-purple">
+      <h3>Contas $250k+ / Reais Grandes</h3>
+      <ul>
+        <li><strong>Contrato:</strong> <code>ES</code> (Cheio).</li>
+        <li><strong>Lote Sugerido:</strong> <code>2 ES</code> (para parciais perfeitas).</li>
+        <li><strong>Risco por Trade:</strong> <code>$700</code> (Stop 7 pts em 2 ES).</li>
+        <li><strong>Meta Diária:</strong> <code>$1.200 a $2.000</code>.</li>
+        <li><strong>Limite Perda Diária:</strong> <code>$1.500</code>.</li>
+      </ul>
+    </div>
   </div>
 
   <div class="section-header">
-    <span>3. TABELA CONSOLIDADA DE RESULTADOS ANUAIS NO ES (365 DIAS)</span>
-    <span class="tag">PERFORMANCE 1 ANO</span>
+    <span>3. RESUMO CONSOLIDADO DE PERFORMANCE ANUAL NO ES (365 DIAS / 254 PREGÕES)</span>
+    <span class="tag">AUDITORIA QUANTITATIVA</span>
   </div>
 
   <table>
     <thead>
       <tr>
-        <th>Etapa Cronológica</th>
-        <th>Setup no ES / MES</th>
-        <th>Trades / Ano</th>
-        <th>Win Rate</th>
-        <th>Expectativa</th>
-        <th>Saldo Pontos ES</th>
-        <th>Saldo Financeiro (1 Contrato)</th>
+        <th>Estratégia Playbook</th>
+        <th>Horário de Gatilho (Corretora)</th>
+        <th>Condição Validada</th>
+        <th>Taxa de Acerto</th>
+        <th>Média / Trade</th>
+        <th>Saldo Anual</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td><strong>1. Abertura T0 (Scalp)</strong></td>
-        <td>Ásia + T-15m (&ge; 52 / &le; 48) — TP 7 / SL 7 pts</td>
-        <td>99</td>
-        <td><strong>59,6%</strong></td>
-        <td><strong>+1,36 pts</strong></td>
-        <td><strong>+135,00 pts</strong></td>
-        <td>+$6.750 ES / +$675 MES</td>
-      </tr>
-      <tr>
-        <td><strong>1. Abertura T0 (Swing)</strong></td>
-        <td>Ásia + T-15m (&ge; 52 / &le; 48) — TP 22 / SL 14 pts</td>
-        <td>99</td>
-        <td><strong>44,4%</strong> (1,57:1)</td>
-        <td><strong>+1,72 pts</strong></td>
-        <td><strong>+170,25 pts</strong></td>
-        <td>+$8.512 ES / +$851 MES</td>
+        <td><strong>1. Abertura T0 (1º Seg)</strong></td>
+        <td><code>10:30:01 / 11:30:01 BRT</code></td>
+        <td>Alinhamento Ásia + Pré-Mercado (Config 1)</td>
+        <td><strong>73,7% Win</strong></td>
+        <td><strong>+1,47 pts</strong></td>
+        <td><strong>+145,9 a +284,0 pts</strong></td>
       </tr>
       <tr class="highlight">
-        <td><strong>2. Confirmação M5</strong></td>
-        <td>Força &ge; 55% + Tech &ge; 52% (TP 16 / SL 11 pts)</td>
-        <td>151</td>
-        <td><strong>54,3%</strong></td>
-        <td><strong>+2,36 pts</strong></td>
-        <td><strong>+357,00 pts</strong></td>
-        <td><strong>+$17.850 ES</strong> / <strong>+$1.785 MES</strong></td>
+        <td><strong>2. Confirmação M5 ⭐</strong></td>
+        <td><code>10:35:01 / 11:35:01 BRT</code></td>
+        <td>Força Final &ge; 55% + 7 Techs &ge; 52%</td>
+        <td><strong>83,6% Win</strong></td>
+        <td><strong>+2,01 pts</strong></td>
+        <td><strong>+303,4 a +390,8 pts</strong></td>
+      </tr>
+      <tr class="highlight-blue">
+        <td><strong>3. Caixa OR5 (5 min) ⭐</strong></td>
+        <td><code>10:35:01 às 10:45:00 BRT</code></td>
+        <td>Breakout com Reteste na Borda da OR5</td>
+        <td><strong>81,2% Win</strong></td>
+        <td><strong>+1,61 pts</strong></td>
+        <td><strong>+273,2 a +429,9 pts</strong></td>
       </tr>
       <tr class="highlight">
-        <td><strong>3. OR15 Reversão (Fade)</strong></td>
-        <td>1º Toque c/ Pavio (Parcial 25% + BE + Final 50%)</td>
-        <td>132</td>
-        <td><strong>74,2%</strong></td>
-        <td><strong>+2,02 pts</strong></td>
-        <td><strong>+266,09 pts</strong></td>
-        <td><strong>+$13.304 ES</strong> / <strong>+$1.330 MES</strong></td>
+        <td><strong>4. OR15 Fade (Reversão) ⭐</strong></td>
+        <td><code>10:45:01 às 13:30:00 BRT</code></td>
+        <td>1º Toque na borda com rejeição (Parcial 35%/50%)</td>
+        <td><strong>74,2% Win</strong></td>
+        <td><strong>+0,64 pts</strong></td>
+        <td><strong>+87,5 pts</strong></td>
       </tr>
       <tr>
-        <td><strong>3. OR15 Reversão (Alvo 50%)</strong></td>
-        <td>1º Toque c/ Pavio (Alvo Centro 50% | SL 50% OR)</td>
-        <td>132</td>
-        <td><strong>67,4%</strong></td>
-        <td><strong>+3,02 pts</strong></td>
-        <td><strong>+398,00 pts</strong></td>
-        <td><strong>+$19.900 ES</strong> / <strong>+$1.990 MES</strong></td>
-      </tr>
-      <tr>
-        <td><strong>4. OR15 Breakout (&le; 20 pts)</strong></td>
-        <td>Caixa Comprimida + Fecha Fora + Força &ge; 55%</td>
-        <td>106</td>
-        <td><strong>63,2%</strong></td>
-        <td><strong>+1,91 pts</strong></td>
-        <td><strong>+202,12 pts</strong></td>
-        <td>+$10.106 ES / +$1.010 MES</td>
-      </tr>
-      <tr>
-        <td><strong>4. OR15 Breakout (&ge; 30 pts)</strong></td>
-        <td>Caixa Explosiva + Fecha Fora + Força &ge; 55%</td>
-        <td>37</td>
-        <td><strong>45,9%</strong> (2:1)</td>
-        <td><strong>+4,67 pts</strong></td>
-        <td><strong>+172,62 pts</strong></td>
-        <td>+$8.631 ES / +$863 MES</td>
+        <td><strong>5. OR15 Breakout (Pullback)</strong></td>
+        <td><code>10:45:01 às 13:30:00 BRT</code></td>
+        <td>Rompimento com Confirmação de Reteste</td>
+        <td><strong>65,8% Win</strong></td>
+        <td><strong>+1,84 pts</strong></td>
+        <td><strong>+210,2 pts</strong></td>
       </tr>
     </tbody>
   </table>
 
   <div class="footer-note">
-    <span>VortexWeb Quant Research • Playbook Operacional ES / MES • Arquivo: Playbook_Operacional_ES_MES_NasdaqForce.pdf</span>
+    <span>VortexWeb Quant Research • Arquivos: experts/VMPlaybookNasdaq.cs &amp; experts/VMBotF.cs</span>
     <span>Página 4 de 4</span>
   </div>
 </div>

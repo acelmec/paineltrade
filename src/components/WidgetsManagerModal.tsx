@@ -342,13 +342,13 @@ export const WidgetsManagerModal: React.FC<WidgetsManagerModalProps> = ({
                   </div>
                 </div>
 
-                {/* 7. Força Momentum Cesta Geral */}
+                {/* 7. Força Momentum */}
                 <div className="bg-slate-900/60 border border-slate-800 hover:border-slate-700 p-4 rounded-xl flex flex-col justify-between transition group md:col-span-2">
                   <div>
                     <div className="flex items-center gap-2 mb-2">
                       <span className="text-xl">📊</span>
                       <h4 className="text-sm font-bold text-white group-hover:text-blue-400 transition">
-                        Força Momentum (Cesta Geral Completa)
+                        Força Momentum
                       </h4>
                     </div>
                     <p className="text-xs text-slate-400 leading-relaxed">

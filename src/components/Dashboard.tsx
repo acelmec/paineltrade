@@ -1059,6 +1059,8 @@ export const Dashboard: React.FC = () => {
     switch (symbol) {
       case 'NASDAQ': return 'NDAQ';
       case 'S&P 500': return 'SP500';
+      case 'IMF':
+      case 'FLUXO DE CAPITAIS': return 'IMF';
       case 'USD Index': return 'DXY';
       case 'VIX': return 'VIX';
       case 'NVIDIA': return 'NVDA';
@@ -1479,11 +1481,17 @@ export const Dashboard: React.FC = () => {
                     {forces.length === 0 ? (
                       <div className="text-slate-500 text-xs py-4 text-center col-span-2">Buscando forces...</div>
                     ) : (() => {
-                      const activeForces = forces.filter(f => {
+                      const filteredDashboardForces = forces.filter(f => {
+                        const s = (f.symbol || '').toUpperCase();
+                        return s !== 'EUR/JPY' && s !== 'EUR/USD' && s !== 'USD/JPY' && s !== 'EURJPY' && s !== 'EURUSD' && s !== 'USDJPY';
+                      });
+
+                      const activeForces = filteredDashboardForces.filter(f => {
                         if (f.symbol === 'FORÇA FINAL') return false;
                         let cfgId = '';
                         if (f.symbol === 'S&P 500') cfgId = 'sp500_impulso';
                         else if (f.symbol === 'USD Index') cfgId = 'usdindex_impulso';
+                        else if (f.symbol === 'IMF' || f.symbol === 'FLUXO DE CAPITAIS') cfgId = 'imf_impulso';
                         else cfgId = `${f.symbol.toLowerCase()}_impulso`;
                         const cfg = forcesConfig.find(c => c.id === cfgId);
                         return cfg ? cfg.ativo : true;
@@ -1501,11 +1509,12 @@ export const Dashboard: React.FC = () => {
                       return (
                         <>
                           <div className="space-y-0">
-                            {forces.slice(0, 6).map((item) => {
+                            {filteredDashboardForces.slice(0, 6).map((item) => {
                               let cfgId = '';
                               if (item.symbol === 'S&P 500' || item.symbol === 'S&P 500') cfgId = 'sp500_impulso';
                               else if (item.symbol === 'USD Index') cfgId = 'usdindex_impulso';
                               else if (item.symbol === 'FORÇA FINAL') cfgId = 'forca_final';
+                              else if (item.symbol === 'IMF' || item.symbol === 'FLUXO DE CAPITAIS') cfgId = 'imf_impulso';
                               else cfgId = `${item.symbol.toLowerCase()}_impulso`;
 
                               const cfg = forcesConfig.find(f => f.id === cfgId);
@@ -1533,7 +1542,7 @@ export const Dashboard: React.FC = () => {
                             })}
                           </div>
                           <div className="space-y-0">
-                            {forces.slice(6, 12).map((item) => {
+                            {filteredDashboardForces.slice(6, 13).map((item) => {
                               let cfgId = '';
                               if (item.symbol === 'S&P 500') cfgId = 'sp500_impulso';
                               else if (item.symbol === 'USD Index') cfgId = 'usdindex_impulso';

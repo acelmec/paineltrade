@@ -675,7 +675,7 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
       news_impact_low: newsImpactLow,
       news_chart_markers: newsChartMarkers,
       news_background_enabled: newsBackgroundEnabled
-    });
+    }, 'all');
     if (success) {
       setMessage({ text: 'Configurações de Notícias salvas com sucesso!', type: 'success' });
     } else {

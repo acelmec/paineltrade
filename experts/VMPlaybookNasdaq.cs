@@ -7799,12 +7799,27 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				private Task _pbPollTask = null;
 				private DateTime _pbCurrentSessionDate = DateTime.MinValue;
 
-				private double _pbForcaAsia = -1.0;
-				private double _pbForcaT15m = -1.0;
+				private double _pbForcaAsia    = -1.0;
+				private double _pbForcaLondres = -1.0;
+				private double _pbForcaT15m    = -1.0;
 				private bool   _pbT0EvaluatedToday = false;
 				private bool   _pbT0TriggeredToday = false;
 				private bool   _pbM5EvaluatedToday = false;
 				private bool   _pbM5TriggeredToday = false;
+
+				// Variáveis da Caixa de 5 Minutos (OR5)
+				private double _pbOr5TempHigh = double.MinValue;
+				private double _pbOr5TempLow  = double.MaxValue;
+				private double _pbOr5High     = 0.0;
+				private double _pbOr5Low      = 0.0;
+				private double _pbOr5Mid      = 0.0;
+				private double _pbOr5RangePts = 0.0;
+				private double _pbOr5Q25Pts   = 0.0;
+				private double _pbOr5Q35Pts   = 0.0;
+				private bool   _pbOr5Consolidated = false;
+				private bool   _pbOr5BreakoutUsed = false;
+				private bool   _pbOr5WaitingPullback = false;
+				private int    _pbOr5PullbackDir = 0;
 
 				private double _pbOr15TempHigh = double.MinValue;
 				private double _pbOr15TempLow  = double.MaxValue;
@@ -7854,6 +7869,18 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 										{
 											_pbForcaAsia = snapAsia.ForcaFinalCompra;
 											DebugPrint($"[PLAYBOOK NQ] 🌏 Força Ásia ({asiaDt:dd/MM HH:mm}) carregada em RAM: {_pbForcaAsia:F1}%");
+										}
+									}
+
+									// 2.5. Se a força de Londres ainda não foi capturada, busca no Supabase (05:00 BRT)
+									if (_pbForcaLondres < 0)
+									{
+										DateTime ldnDt = curBrt.Date + TimeSpan.FromHours(5);
+										NasdaqForceSnapshot snapLdn = AxionNasdaqForceCache.RequestSpecificMinuteAsync(supabaseUrl, supabaseServiceKey, PB_InstanceId, ldnDt, 60, DebugPrint);
+										if (snapLdn.IsValid)
+										{
+											_pbForcaLondres = snapLdn.ForcaFinalCompra;
+											DebugPrint($"[PLAYBOOK NQ] 🇬🇧 Força Londres ({ldnDt:dd/MM HH:mm}) carregada em RAM: {_pbForcaLondres:F1}%");
 										}
 									}
 
@@ -7907,12 +7934,26 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				private void ResetPlaybookNasdaqDailyState(DateTime sessionDate)
 				{
 					_pbCurrentSessionDate = sessionDate.Date;
-					_pbForcaAsia = -1.0;
-					_pbForcaT15m = -1.0;
+					_pbForcaAsia    = -1.0;
+					_pbForcaLondres = -1.0;
+					_pbForcaT15m    = -1.0;
 					_pbT0EvaluatedToday = false;
 					_pbT0TriggeredToday = false;
 					_pbM5EvaluatedToday = false;
 					_pbM5TriggeredToday = false;
+
+					_pbOr5TempHigh = double.MinValue;
+					_pbOr5TempLow  = double.MaxValue;
+					_pbOr5High     = 0.0;
+					_pbOr5Low      = 0.0;
+					_pbOr5Mid      = 0.0;
+					_pbOr5RangePts = 0.0;
+					_pbOr5Q25Pts   = 0.0;
+					_pbOr5Q35Pts   = 0.0;
+					_pbOr5Consolidated = false;
+					_pbOr5BreakoutUsed = false;
+					_pbOr5WaitingPullback = false;
+					_pbOr5PullbackDir = 0;
 
 					_pbOr15TempHigh = double.MinValue;
 					_pbOr15TempLow  = double.MaxValue;
@@ -7933,6 +7974,9 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 					_pbOr15EntryPrice         = 0.0;
 					_pbOr15Direction          = 0;
 
+					RemoveDrawObject("PB_OR5_High");
+					RemoveDrawObject("PB_OR5_Low");
+					RemoveDrawObject("PB_OR5_Mid");
 					RemoveDrawObject("PB_OR15_High");
 					RemoveDrawObject("PB_OR15_Low");
 					RemoveDrawObject("PB_OR15_Mid");
@@ -8047,12 +8091,18 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 					else
 						statusT0 = "⚪ Monitorando Sessões";
 
+					string ldnStr = _pbForcaLondres >= 0 
+						? $"{_pbForcaLondres:F1}% ({(_pbForcaLondres >= 52.0 ? "Compradora" : (_pbForcaLondres <= 48.0 ? "Vendedora" : "Neutra"))})"
+						: "Monitorando...";
+
 					_pPlaybookText = $"{nomeAtivoPerfil} • {faseStr} ({nyOpen:hh\\:mm} BRT)\n" +
 					                 $"• Sessão Ásia:        {asiaStr}\n" +
-					                 $"• Pré-Mercado (T-15m): {t15Str}\n" +
+					                 $"• Sessão Londres:     {ldnStr}\n" +
+					                 $"• Pré-Mercado (T-15m): {t15Str}\n" + 
 					                 $"• Atual Ativo:        {forcaAtualStr}\n" +
 					                 $"• Big Techs:          {forcaTechStr}\n" +
 					                 $"• Gatilho T0:         {statusT0}" +
+					                 (_pbOr5Consolidated  ? $"\n• OR5:  Range {_pbOr5RangePts:F1} pts | 50%={_pbOr5Mid:F1}" : "") +
 					                 (_pbOr15Consolidated ? $"\n• OR15: Range {_pbOr15RangePts:F1} pts | 50%={_pbOr15Mid:F1} | 25%={_pbOr15Q25Pts:F1}" : "");
 
 					_pPlaybookBrush = (liveSnap.IsValid && liveSnap.ForcaFinalCompra >= 52.0) ? Brushes.Lime : ((liveSnap.IsValid && liveSnap.ForcaFinalCompra <= 48.0) ? Brushes.Red : Brushes.Yellow);
@@ -8070,6 +8120,14 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 					Draw.Line(this, "PB_OR15_Mid",     false, 15, _pbOr15Mid,  -40, _pbOr15Mid,  Brushes.Gold,           DashStyleHelper.Dash,  2);
 					Draw.Line(this, "PB_OR15_Q25_Top", false, 15, q25Top,      -40, q25Top,      Brushes.DodgerBlue,     DashStyleHelper.Dot,   1);
 					Draw.Line(this, "PB_OR15_Q25_Bot", false, 15, q25Bot,      -40, q25Bot,      Brushes.DodgerBlue,     DashStyleHelper.Dot,   1);
+				}
+
+				private void DrawPlaybookOR5Levels()
+				{
+					if (!PB_DesenharNiveisOR5 || !_pbOr5Consolidated || _pbOr5High <= 0 || _pbOr5Low <= 0) return;
+					Draw.Line(this, "PB_OR5_High", false, 5, _pbOr5High, -40, _pbOr5High, Brushes.IndianRed,      DashStyleHelper.DashDot, 1);
+					Draw.Line(this, "PB_OR5_Low",  false, 5, _pbOr5Low,  -40, _pbOr5Low,  Brushes.MediumSeaGreen, DashStyleHelper.DashDot, 1);
+					Draw.Line(this, "PB_OR5_Mid",  false, 5, _pbOr5Mid,  -40, _pbOr5Mid,  Brushes.DarkOrange,     DashStyleHelper.Dot,     1);
 				}
 
 				private bool IsEsAsset()
@@ -8197,9 +8255,33 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 						}
 					}
 
-					// ── 2. ACUMULAÇÃO DA CAIXA DOS PRIMEIROS 15 MINUTOS (OR15: nyOpen -> nyOpen + 15m) ──
+					// ── 2. ACUMULAÇÃO DA CAIXA DE 5 MINUTOS (OR5) E 15 MINUTOS (OR15) ──
+					TimeSpan or5End  = nyOpen + TimeSpan.FromMinutes(5);
 					TimeSpan or15End = nyOpen + TimeSpan.FromMinutes(15);
-					// Em velas de 1m do NinjaTrader (timestamp de fechamento), a 1ª vela de 1m da abertura fecha em nyOpen + 1m e a 15ª em nyOpen + 15m
+
+					// Em velas de 1m do NinjaTrader (timestamp de fechamento), a 1ª vela oficial fecha em nyOpen + 1m e a 5ª em nyOpen + 5m
+					if (ctBar > nyOpen && ctBar <= or5End)
+					{
+						if (High[0] > _pbOr5TempHigh) _pbOr5TempHigh = High[0];
+						if (Low[0]  < _pbOr5TempLow)  _pbOr5TempLow  = Low[0];
+					}
+
+					if (!_pbOr5Consolidated && ctBar >= or5End && _pbOr5TempHigh > double.MinValue && _pbOr5TempLow < double.MaxValue)
+					{
+						_pbOr5High     = _pbOr5TempHigh;
+						_pbOr5Low      = _pbOr5TempLow;
+						_pbOr5RangePts = _pbOr5High - _pbOr5Low;
+						_pbOr5Mid      = (_pbOr5High + _pbOr5Low) / 2.0;
+						_pbOr5Q25Pts   = 0.25 * _pbOr5RangePts;
+						_pbOr5Q35Pts   = 0.35 * _pbOr5RangePts;
+						_pbOr5Consolidated = true;
+
+						DebugPrint($"[PLAYBOOK] 📦 OR5 Consolidada ({nyOpen:hh\\:mm}-{or5End:hh\\:mm}) | " +
+							$"ORH: {_pbOr5High:F2} | ORL: {_pbOr5Low:F2} | Range: {_pbOr5RangePts:F2} pts | 50%: {_pbOr5Mid:F2}");
+
+						DrawPlaybookOR5Levels();
+					}
+
 					if (ctBar > nyOpen && ctBar <= or15End)
 					{
 						if (High[0] > _pbOr15TempHigh) _pbOr15TempHigh = High[0];
@@ -8230,21 +8312,36 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 						return;
 
 					// =================================================================
-					// CRONOLOGIA 1 — ENTRADA NO 1º SEGUNDO DA ABERTURA (T0 = nyOpen)
+					// CRONOLOGIA 1 — ENTRADA NO 1º SEGUNDO DA ABERTURA (T0 = nyOpen + 1s)
 					// =================================================================
-					bool naJanelaT0 = (ctRef >= nyOpen && ctRef <= nyOpen + TimeSpan.FromMinutes(2))
-					               || (ctBar >= nyOpen && ctBar <= nyOpen + TimeSpan.FromMinutes(1));
+					// NOTA NINJATRADER: A barra de timestamp nyOpen (ex: 10:30:00) fecha às 10:30:00 e pertence ao PRÉ-MERCADO (10:29 a 10:30).
+					// O pregão oficial de NY inicia no segundo 10:30:01 (ou 11:30:01 no inverno).
+					// A 1ª vela real do pregão de NY tem timestamp nyOpen + 1m (ex: 10:31:00).
+					bool brokerNoT0 = (isLiveTrading && currentBrokerTime != DateTime.MinValue)
+					               && (ctRef >= nyOpen + TimeSpan.FromSeconds(1) && ctRef <= nyOpen + TimeSpan.FromMinutes(2));
+
+					bool barNoT0 = (ctBar > nyOpen && ctBar <= nyOpen + TimeSpan.FromMinutes(1));
+
+					bool naJanelaT0 = brokerNoT0 || barNoT0;
 
 					if (PB_OperarAberturaT0 && !_pbT0EvaluatedToday && naJanelaT0)
 					{
 						_pbT0EvaluatedToday = true;
+						bool isEsT0 = IsEsAsset();
 
-						if (_pbForcaAsia > 0 && _pbForcaT15m > 0)
+						// Viés Conforme Seletor Quantitativo
+						bool useAsiaLondres = (PB_T0_ViesSessao == PlaybookT0ViesMode.Modo5_Asia_e_Londres) 
+						                   || (PB_T0_ViesSessao == PlaybookT0ViesMode.Auto_Recomendado && !isEsT0); // NQ usa Ásia + Londres (+722 pts)
+
+						double fRef1 = _pbForcaAsia;
+						double fRef2 = useAsiaLondres ? (_pbForcaLondres >= 0 ? _pbForcaLondres : _pbForcaT15m) : _pbForcaT15m;
+
+						if (fRef1 > 0 && fRef2 > 0)
 						{
 							int dirT0 = 0;
-							if (_pbForcaAsia >= PB_T0_ForcaMinCompra && _pbForcaT15m >= PB_T0_ForcaMinCompra)
-								dirT0 = 1; // COMPRA T0
-							else if (_pbForcaAsia <= PB_T0_ForcaMaxVenda && _pbForcaT15m <= PB_T0_ForcaMaxVenda)
+							if (fRef1 >= PB_T0_ForcaMinCompra && fRef2 >= PB_T0_ForcaMinCompra)
+								dirT0 = 1;  // COMPRA T0
+							else if (fRef1 <= PB_T0_ForcaMaxVenda && fRef2 <= PB_T0_ForcaMaxVenda)
 								dirT0 = -1; // VENDA T0
 
 							bool dirPermitida = (dirT0 == 1 && (currentOperatingMode == OperatingMode.Comprado || currentOperatingMode == OperatingMode.Ambos))
@@ -8254,66 +8351,39 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 							{
 								int slTicksT0 = SL_Ticks;
 								int tpTicksT0 = TP_Ticks;
+								int p1TicksT0 = 0;
+								int p2TicksT0 = 0;
+								bool usarParcialT0 = false;
 								int maxMinT0  = 60;
-								bool isEs     = IsEsAsset();
 
 								switch (PB_T0_ModoGestao)
 								{
-									case PlaybookT0Mode.Auto_ConformeAtivo:
-										if (isEs)
-										{
-											tpTicksT0 = (int)Math.Round(22.0 / TickSize); // 22 pts = 88 ticks
-											slTicksT0 = (int)Math.Round(14.0 / TickSize); // 14 pts = 56 ticks
-											maxMinT0  = 60;
-										}
-										else
-										{
-											tpTicksT0 = (int)Math.Round(130.0 / TickSize); // 130 pts = 520 ticks
-											slTicksT0 = (int)Math.Round(85.0  / TickSize); // 85 pts  = 340 ticks
-											maxMinT0  = 60;
-										}
+									case PlaybookT0Mode.Auto_Recomendado_Parcial:
+									case PlaybookT0Mode.NQ_Scalp_Parcial_85x45x130pts:
+									case PlaybookT0Mode.ES_Scalp_Parcial_7x4x8pts:
+										usarParcialT0 = true;
+										if (isEsT0) { slTicksT0 = 7 * 4; p1TicksT0 = 4 * 4; p2TicksT0 = 8 * 4; maxMinT0 = 30; }
+										else        { slTicksT0 = 85 * 4; p1TicksT0 = 45 * 4; p2TicksT0 = 130 * 4; maxMinT0 = 60; }
 										break;
 
-									case PlaybookT0Mode.Auto_Scalp5m:
-										if (isEs)
-										{
-											tpTicksT0 = (int)Math.Round(7.0 / TickSize); // 7 pts = 28 ticks
-											slTicksT0 = (int)Math.Round(7.0 / TickSize); // 7 pts = 28 ticks
-											maxMinT0  = 5;
-										}
-										else
-										{
-											tpTicksT0 = (int)Math.Round(45.0 / TickSize); // 45 pts = 180 ticks
-											slTicksT0 = (int)Math.Round(45.0 / TickSize); // 45 pts = 180 ticks
-											maxMinT0  = 5;
-										}
+									case PlaybookT0Mode.Auto_Scalp_Seco:
+									case PlaybookT0Mode.NQ_Scalp_Seco_60x45pts:
+									case PlaybookT0Mode.ES_Scalp_Seco_8x6pts:
+										usarParcialT0 = false;
+										if (isEsT0) { slTicksT0 = 8 * 4; tpTicksT0 = 6 * 4; maxMinT0 = 15; }
+										else        { slTicksT0 = 60 * 4; tpTicksT0 = 45 * 4; maxMinT0 = 30; }
 										break;
 
+									case PlaybookT0Mode.Auto_Swing_Cheio:
 									case PlaybookT0Mode.NQ_Swing60m_130x85pts:
-										tpTicksT0 = (int)Math.Round(130.0 / TickSize);
-										slTicksT0 = (int)Math.Round(85.0  / TickSize);
-										maxMinT0  = 60;
-										break;
-
-									case PlaybookT0Mode.NQ_Scalp5m_45x45pts:
-										tpTicksT0 = (int)Math.Round(45.0 / TickSize);
-										slTicksT0 = (int)Math.Round(45.0 / TickSize);
-										maxMinT0  = 5;
-										break;
-
 									case PlaybookT0Mode.ES_Swing60m_22x14pts:
-										tpTicksT0 = (int)Math.Round(22.0 / TickSize); // 88 ticks
-										slTicksT0 = (int)Math.Round(14.0 / TickSize); // 56 ticks
-										maxMinT0  = 60;
-										break;
-
-									case PlaybookT0Mode.ES_Scalp5m_7x7pts:
-										tpTicksT0 = (int)Math.Round(7.0 / TickSize); // 28 ticks
-										slTicksT0 = (int)Math.Round(7.0 / TickSize); // 28 ticks
-										maxMinT0  = 5;
+										usarParcialT0 = false;
+										if (isEsT0) { slTicksT0 = 14 * 4; tpTicksT0 = 22 * 4; maxMinT0 = 60; }
+										else        { slTicksT0 = 85 * 4; tpTicksT0 = 130 * 4; maxMinT0 = 60; }
 										break;
 
 									case PlaybookT0Mode.Customizado_Ticks:
+										usarParcialT0 = false;
 										tpTicksT0 = Math.Max(1, PB_T0_CustomTpTicks);
 										slTicksT0 = Math.Max(1, PB_T0_CustomSlTicks);
 										maxMinT0  = Math.Max(1, PB_T0_CustomMaxMinutos);
@@ -8321,30 +8391,48 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 
 									case PlaybookT0Mode.RoboFixoTicks:
 									default:
+										usarParcialT0 = false;
 										tpTicksT0 = TP_Ticks;
 										slTicksT0 = SL_Ticks;
 										maxMinT0  = 60;
 										break;
 								}
 
-								ExecutarOrdemPlaybookSimples(dirT0, "PB_T0", slTicksT0, tpTicksT0, today + nyOpen + TimeSpan.FromMinutes(maxMinT0));
+								DateTime exitTimeT0 = today + nyOpen + TimeSpan.FromMinutes(maxMinT0);
+								if (usarParcialT0)
+									ExecutarOrdemPlaybookParcial(dirT0, "PB_T0", slTicksT0, p1TicksT0, p2TicksT0, exitTimeT0);
+								else
+									ExecutarOrdemPlaybookSimples(dirT0, "PB_T0", slTicksT0, tpTicksT0, exitTimeT0);
+
 								_pbT0TriggeredToday = true;
-								DebugPrint($"[PLAYBOOK NQ] 🚀 [ETAPA 1 - T0] {(dirT0 == 1 ? "COMPRA" : "VENDA")} executada na abertura! " +
-									$"Ásia={_pbForcaAsia:F1}% | T-15m={_pbForcaT15m:F1}% | TP={tpTicksT0}tk | SL={slTicksT0}tk");
+								DebugPrint($"[PLAYBOOK {(isEsT0 ? "ES" : "NQ")}] 🚀 [ETAPA 1 - T0] {(dirT0 == 1 ? "COMPRA" : "VENDA")} executada na abertura! " +
+									$"Ref1={fRef1:F1}% | Ref2={fRef2:F1}% | Parcial={usarParcialT0} | SL={slTicksT0}tk");
 								return;
 							}
 							else
 							{
-								DebugPrint($"[PLAYBOOK NQ] ⏸️ [ETAPA 1 - T0] Sem alinhamento Ásia ({_pbForcaAsia:F1}%) + T-15m ({_pbForcaT15m:F1}%). Aguardando M5/OR15.");
+								DebugPrint($"[PLAYBOOK {(isEsT0 ? "ES" : "NQ")}] ⏸️ [ETAPA 1 - T0] Direção {dirT0} não permitida pelo modo operacional.");
 							}
+						}
+						else
+						{
+							DebugPrint($"[PLAYBOOK {(isEsT0 ? "ES" : "NQ")}] ⏸️ [ETAPA 1 - T0] Forças de referência incompletas (Ref1={fRef1:F1}%, Ref2={fRef2:F1}%).");
 						}
 					}
 
 					// =================================================================
-					// CRONOLOGIA 2 — CONFIRMAÇÃO NO M5 (T+5m = nyOpen + 5 min)
+					// CRONOLOGIA 2 — CONFIRMAÇÃO NO M5 (T+5m = nyOpen + 5 min + 1s)
 					// =================================================================
 					TimeSpan m5Time = nyOpen + TimeSpan.FromMinutes(5);
-					bool naJanelaM5 = (ctBar >= m5Time && ctBar <= m5Time + TimeSpan.FromMinutes(2));
+
+					// Em LiveTrading: relógio da corretora atinge 10:35:01 (primeiro segundo após o fechamento da 5ª vela)
+					bool brokerNoM5 = (isLiveTrading && currentBrokerTime != DateTime.MinValue)
+					               && (ctRef >= m5Time + TimeSpan.FromSeconds(1) && ctRef <= m5Time + TimeSpan.FromMinutes(2));
+
+					// No gráfico: a barra das 10:35:00 acabou de fechar
+					bool barNoM5 = (ctBar >= m5Time && ctBar <= m5Time + TimeSpan.FromMinutes(1));
+
+					bool naJanelaM5 = brokerNoM5 || barNoM5;
 
 					if (PB_OperarConfirmacaoM5 && !_pbM5EvaluatedToday && naJanelaM5)
 					{
@@ -8362,7 +8450,7 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 								int dirM5 = 0;
 								if (snapM5.ForcaFinalCompra >= PB_M5_ForcaFinalCompra && snapM5.ForcaTechMediaCompra >= PB_M5_ForcaTechCompra)
 									dirM5 = 1; // COMPRA M5
-								else if (snapM5.ForcaFinalCompra <= PB_M5_ForcaFinalVenda && snapM5.ForcaTechMediaCompra <= PB_M5_ForcaTechVenda)
+								else if (snapM5.ForcaFinalVenda <= PB_M5_ForcaFinalVenda && snapM5.ForcaTechMediaCompra <= PB_M5_ForcaTechVenda)
 									dirM5 = -1; // VENDA M5
 
 								bool dirPermitida = (dirM5 == 1 && (currentOperatingMode == OperatingMode.Comprado || currentOperatingMode == OperatingMode.Ambos))
@@ -8372,51 +8460,132 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 								{
 									int tpTicksM5 = 0;
 									int slTicksM5 = 0;
+									int p1TicksM5 = 0;
+									int p2TicksM5 = 0;
+									bool usarParcialM5 = false;
 									bool isEsM5   = IsEsAsset();
 
-									if (PB_M5_ModoGestao == PlaybookM5Mode.Customizado_Ticks && PB_M5_TpTicks > 0 && PB_M5_SlTicks > 0)
+									switch (PB_M5_ModoGestao)
 									{
-										tpTicksM5 = PB_M5_TpTicks;
-										slTicksM5 = PB_M5_SlTicks;
-									}
-									else if (PB_M5_ModoGestao == PlaybookM5Mode.Customizado_Pontos)
-									{
-										double tpPts = PB_M5_TpPontos;
-										double slPts = PB_M5_SlPontos;
-										if (isEsM5 && (tpPts > 35.0 || slPts > 25.0))
-										{
-											tpPts = 12.0;
-											slPts = 10.0;
-											DebugPrint($"[PLAYBOOK ES] ⚠️ Ajuste defensivo: Pontos M5 ({PB_M5_TpPontos}/{PB_M5_SlPontos}) reduzidos para escala ES (12x10 pts).");
-										}
-										tpTicksM5 = tpPts > 0 ? (int)Math.Round(tpPts / TickSize) : 0;
-										slTicksM5 = slPts > 0 ? (int)Math.Round(slPts / TickSize) : (isEsM5 ? 40 : SL_Ticks);
-									}
-									else // Auto_ConformeAtivo
-									{
-										if (isEsM5)
-										{
-											tpTicksM5 = (int)Math.Round(7.0 / TickSize); // 28 ticks (7.0 pts)
-											slTicksM5 = (int)Math.Round(7.0 / TickSize); // 28 ticks (7.0 pts)
-										}
-										else
-										{
-											tpTicksM5 = (int)Math.Round(110.0 / TickSize); // 440 ticks (110 pts)
-											slTicksM5 = (int)Math.Round(75.0  / TickSize); // 300 ticks (75 pts)
-										}
-									}
-									DateTime exitM5 = today + m5Time + TimeSpan.FromMinutes(PB_M5_DuracaoMaxMinutos);
+										case PlaybookM5Mode.Auto_Recomendado_Parcial:
+											usarParcialM5 = true;
+											if (isEsM5) { slTicksM5 = 11 * 4; p1TicksM5 = 5 * 4; p2TicksM5 = 14 * 4; } // 83.6% Win!
+											else        { slTicksM5 = 60 * 4; p1TicksM5 = 30 * 4; p2TicksM5 = 75 * 4; } // 81.1% Win!
+											break;
 
-									ExecutarOrdemPlaybookSimples(dirM5, "PB_M5", slTicksM5, tpTicksM5, exitM5);
+										case PlaybookM5Mode.Auto_Scalp_Seco:
+											usarParcialM5 = false;
+											if (isEsM5) { slTicksM5 = 10 * 4; tpTicksM5 = 8 * 4; } // 67.2% Win!
+											else        { slTicksM5 = 35 * 4; tpTicksM5 = 35 * 4; } // 63.9% Win!
+											break;
+
+										case PlaybookM5Mode.Auto_Alvo_Cheio:
+											usarParcialM5 = false;
+											if (isEsM5) { slTicksM5 = 14 * 4; tpTicksM5 = 20 * 4; }
+											else        { slTicksM5 = 75 * 4; tpTicksM5 = 110 * 4; }
+											break;
+
+										case PlaybookM5Mode.Customizado_Pontos:
+											usarParcialM5 = false;
+											double tpPts = PB_M5_TpPontos;
+											double slPts = PB_M5_SlPontos;
+											if (isEsM5 && (tpPts > 35.0 || slPts > 25.0)) { tpPts = 12.0; slPts = 10.0; }
+											tpTicksM5 = tpPts > 0 ? (int)Math.Round(tpPts / TickSize) : 0;
+											slTicksM5 = slPts > 0 ? (int)Math.Round(slPts / TickSize) : (isEsM5 ? 40 : SL_Ticks);
+											break;
+
+										case PlaybookM5Mode.Customizado_Ticks:
+											usarParcialM5 = false;
+											tpTicksM5 = PB_M5_TpTicks;
+											slTicksM5 = PB_M5_SlTicks;
+											break;
+
+										default:
+											usarParcialM5 = true;
+											if (isEsM5) { slTicksM5 = 11 * 4; p1TicksM5 = 5 * 4; p2TicksM5 = 14 * 4; }
+											else        { slTicksM5 = 60 * 4; p1TicksM5 = 30 * 4; p2TicksM5 = 75 * 4; }
+											break;
+									}
+
+									DateTime exitM5 = today + m5Time + TimeSpan.FromMinutes(PB_M5_DuracaoMaxMinutos);
+									if (usarParcialM5)
+										ExecutarOrdemPlaybookParcial(dirM5, "PB_M5", slTicksM5, p1TicksM5, p2TicksM5, exitM5);
+									else
+										ExecutarOrdemPlaybookSimples(dirM5, "PB_M5", slTicksM5, tpTicksM5, exitM5);
+
 									_pbM5TriggeredToday = true;
-									DebugPrint($"[PLAYBOOK NQ] 🚀 [ETAPA 2 - M5] {(dirM5 == 1 ? "COMPRA" : "VENDA")} confirmada em T+5m! " +
-										$"Força={snapM5.ForcaFinalCompra:F1}% | 7Techs={snapM5.ForcaTechMediaCompra:F1}% | TP={tpTicksM5}tk | SL={slTicksM5}tk");
+									DebugPrint($"[PLAYBOOK {(isEsM5 ? "ES" : "NQ")}] 🚀 [ETAPA 2 - M5] {(dirM5 == 1 ? "COMPRA" : "VENDA")} confirmada em T+5m! " +
+										$"Força={snapM5.ForcaFinalCompra:F1}% | 7Techs={snapM5.ForcaTechMediaCompra:F1}% | Parcial={usarParcialM5}");
 									return;
 								}
 								else
 								{
 									DebugPrint($"[PLAYBOOK NQ] ⏸️ [ETAPA 2 - M5] Sem confirmação em T+5m (Força={snapM5.ForcaFinalCompra:F1}%, Techs={snapM5.ForcaTechMediaCompra:F1}%).");
 								}
+							}
+						}
+					}
+
+					// =================================================================
+					// CRONOLOGIA 2.5 — OPERAÇÃO NA CAIXA DOS 5 MINUTOS (OR5: Pós-10:35:01 / 11:35:01)
+					// Estratégia Comprovada: Breakout com Reteste (80.8% Win NQ / 81.2% Win ES)
+					// =================================================================
+					if (PB_OperarOR5 && _pbOr5Consolidated && !_pbOr5BreakoutUsed && ctBar > or5End && ctBar <= or15End)
+					{
+						int barIdxOr5 = isLiveTrading ? 1 : 0;
+						double c5 = Close[barIdxOr5];
+						double h5 = High[0];
+						double l5 = Low[0];
+						NasdaqForceSnapshot snapOr5 = AxionNasdaqForceCache.GetAtOrBefore(Time[barIdxOr5], 5, isLiveTrading);
+						double fCompra5 = snapOr5.IsValid ? snapOr5.ForcaFinalCompra : 50.0;
+						double fVenda5  = 100.0 - fCompra5;
+
+						if (!_pbOr5WaitingPullback)
+						{
+							if (c5 > _pbOr5High && fCompra5 >= 55.0 && (currentOperatingMode == OperatingMode.Comprado || currentOperatingMode == OperatingMode.Ambos))
+							{
+								if (PB_OR5_ModoEntrada == PlaybookOR5EntradaMode.Direto_FechamentoFora)
+								{
+									ExecutarOrdemOR5(1, "PB_OR5_BrkDirect", _pbOr5High, today + or15End);
+									_pbOr5BreakoutUsed = true;
+									return;
+								}
+								else
+								{
+									_pbOr5WaitingPullback = true;
+									_pbOr5PullbackDir = 1;
+									DebugPrint($"[PLAYBOOK] ⏳ OR5 Rompimento Compra detectado @ {c5:F2}! Aguardando Reteste na borda ({_pbOr5High:F2})...");
+								}
+							}
+							else if (c5 < _pbOr5Low && fVenda5 >= 55.0 && (currentOperatingMode == OperatingMode.Vendido || currentOperatingMode == OperatingMode.Ambos))
+							{
+								if (PB_OR5_ModoEntrada == PlaybookOR5EntradaMode.Direto_FechamentoFora)
+								{
+									ExecutarOrdemOR5(-1, "PB_OR5_BrkDirect", _pbOr5Low, today + or15End);
+									_pbOr5BreakoutUsed = true;
+									return;
+								}
+								else
+								{
+									_pbOr5WaitingPullback = true;
+									_pbOr5PullbackDir = -1;
+									DebugPrint($"[PLAYBOOK] ⏳ OR5 Rompimento Venda detectado @ {c5:F2}! Aguardando Reteste na borda ({_pbOr5Low:F2})...");
+								}
+							}
+						}
+						else
+						{
+							bool retesteCompra = (_pbOr5PullbackDir == 1 && l5 <= (_pbOr5High + 2 * TickSize));
+							bool retesteVenda  = (_pbOr5PullbackDir == -1 && h5 >= (_pbOr5Low - 2 * TickSize));
+
+							if (retesteCompra || retesteVenda)
+							{
+								_pbOr5BreakoutUsed = true;
+								_pbOr5WaitingPullback = false;
+								double bordaPrice = _pbOr5PullbackDir == 1 ? _pbOr5High : _pbOr5Low;
+								ExecutarOrdemOR5(_pbOr5PullbackDir, "PB_OR5_Pullback", bordaPrice, today + or15End);
+								DebugPrint($"[PLAYBOOK] 🎯 OR5 Reteste confirmado na borda ({bordaPrice:F2})! Ordem executada com sucesso!");
+								return;
 							}
 						}
 					}
@@ -8527,6 +8696,63 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 						else
 						{
 							_pbOr15FirstTouchUsed = true;
+						}
+					}
+				}
+
+								private void ExecutarOrdemPlaybookParcial(int direction, string signalName, int slTicks, int p1Ticks, int p2Ticks, DateTime maxExitTime)
+				{
+					int totalLots = Math.Max(1, LOTE_Size);
+					breakEvenTriggered = false;
+					trailStopPrice = 0.0;
+					trailStepCount = 0;
+					_pbActiveTradeMaxExitTime = maxExitTime;
+
+					if (totalLots >= 2)
+					{
+						int lotsP1 = totalLots / 2;
+						int lotsP2 = totalLots - lotsP1;
+
+						SetStopLoss(signalName + "_P1", CalculationMode.Ticks, slTicks, false);
+						SetProfitTarget(signalName + "_P1", CalculationMode.Ticks, p1Ticks, false);
+						SetStopLoss(CalculationMode.Ticks, slTicks);
+
+						SetStopLoss(signalName + "_P2", CalculationMode.Ticks, slTicks, false);
+						SetProfitTarget(signalName + "_P2", CalculationMode.Ticks, p2Ticks, false);
+
+						Order o1 = direction == 1 ? EnterLong(lotsP1, signalName + "_P1") : EnterShort(lotsP1, signalName + "_P1");
+						Order o2 = direction == 1 ? EnterLong(lotsP2, signalName + "_P2") : EnterShort(lotsP2, signalName + "_P2");
+
+						if (o1 != null) { AddOrderToList(o1); realtimeOrderIds.Add(o1.Id); }
+						if (o2 != null) { AddOrderToList(o2); realtimeOrderIds.Add(o2.Id); }
+
+						_pbOr15BreakevenArmed = true;
+						_pbOr15BreakevenTriggered = false;
+						_pbOr15BreakevenTriggerPrice = direction == 1 ? Close[0] + (p1Ticks * TickSize) : Close[0] - (p1Ticks * TickSize);
+						_pbOr15Direction = direction;
+
+						IncrementarQuantOperacoes();
+						DebugPrint($"[PLAYBOOK {(IsEsAsset() ? "ES" : "NQ")}] 🎯 PARCIAL DISPARADA ({signalName}) | Qtd={totalLots} (P1:{lotsP1} / P2:{lotsP2}) | SL={slTicks}tk ({slTicks * TickSize:F2}pts) | P1={p1Ticks}tk ({p1Ticks * TickSize:F2}pts) | P2={p2Ticks}tk ({p2Ticks * TickSize:F2}pts) | Saída: {maxExitTime:HH:mm:ss}");
+					}
+					else
+					{
+						// Se 1 contrato apenas: usa alvo P1 como gatilho de breakeven e busca alvo final P2
+						SetStopLoss(signalName, CalculationMode.Ticks, slTicks, false);
+						SetProfitTarget(signalName, CalculationMode.Ticks, p2Ticks, false);
+						SetStopLoss(CalculationMode.Ticks, slTicks);
+						SetProfitTarget(CalculationMode.Ticks, p2Ticks);
+
+						Order o = direction == 1 ? EnterLong(totalLots, signalName) : EnterShort(totalLots, signalName);
+						if (o != null)
+						{
+							AddOrderToList(o);
+							realtimeOrderIds.Add(o.Id);
+							IncrementarQuantOperacoes();
+							_pbOr15BreakevenArmed = true;
+							_pbOr15BreakevenTriggered = false;
+							_pbOr15BreakevenTriggerPrice = direction == 1 ? Close[0] + (p1Ticks * TickSize) : Close[0] - (p1Ticks * TickSize);
+							_pbOr15Direction = direction;
+							DebugPrint($"[PLAYBOOK {(IsEsAsset() ? "ES" : "NQ")}] 🎯 1 LOTE DISPARADO ({signalName}) | SL={slTicks}tk | Alvo={p2Ticks}tk | BE armado em {p1Ticks}tk | Saída: {maxExitTime:HH:mm:ss}");
 						}
 					}
 				}
@@ -8671,6 +8897,49 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 						}
 					}
 				}
+
+				private void ExecutarOrdemOR5(int direction, string tag, double refPrice, DateTime exitLimitTime)
+				{
+					double slPts = _pbOr5RangePts * 0.50; // SL no centro da OR5 (50%)
+					double p1Pts = _pbOr5Q25Pts;          // P1 em 25% da OR5
+					double p2Pts = _pbOr5RangePts * 0.50; // P2 em 50% de expansao
+					bool usarParcial = true;
+
+					switch (PB_OR5_ModoGestao)
+					{
+						case PlaybookOR5GestaoMode.Parcial25_BE_Final50_Stop50:
+							usarParcial = true;
+							p1Pts = _pbOr5Q25Pts;
+							p2Pts = _pbOr5RangePts * 0.50;
+							slPts = _pbOr5RangePts * 0.50;
+							break;
+						case PlaybookOR5GestaoMode.Parcial35_BE_Final50_Stop50:
+							usarParcial = true;
+							p1Pts = _pbOr5Q35Pts;
+							p2Pts = _pbOr5RangePts * 0.50;
+							slPts = _pbOr5RangePts * 0.50;
+							break;
+						case PlaybookOR5GestaoMode.AlvoFixo50_Stop50:
+							usarParcial = false;
+							p1Pts = _pbOr5RangePts * 0.50;
+							slPts = _pbOr5RangePts * 0.50;
+							break;
+						case PlaybookOR5GestaoMode.AlvoFixo100_Stop50:
+							usarParcial = false;
+							p1Pts = _pbOr5RangePts * 1.00;
+							slPts = _pbOr5RangePts * 0.50;
+							break;
+					}
+
+					int slTicks = Math.Max(4, (int)Math.Round(slPts / TickSize));
+					int p1Ticks = Math.Max(4, (int)Math.Round(p1Pts / TickSize));
+					int p2Ticks = Math.Max(4, (int)Math.Round(p2Pts / TickSize));
+
+					if (usarParcial)
+						ExecutarOrdemPlaybookParcial(direction, tag, slTicks, p1Ticks, p2Ticks, exitLimitTime);
+					else
+						ExecutarOrdemPlaybookSimples(direction, tag, slTicks, p1Ticks, exitLimitTime);
+				}
 				#endregion
 
 		        #region Properties
@@ -8747,9 +9016,13 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				public enum estrategiaMode { ManualBox, Preço, GridScalper, FVGScalper, ConectorVM, ConectorLocal, SessaoHILO, PlaybookNasdaq }
 				public enum SessaoHiloGatilhoMode { Toque, ToqueConfirmacaoCandle, FiltrosTecnicos }
 				public enum PlaybookAtivoMode { AutoDetectar, Nasdaq_NQ_MNQ, Sp500_ES_MES, Customizado_Livre }
-				public enum PlaybookT0Mode { Auto_ConformeAtivo, Auto_Scalp5m, NQ_Swing60m_130x85pts, NQ_Scalp5m_45x45pts, ES_Swing60m_22x14pts, ES_Scalp5m_7x7pts, Customizado_Ticks, RoboFixoTicks }
-				public enum PlaybookM5Mode { Auto_ConformeAtivo, Customizado_Pontos, Customizado_Ticks }
-				public enum PlaybookOR15GestaoMode { Parcial25_BE_Final50_Stop25, Parcial25_BE_Final50_Stop50, Alvo25_Stop25_1para1, Alvo50_Stop25_2para1, Alvo50_Stop50_1para1 }
+				public enum PlaybookT0ViesMode { Auto_Recomendado, Modo1_Asia_e_T15m, Modo5_Asia_e_Londres }
+				public enum PlaybookT0Mode { Auto_ConformeAtivo = 0, Auto_Recomendado_Parcial = 0, Auto_Scalp_Seco, Auto_Swing_Cheio, NQ_Swing60m_130x85pts, NQ_Scalp_Seco_60x45pts, NQ_Scalp_Parcial_85x45x130pts, ES_Swing60m_22x14pts, ES_Scalp_Seco_8x6pts, ES_Scalp_Parcial_7x4x8pts, Customizado_Ticks, RoboFixoTicks }
+				public enum PlaybookM5Mode { Auto_ConformeAtivo = 0, Auto_Recomendado_Parcial = 0, Auto_Scalp_Seco, Auto_Alvo_Cheio, Customizado_Pontos, Customizado_Ticks }
+				public enum PlaybookOR5EntradaMode { Com_Pullback_Reteste, Direto_FechamentoFora }
+				public enum PlaybookOR5GestaoMode { Parcial25_BE_Final50_Stop50, Parcial35_BE_Final50_Stop50, AlvoFixo50_Stop50, AlvoFixo100_Stop50 }
+				public enum PlaybookOR15BreakoutEntradaMode { Direto_FechamentoFora, Com_Pullback_Reteste }
+				public enum PlaybookOR15GestaoMode { Auto_Recomendado, Parcial35_BE_Final50_Stop35, Parcial35_BE_Final50_Stop25, Parcial25_BE_Final50_Stop25, Parcial25_BE_Final50_Stop50, Alvo35_Stop25, Alvo35_Stop35_1para1, Alvo50_Stop25_2para1, Alvo50_Stop50_1para1, Alvo25_Stop25_1para1 }
 				
 				[Browsable(true)]
 				[NinjaScriptProperty]
@@ -9257,8 +9530,12 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				public bool PB_OperarAberturaT0 { get; set; } = true;
 
 				[NinjaScriptProperty]
-				[Display(Name="08. [T0] Modo de Gestão (Swing / Scalp / Custom Ticks)", Description="Auto_ConformeAtivo (NQ 130x85pts / ES 22x14pts) | Auto_Scalp5m (NQ 45x45pts / ES 7x7pts) | NQ_Swing | NQ_Scalp | ES_Swing | ES_Scalp | Customizado_Ticks | RoboFixoTicks", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=8)]
-				public PlaybookT0Mode PB_T0_ModoGestao { get; set; } = PlaybookT0Mode.Auto_ConformeAtivo;
+				[Display(Name="07.1. [T0] Viés Noturno (Ásia / Londres / T-15m)", Description="Auto_Recomendado (NQ: Ásia+Londres +722pts / ES: Ásia+T-15m +109pts) | Modo1_Asia_e_T15m | Modo5_Asia_e_Londres", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=7)]
+				public PlaybookT0ViesMode PB_T0_ViesSessao { get; set; } = PlaybookT0ViesMode.Auto_Recomendado;
+
+				[NinjaScriptProperty]
+				[Display(Name="08. [T0] Modo de Gestão", Description="Auto_Recomendado_Parcial (NQ 85x45x130 / ES 7x4x8 - 71-74% Win) | Auto_Scalp_Seco (NQ 60x45 / ES 8x6 - 63-67% Win) | Auto_Swing_Cheio | Customizado_Ticks", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=8)]
+				public PlaybookT0Mode PB_T0_ModoGestao { get; set; } = PlaybookT0Mode.Auto_Recomendado_Parcial;
 
 				[NinjaScriptProperty]
 				[Range(1, 20000)]
@@ -9295,12 +9572,12 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 
 				[NinjaScriptProperty]
 				[Display(Name="16. [M5] Modo de Gestão M5", Description="Auto_ConformeAtivo (NQ 110x75pts / ES 7x7pts) | Customizado_Pontos | Customizado_Ticks", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=16)]
-				public PlaybookM5Mode PB_M5_ModoGestao { get; set; } = PlaybookM5Mode.Auto_ConformeAtivo;
+				public PlaybookM5Mode PB_M5_ModoGestao { get; set; } = PlaybookM5Mode.Auto_Recomendado_Parcial;
 
 				[NinjaScriptProperty]
 				[Range(50.0, 95.0)]
 				[Display(Name="17. [M5] Força Final Mínima Compra (%)", Description="Força Final mínima em T+5m para Compra (Padrão: 55%)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=17)]
-				public double PB_M5_ForcaFinalCompra { get; set; } = 55.0;
+				public double PB_M5_ForcaFinalCompra { get; set; } = 60.0;
 
 				[NinjaScriptProperty]
 				[Range(50.0, 95.0)]
@@ -9310,7 +9587,7 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				[NinjaScriptProperty]
 				[Range(5.0, 50.0)]
 				[Display(Name="19. [M5] Força Final Máxima Venda (%)", Description="Força Final máxima em T+5m para Venda (Padrão: 45%)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=19)]
-				public double PB_M5_ForcaFinalVenda { get; set; } = 45.0;
+				public double PB_M5_ForcaFinalVenda { get; set; } = 40.0;
 
 				[NinjaScriptProperty]
 				[Range(5.0, 50.0)]
@@ -9343,6 +9620,22 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				public int PB_M5_DuracaoMaxMinutos { get; set; } = 55;
 
 				[NinjaScriptProperty]
+				[Display(Name="25.1. [FLAG OR5] Operar Caixa dos 5 Minutos (OR5)", Description="Ativa a operação de Breakout da Caixa dos 5 Minutos (OR5) imediatamente após o T05 (10:35:01 BRT)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=25)]
+				public bool PB_OperarOR5 { get; set; } = false;
+
+				[NinjaScriptProperty]
+				[Display(Name="25.2. [OR5 Breakout] Modo de Entrada", Description="Com_Pullback_Reteste (Recomendado: 80.8% Win NQ / 81.2% Win ES) | Direto_FechamentoFora", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=25)]
+				public PlaybookOR5EntradaMode PB_OR5_ModoEntrada { get; set; } = PlaybookOR5EntradaMode.Com_Pullback_Reteste;
+
+				[NinjaScriptProperty]
+				[Display(Name="25.3. [OR5] Modelo de Gestão", Description="Parcial25_BE_Final50_Stop50 (Recomendado: +1.501 pts NQ / +273 pts ES) | Parcial35_BE_Final50_Stop50 | AlvoFixo50_Stop50 | AlvoFixo100_Stop50", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=25)]
+				public PlaybookOR5GestaoMode PB_OR5_ModoGestao { get; set; } = PlaybookOR5GestaoMode.Parcial25_BE_Final50_Stop50;
+
+				[NinjaScriptProperty]
+				[Display(Name="25.4. [OR5] Desenhar Níveis OR5 no Gráfico", Description="Traça as linhas da Máxima, Mínima e Centro (50%) da OR5", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=25)]
+				public bool PB_DesenharNiveisOR5 { get; set; } = true;
+
+				[NinjaScriptProperty]
 				[Display(Name="26. [FLAG 3] Operar OR15 — Reversão / Fade (15 min)", Description="Ativa operação contra a borda da OR15 no 1º toque com rejeição (pavio) ou exaustão de força (< 55%)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=26)]
 				public bool PB_OperarOR15_Reversao { get; set; } = true;
 
@@ -9351,8 +9644,12 @@ if (SendSignalsToIndicator && VmSignalBridge.IsBusy(Instrument.FullName))
 				public bool PB_OperarOR15_Breakout { get; set; } = true;
 
 				[NinjaScriptProperty]
+				[Display(Name="27.1. [OR15 Breakout] Modo de Entrada", Description="Direto_FechamentoFora (Entra a mercado na vela que fecha fora) | Com_Pullback_Reteste (Aguarda reteste na borda - Triplica o lucro no ES)", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=27)]
+				public PlaybookOR15BreakoutEntradaMode PB_OR15_BreakoutModoEntrada { get; set; } = PlaybookOR15BreakoutEntradaMode.Direto_FechamentoFora;
+
+				[NinjaScriptProperty]
 				[Display(Name="28. [OR15] Modelo de Gestão 50% (OR_Mid) e 25% (50% da Metade)", Description="Define a combinação de Alvo, Parcial, Breakeven e Stop baseada em 50% e 25% da amplitude dos primeiros 15 minutos", GroupName="26. PLAYBOOK MULTI-ATIVO (NQ / MNQ / ES / MES)", Order=28)]
-				public PlaybookOR15GestaoMode PB_OR15_ModoGestao { get; set; } = PlaybookOR15GestaoMode.Parcial25_BE_Final50_Stop25;
+				public PlaybookOR15GestaoMode PB_OR15_ModoGestao { get; set; } = PlaybookOR15GestaoMode.Auto_Recomendado;
 
 				[NinjaScriptProperty]
 				[Range(50.0, 95.0)]

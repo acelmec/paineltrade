@@ -291,7 +291,7 @@ export const ChartWidgetsOverlay: React.FC<ChartWidgetsOverlayProps> = ({
               <div className="flex items-center gap-1.5 font-bold tracking-wide">
                 <span className="text-slate-500 text-[11px]">⋮⋮</span>
                 <span className="truncate max-w-[260px]">
-                  {(widget.title || '').replace(/GRIX\s*/gi, '').trim() || widget.title}
+                  {((widget.title || '').replace(/GRIX\s*/gi, '').replace(/\s*\(Cesta Geral\)/gi, '')).trim() || widget.title}
                 </span>
               </div>
 
@@ -946,15 +946,36 @@ export const ChartWidgetsOverlay: React.FC<ChartWidgetsOverlayProps> = ({
                         return <div className="text-slate-500 text-center py-2">Carregando cesta...</div>;
                       }
 
-                      return forces.map((item: any) => {
+                      // Oculta os 3 pares individuais de moedas (EUR/JPY, EUR/USD, USD/JPY)
+                      // O fluxo geral já é representado pelo IndexMoneyFlow (IMF)
+                      // Ordena para que o IMF fique imediatamente acima da FORÇA FINAL
+                      const filteredForces = forces
+                        .filter((f: any) => {
+                          const s = (f.symbol || '').toUpperCase();
+                          return s !== 'EUR/JPY' && s !== 'EUR/USD' && s !== 'USD/JPY' && s !== 'EURJPY' && s !== 'EURUSD' && s !== 'USDJPY';
+                        })
+                        .sort((a: any, b: any) => {
+                          const getOrder = (sym: string) => {
+                            const s = (sym || '').toUpperCase();
+                            if (s === 'IMF' || s === 'FLUXO DE CAPITAIS') return 98;
+                            if (s === 'FORÇA FINAL' || s === 'FORCA') return 99;
+                            return 1;
+                          };
+                          return getOrder(a.symbol) - getOrder(b.symbol);
+                        });
+
+                      return filteredForces.map((item: any) => {
                         let cfgId = '';
                         if (item.symbol === 'S&P 500') cfgId = 'sp500_impulso';
                         else if (item.symbol === 'USD Index') cfgId = 'usdindex_impulso';
                         else if (item.symbol === 'FORÇA FINAL') cfgId = 'forca_final';
+                        else if (item.symbol === 'IMF' || item.symbol === 'FLUXO DE CAPITAIS') cfgId = 'imf_impulso';
                         else cfgId = `${item.symbol.toLowerCase()}_impulso`;
 
                         const cfg = (forcesConfig || []).find((f: any) => f.id === cfgId);
                         const isAtivo = cfgId === 'forca_final' ? true : (cfg ? cfg.ativo : false);
+                        const buyVal = Math.round(Number(item.buy || 0));
+                        const sellVal = Math.round(Number(item.sell || 0));
 
                         return (
                           <div
@@ -967,12 +988,12 @@ export const ChartWidgetsOverlay: React.FC<ChartWidgetsOverlayProps> = ({
                             }`}
                           >
                             <span className="font-bold text-slate-300 w-10 truncate">{getShortSymbol(item.symbol)}</span>
-                            <span className="text-emerald-400 font-bold w-6 text-right">{item.buy}%</span>
+                            <span className="text-emerald-400 font-bold w-6 text-right">{buyVal}%</span>
                             <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden flex">
-                              <div className="bg-emerald-500" style={{ width: `${item.buy}%` }} />
-                              <div className="bg-rose-500" style={{ width: `${item.sell}%` }} />
+                              <div className="bg-emerald-500" style={{ width: `${buyVal}%` }} />
+                              <div className="bg-rose-500" style={{ width: `${sellVal}%` }} />
                             </div>
-                            <span className="text-rose-400 font-bold w-6 text-left">{item.sell}%</span>
+                            <span className="text-rose-400 font-bold w-6 text-left">{sellVal}%</span>
                           </div>
                         );
                       });

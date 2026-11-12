@@ -37,6 +37,11 @@ input string META_Symbol      = "META";
 input string AMAZON_Symbol    = "AMZN";
 input string ALPHABET_Symbol  = "GOOGL";
 input string TESLA_Symbol     = "TSLA";
+input string EURJPY_Symbol    = "EURJPY";
+input string EURUSD_Symbol    = "EURUSD";
+input string USDJPY_Symbol    = "USDJPY";
+
+#define TOTAL_ASSETS 14
 
 input int    Dynamic_Number   = 789789;
 input bool   Show_Panel       = true;
@@ -100,7 +105,7 @@ struct AssetData {
    int    digits;
 };
 
-AssetData assets[11];
+AssetData assets[TOTAL_ASSETS];
 int       objPrefix;
 string    bgObjName;
 
@@ -144,6 +149,9 @@ int OnInit()
    InitAsset(8, "amazon_impulso",   AMAZON_Symbol);
    InitAsset(9, "alphabet_impulso", ALPHABET_Symbol);
    InitAsset(10,"tesla_impulso",    TESLA_Symbol);
+   InitAsset(11,"eurjpy_impulso",   EURJPY_Symbol);
+   InitAsset(12,"eurusd_impulso",   EURUSD_Symbol);
+   InitAsset(13,"usdjpy_impulso",   USDJPY_Symbol);
 
    if(Show_Panel) CreatePanel();
 
@@ -193,7 +201,7 @@ void OnTick()
 //+------------------------------------------------------------------+
 void OnTimer()
 {
-   for(int i=0; i<11; i++)
+   for(int i=0; i<TOTAL_ASSETS; i++)
    {
       CalcularImpulsoExato(assets[i]);
    }
@@ -335,7 +343,7 @@ void CalcularForcaFinalNAS100()
    int idx_nas = -1, idx_vix = -1, idx_sp = -1, idx_usd = -1;
    int idx_tech[7] = {-1,-1,-1,-1,-1,-1,-1};
 
-   for(int i=0; i<11; i++)
+   for(int i=0; i<TOTAL_ASSETS; i++)
    {
       if(assets[i].symbol == NASDAQ_Symbol) idx_nas = i;
       if(assets[i].symbol == VIX_Symbol) idx_vix = i;
@@ -519,6 +527,12 @@ void EnviarCandleFechadoParaSupabase(datetime closedTime)
    json += "\"alphabet_venda\":" + DoubleToString(assets[9].venda,0) + ",";
    json += "\"tesla_compra\":" + DoubleToString(assets[10].compra,0) + ",";
    json += "\"tesla_venda\":" + DoubleToString(assets[10].venda,0) + ",";
+   json += "\"eurjpy_compra\":" + DoubleToString(assets[11].compra,0) + ",";
+   json += "\"eurjpy_venda\":" + DoubleToString(assets[11].venda,0) + ",";
+   json += "\"eurusd_compra\":" + DoubleToString(assets[12].compra,0) + ",";
+   json += "\"eurusd_venda\":" + DoubleToString(assets[12].venda,0) + ",";
+   json += "\"usdjpy_compra\":" + DoubleToString(assets[13].compra,0) + ",";
+   json += "\"usdjpy_venda\":" + DoubleToString(assets[13].venda,0) + ",";
    json += "\"forca_final_compra\":" + DoubleToString(g_nas100_forca_compra,0) + ",";
    json += "\"forca_final_venda\":" + DoubleToString(g_nas100_forca_venda,0) + ",";
    json += "\"direcao\":" + IntegerToString(g_nas100_direcao) + ",";
@@ -621,6 +635,12 @@ void EnviarParaSupabase()
    json += "\"alphabet_venda\":" + DoubleToString(assets[9].venda,0) + ",";
    json += "\"tesla_compra\":" + DoubleToString(assets[10].compra,0) + ",";
    json += "\"tesla_venda\":" + DoubleToString(assets[10].venda,0) + ",";
+   json += "\"eurjpy_compra\":" + DoubleToString(assets[11].compra,0) + ",";
+   json += "\"eurjpy_venda\":" + DoubleToString(assets[11].venda,0) + ",";
+   json += "\"eurusd_compra\":" + DoubleToString(assets[12].compra,0) + ",";
+   json += "\"eurusd_venda\":" + DoubleToString(assets[12].venda,0) + ",";
+   json += "\"usdjpy_compra\":" + DoubleToString(assets[13].compra,0) + ",";
+   json += "\"usdjpy_venda\":" + DoubleToString(assets[13].venda,0) + ",";
    json += "\"forca_final_compra\":" + DoubleToString(g_nas100_forca_compra,0) + ",";
    json += "\"forca_final_venda\":" + DoubleToString(g_nas100_forca_venda,0) + ",";
    json += "\"direcao\":" + IntegerToString(g_nas100_direcao) + ",";
@@ -712,7 +732,7 @@ void CreatePanel()
    int corner = Panel_Corner;
    if(corner < 0 || corner > 3) corner = 0;
 
-   int rows = (11 + Cols - 1) / Cols;
+   int rows = (TOTAL_ASSETS + 1 + Cols - 1) / Cols;
    int realHeight = 20 + rows * Box_SpacingY + 10;
 
    bgObjName = StringFormat("FFB_%d_BG", objPrefix);
@@ -736,7 +756,7 @@ void CreatePanel()
    ObjectSet(titleObj, OBJPROP_COLOR, Gold);
    ObjectSetText(titleObj, "IMPULSE TREND PANEL", 11, "Arial Bold", Gold);
 
-   for(int i=0; i<11; i++)
+   for(int i=0; i<TOTAL_ASSETS; i++)
    {
       int col = i % Cols;
       int row = i / Cols;
@@ -745,8 +765,8 @@ void CreatePanel()
       CreateAssetBox(i, cx, cy, corner);
    }
 
-   int ff_col = 5;
-   int ff_row = 1;
+   int ff_col = TOTAL_ASSETS % Cols;
+   int ff_row = TOTAL_ASSETS / Cols;
    int ff_x = Panel_X + ff_col * Box_SpacingX;
    int ff_y = Panel_Y + 20 + ff_row * Box_SpacingY;
    CreateForcaFinalBox(ff_x, ff_y, corner);
@@ -911,7 +931,7 @@ void CreateForcaFinalBox(int cx, int cy, int corner)
 //+------------------------------------------------------------------+
 void UpdatePanel()
 {
-   for(int i=0; i<11; i++)
+   for(int i=0; i<TOTAL_ASSETS; i++)
    {
       string objName;
       color cUp = assets[i].compra > assets[i].venda ? Lime : C'0,120,0';
@@ -983,7 +1003,7 @@ void DeletePanel()
 {
    ObjectDelete(bgObjName);
    ObjectDelete(StringFormat("FFB_%d_TitleMain", objPrefix));
-   for(int i=0; i<11; i++)
+   for(int i=0; i<TOTAL_ASSETS; i++)
    {
       ObjectDelete(StringFormat("FFB_%d_Title_%d", objPrefix, i));
       ObjectDelete(StringFormat("FFB_%d_MiniBG_%d", objPrefix, i));

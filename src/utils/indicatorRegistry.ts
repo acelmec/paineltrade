@@ -1739,6 +1739,12 @@ export const INDICATOR_DEFINITIONS: Record<string, IndicatorDefinition> = {
     overlay: false,
     paramDefs: [
       {
+        key: 'showFxFlow',
+        label: '🌐 Exibir IndexMoneyFlow (IMF)',
+        type: 'boolean',
+        default: true
+      },
+      {
         key: 'indicesMode',
         label: 'Modo Índices Futuros',
         type: 'select',
@@ -1762,8 +1768,11 @@ export const INDICATOR_DEFINITIONS: Record<string, IndicatorDefinition> = {
       },
       { key: 'showVix', label: '⚡ Exibir VIX (Volatilidade)', type: 'boolean', default: true },
       { key: 'invertVix', label: '🔄 Inverter VIX (100 - VIX para correlacionar com alta)', type: 'boolean', default: false },
-      { key: 'showDxy', label: '💵 Exibir DXY / USD Index', type: 'boolean', default: true },
+      { key: 'showDxy', label: '💵 Exibir DXY / USD Index (Isolado)', type: 'boolean', default: false },
       { key: 'invertDxy', label: '🔄 Inverter DXY (100 - DXY para correlacionar com alta)', type: 'boolean', default: false },
+      { key: 'showEurJpy', label: '💴 Exibir EUR/JPY (Risco Global)', type: 'boolean', default: false },
+      { key: 'showUsdJpy', label: '💴 Exibir USD/JPY (Carry Trade)', type: 'boolean', default: false },
+      { key: 'showEurUsd', label: '💶 Exibir EUR/USD (Fluxo Euro/Dólar)', type: 'boolean', default: false },
       { key: 'showNq', label: 'Exibir NQ (quando no modo individual)', type: 'boolean', default: true },
       { key: 'showEs', label: 'Exibir ES (quando no modo individual)', type: 'boolean', default: true },
       { key: 'showNvidia', label: 'Exibir NVIDIA (NVDA)', type: 'boolean', default: true },
