@@ -2431,30 +2431,38 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     };
   }, []);
 
-  const handleChartCanvasClick = (e: React.MouseEvent) => {
-    if (!markingSlTpState || !candleSeriesRef.current || !mainContainerRef.current) return;
+  const markingSlTpStateRef = useRef(markingSlTpState);
+  markingSlTpStateRef.current = markingSlTpState;
+  const tempSlPriceRef = useRef(tempSlPrice);
+  tempSlPriceRef.current = tempSlPrice;
+  const handleChartPriceSelectionRef = useRef<((clickY: number) => void) | null>(null);
 
-    const rect = mainContainerRef.current.getBoundingClientRect();
-    const clickY = e.clientY - rect.top;
+  const handleChartPriceSelection = useCallback((clickY: number) => {
+    const currentState = markingSlTpStateRef.current;
+    if (!currentState || !candleSeriesRef.current || !mainContainerRef.current) return;
+
     const series = candleSeriesRef.current;
     const price = series.coordinateToPrice ? series.coordinateToPrice(clickY) : null;
     if (!price || isNaN(price)) return;
 
     const cleanPrice = Number(price.toFixed(2));
-    const keySl = isSimulatorMode || isSimulator ? 'vortex_replay_custom_sl_price' : 'vortex_custom_sl_price';
-    const keyTp = isSimulatorMode || isSimulator ? 'vortex_replay_custom_tp_price' : 'vortex_custom_tp_price';
-    const keyMode = isSimulatorMode || isSimulator ? 'vortex_replay_stop_mode' : 'vortex_stop_mode';
+    const isSim = isSimulatorMode || isSimulator;
+    const keySl = isSim ? 'vortex_replay_custom_sl_price' : 'vortex_custom_sl_price';
+    const keyTp = isSim ? 'vortex_replay_custom_tp_price' : 'vortex_custom_tp_price';
+    const keyMode = isSim ? 'vortex_replay_stop_mode' : 'vortex_stop_mode';
 
-    if (markingSlTpState === 'marking_sl') {
+    if (currentState === 'marking_sl') {
       setTempSlPrice(cleanPrice);
+      tempSlPriceRef.current = cleanPrice;
       localStorage.setItem(keySl, String(cleanPrice));
       localStorage.setItem(keyMode, 'grafico');
       setMarkingSlTpState('marking_tp');
+      markingSlTpStateRef.current = 'marking_tp';
       setCustomMarkersVersion(v => v + 1);
       if (updateTradePriceLinesRef.current) updateTradePriceLinesRef.current();
       if (updateLevelLabelsRef.current) updateLevelLabelsRef.current();
-    } else if (markingSlTpState === 'marking_tp') {
-      const sl = tempSlPrice || cleanPrice;
+    } else if (currentState === 'marking_tp') {
+      const sl = tempSlPriceRef.current || cleanPrice;
       const tp = cleanPrice;
 
       localStorage.setItem(keySl, String(sl));
@@ -2462,13 +2470,23 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       localStorage.setItem(keyMode, 'grafico');
 
       setMarkingSlTpState(null);
+      markingSlTpStateRef.current = null;
       setTempSlPrice(null);
+      tempSlPriceRef.current = null;
       setCustomMarkersVersion(v => v + 1);
 
       if (updateTradePriceLinesRef.current) updateTradePriceLinesRef.current();
       if (updateLevelLabelsRef.current) updateLevelLabelsRef.current();
       window.dispatchEvent(new CustomEvent('vortex_custom_sltp_updated', { detail: { sl, tp } }));
     }
+  }, [isSimulator, isSimulatorMode]);
+
+  handleChartPriceSelectionRef.current = handleChartPriceSelection;
+
+  const handleChartCanvasClick = (e: React.MouseEvent) => {
+    if (!mainContainerRef.current) return;
+    const rect = mainContainerRef.current.getBoundingClientRect();
+    handleChartPriceSelection(e.clientY - rect.top);
   };
 
   // Parse, aggregate and sort candles (excluindo velas pós-sessão > 18:00:00 e preservando o candle das 18:00:00)
@@ -6915,10 +6933,33 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
     mainChart.subscribeCrosshairMove(handleChartInteraction);
 
+    // Suporte robusto para marcação de SL/TP com clique e toque nativo no mobile (🎯 TOQUE)
+    const handleMainChartClick = (param: any) => {
+      if (param && param.point && param.point.y !== undefined) {
+        handleChartPriceSelectionRef.current?.(param.point.y);
+      }
+    };
+    mainChart.subscribeClick(handleMainChartClick);
+
+    const handleMobileTouchSelection = (e: TouchEvent) => {
+      if (!markingSlTpStateRef.current || !mainContainerEl) return;
+      const touch = e.changedTouches?.[0] || e.touches?.[0];
+      if (touch) {
+        const rect = mainContainerEl.getBoundingClientRect();
+        handleChartPriceSelectionRef.current?.(touch.clientY - rect.top);
+      }
+    };
+    if (mainContainerEl) {
+      mainContainerEl.addEventListener('touchend', handleMobileTouchSelection, { passive: true });
+    }
+
     // Trigger an initial resize layout pass after browser has finished laying out elements
     const initialResizeTimer = setTimeout(runResize, 100);
 
     return () => {
+      try {
+        mainChart.unsubscribeClick(handleMainChartClick);
+      } catch (_) {}
       if (rootEl) {
         rootEl.removeEventListener('wheel', handleWheel);
       }
@@ -6927,6 +6968,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         mainContainerEl.removeEventListener('pointermove', handleChartInteraction);
         mainContainerEl.removeEventListener('pointerup', handleChartInteraction);
         mainContainerEl.removeEventListener('wheel', handleChartInteraction);
+        mainContainerEl.removeEventListener('touchend', handleMobileTouchSelection);
       }
       resizeObserver.disconnect();
       window.removeEventListener('resize', runResize);

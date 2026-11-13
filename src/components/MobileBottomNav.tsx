@@ -31,6 +31,37 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollRight, setCanScrollRight] = useState(true);
 
+  // Controle de arrasto com mouse ou touch para rolagem fluida
+  const isDraggingRef = useRef(false);
+  const startXRef = useRef(0);
+  const scrollLeftStartRef = useRef(0);
+  const hasMovedRef = useRef(false);
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (!scrollRef.current) return;
+    isDraggingRef.current = true;
+    hasMovedRef.current = false;
+    startXRef.current = e.clientX;
+    scrollLeftStartRef.current = scrollRef.current.scrollLeft;
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!isDraggingRef.current || !scrollRef.current) return;
+    const dx = e.clientX - startXRef.current;
+    if (Math.abs(dx) > 3) {
+      hasMovedRef.current = true;
+    }
+    scrollRef.current.scrollLeft = scrollLeftStartRef.current - dx;
+    checkScroll();
+  };
+
+  const handlePointerUp = () => {
+    isDraggingRef.current = false;
+    setTimeout(() => {
+      hasMovedRef.current = false;
+    }, 60);
+  };
+
   const isCopyOnly = planDetails?.isCopyTraderOnly === true;
   const isSystemAdmin = user?.email?.toLowerCase() === 'admin@vortex.com';
 
@@ -184,31 +215,42 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
       aria-label="Navegação Mobile"
     >
       <div className="relative w-full">
-        {/* Container horizontal com scroll suave touch */}
+        {/* Container horizontal com scroll suave touch e arraste fluido */}
         <div
           ref={scrollRef}
-          className="flex items-center gap-1.5 px-2 py-1.5 overflow-x-auto no-scrollbar scroll-smooth w-full"
-          style={{ WebkitOverflowScrolling: 'touch' }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerUp}
+          className="flex items-center gap-1.5 px-2 py-1.5 overflow-x-auto no-scrollbar scroll-smooth w-full cursor-grab active:cursor-grabbing select-none"
+          style={{
+            WebkitOverflowScrolling: 'touch',
+            touchAction: 'pan-x',
+            overscrollBehaviorX: 'contain'
+          }}
         >
           {navItems.map((item) => {
             const active = item.isActive !== undefined ? item.isActive : currentPage === item.id;
             return (
               <button
                 key={item.id}
-                onClick={item.action}
-                className={`flex flex-col items-center justify-center min-w-[62px] px-2 py-1 rounded-xl transition-all duration-150 active:scale-95 shrink-0 ${
+                onClick={() => {
+                  if (hasMovedRef.current) return;
+                  item.action();
+                }}
+                className={`flex flex-col items-center justify-center min-w-[62px] px-2 py-1 rounded-xl transition-all duration-150 active:scale-95 shrink-0 select-none ${
                   active
                     ? 'bg-blue-600/25 border border-blue-500/50 text-blue-300 shadow-sm shadow-blue-950/50'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'
                 }`}
               >
-                <div className="relative text-lg leading-tight flex items-center justify-center">
+                <div className="relative text-lg leading-tight flex items-center justify-center pointer-events-none">
                   <span>{item.icon}</span>
                   {active && (
                     <span className="absolute -top-0.5 -right-1 w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.9)] animate-pulse" />
                   )}
                 </div>
-                <span className={`text-[10px] tracking-tight font-extrabold mt-0.5 whitespace-nowrap ${active ? 'text-blue-300' : 'text-slate-400'}`}>
+                <span className={`text-[10px] tracking-tight font-extrabold mt-0.5 whitespace-nowrap pointer-events-none ${active ? 'text-blue-300' : 'text-slate-400'}`}>
                   {item.label}
                 </span>
               </button>
@@ -217,11 +259,14 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
 
           {/* Central de Avisos / Notificações */}
           <button
-            onClick={onOpenNotifications}
-            className="flex flex-col items-center justify-center min-w-[62px] px-2 py-1 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent transition-all active:scale-95 shrink-0 relative"
+            onClick={() => {
+              if (hasMovedRef.current) return;
+              if (onOpenNotifications) onOpenNotifications();
+            }}
+            className="flex flex-col items-center justify-center min-w-[62px] px-2 py-1 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent transition-all active:scale-95 shrink-0 relative select-none"
             title="Avisos e Comunicados"
           >
-            <div className="relative text-lg leading-tight">
+            <div className="relative text-lg leading-tight pointer-events-none">
               <span>📢</span>
               {unreadCount > 0 && (
                 <span className="absolute -top-1 -right-2 bg-rose-500 text-white font-black text-[9px] px-1 py-0.2 rounded-full border border-rose-400 animate-pulse">
@@ -229,7 +274,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
                 </span>
               )}
             </div>
-            <span className="text-[10px] tracking-tight font-extrabold mt-0.5 text-slate-400 whitespace-nowrap">
+            <span className="text-[10px] tracking-tight font-extrabold mt-0.5 text-slate-400 whitespace-nowrap pointer-events-none">
               Avisos
             </span>
           </button>
@@ -237,12 +282,15 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           {/* Copilot IA Botão no Rodapé */}
           {!isCopyOnly && canAccessCopilotAI && (
             <button
-              onClick={() => setIsCopilotModalOpen(true)}
-              className="flex flex-col items-center justify-center min-w-[62px] px-2 py-1 rounded-xl bg-purple-950/40 border border-purple-800/50 text-purple-300 transition-all active:scale-95 shrink-0"
+              onClick={() => {
+                if (hasMovedRef.current) return;
+                setIsCopilotModalOpen(true);
+              }}
+              className="flex flex-col items-center justify-center min-w-[62px] px-2 py-1 rounded-xl bg-purple-950/40 border border-purple-800/50 text-purple-300 transition-all active:scale-95 shrink-0 select-none"
               title="Copilot IA"
             >
-              <div className="text-lg leading-tight">🤖</div>
-              <span className="text-[10px] tracking-tight font-extrabold mt-0.5 text-purple-300 whitespace-nowrap">
+              <div className="text-lg leading-tight pointer-events-none">🤖</div>
+              <span className="text-[10px] tracking-tight font-extrabold mt-0.5 text-purple-300 whitespace-nowrap pointer-events-none">
                 Copilot
               </span>
             </button>
@@ -250,12 +298,15 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
 
           {/* Sair do Sistema */}
           <button
-            onClick={logout}
-            className="flex flex-col items-center justify-center min-w-[56px] px-2 py-1 rounded-xl text-rose-400 hover:bg-rose-950/30 border border-transparent transition-all active:scale-95 shrink-0"
+            onClick={() => {
+              if (hasMovedRef.current) return;
+              logout();
+            }}
+            className="flex flex-col items-center justify-center min-w-[56px] px-2 py-1 rounded-xl text-rose-400 hover:bg-rose-950/30 border border-transparent transition-all active:scale-95 shrink-0 select-none"
             title="Sair da Conta"
           >
-            <div className="text-lg leading-tight">🚪</div>
-            <span className="text-[10px] tracking-tight font-extrabold mt-0.5 text-rose-400 whitespace-nowrap">
+            <div className="text-lg leading-tight pointer-events-none">🚪</div>
+            <span className="text-[10px] tracking-tight font-extrabold mt-0.5 text-rose-400 whitespace-nowrap pointer-events-none">
               Sair
             </span>
           </button>

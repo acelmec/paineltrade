@@ -70,6 +70,7 @@ export const isMobileView = (): boolean => {
   if (typeof window === 'undefined') return false;
   if (isDesktopApp()) return false;
   if (isAndroidNative()) return true;
+  if (isMobileDevice()) return true;
   return window.innerWidth < 768;
 };
 

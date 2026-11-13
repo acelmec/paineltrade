@@ -69,7 +69,30 @@ export const TradeWorkstation: React.FC = () => {
 
   const isMobile = useIsMobile();
   const [isMobileBoletaOpen, setIsMobileBoletaOpen] = useState<boolean>(false);
+  const [isMobileLeftDrawerOpen, setIsMobileLeftDrawerOpen] = useState<boolean>(false);
   const [mobileQty, setMobileQty] = useState<number>(1);
+  const touchStartXRef = useRef<number | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
+
+  const handleChartTouchStart = (e: React.TouchEvent) => {
+    if (!isMobile) return;
+    const touch = e.touches[0];
+    touchStartXRef.current = touch.clientX;
+    touchStartYRef.current = touch.clientY;
+  };
+
+  const handleChartTouchEnd = (e: React.TouchEvent) => {
+    if (!isMobile || touchStartXRef.current === null || touchStartYRef.current === null) return;
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - touchStartXRef.current;
+    const dy = touch.clientY - touchStartYRef.current;
+    // Se o toque iniciou na lateral esquerda (< 55px) e arrastou para a direita (> 40px)
+    if (touchStartXRef.current < 55 && dx > 40 && Math.abs(dx) > Math.abs(dy)) {
+      setIsMobileLeftDrawerOpen(true);
+    }
+    touchStartXRef.current = null;
+    touchStartYRef.current = null;
+  };
 
   // Timeframe persistido por Painel (Independente da Conta)
   const [timeframe, setTimeframe] = useState<number>(() => {
@@ -1296,90 +1319,9 @@ export const TradeWorkstation: React.FC = () => {
 
   return (
     <div className={`w-full ${isMobile ? 'h-[calc(100vh-70px)]' : 'h-[calc(100vh-20px)]'} ${wsRootBg} flex flex-col font-sans overflow-hidden transition-colors duration-200`}>
-      {/* Mobile Top Compact Toolbar */}
-      {isMobile ? (
-        <div className={`${wsHeaderBg} border-b px-2 py-1 h-10 flex items-center justify-between select-none shrink-0 relative z-50`}>
-          <div className="flex items-center gap-1.5">
-            <div className={`flex items-center gap-1 ${wsInputBg} border px-2 py-0.5 rounded-lg`}>
-              <span className="text-xs">📈</span>
-              <select
-                value={focusedSlot.panelId || ''}
-                onChange={(e) => updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, panelId: e.target.value }))}
-                className="bg-transparent text-xs font-black outline-none cursor-pointer text-blue-300 max-w-[105px] truncate"
-              >
-                {panels?.map((p: any) => {
-                  const cleanName = p.name ? p.name.replace(/\s*\([^)]*\)/g, '').trim() : 'Painel';
-                  return (
-                    <option key={p.id} value={p.id} className="bg-[#181d28]">
-                      {cleanName}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-
-            <div className={`flex items-center gap-0.5 ${wsInputBg} border px-1.5 py-0.5 rounded-lg`}>
-              <span className="text-[10px] text-slate-400">⏱️</span>
-              <select
-                value={focusedSlot.timeframe}
-                onChange={(e) => updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, timeframe: Number(e.target.value) }))}
-                className="bg-transparent text-xs font-bold text-blue-400 outline-none cursor-pointer"
-              >
-                <option value={1} className="bg-[#181d28]">1m</option>
-                <option value={2} className="bg-[#181d28]">2m</option>
-                <option value={3} className="bg-[#181d28]">3m</option>
-                <option value={5} className="bg-[#181d28]">5m</option>
-                <option value={10} className="bg-[#181d28]">10m</option>
-                <option value={15} className="bg-[#181d28]">15m</option>
-                <option value={30} className="bg-[#181d28]">30m</option>
-                <option value={60} className="bg-[#181d28]">1h</option>
-                <option value={1440} className="bg-[#181d28]">1D</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setFitChartTrigger(prev => prev + 1)}
-              className="border border-amber-500/60 font-mono font-black text-xs text-amber-400 px-2 py-0.5 rounded-lg bg-amber-950/30 active:scale-95"
-              title="Alinhar Gráfico e Escala (NinjaTrader 8 - Botão F)"
-            >
-              F
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setIsIndicatorsModalOpen(true)}
-              className="bg-blue-600/20 border border-blue-500/40 text-blue-300 px-2 py-0.5 rounded-lg text-xs font-bold active:scale-95 flex items-center gap-0.5"
-              title="Gerenciar Indicadores"
-            >
-              <span>📊</span>
-              <span className="text-[9px] bg-blue-900 px-1 rounded-full">{focusedVisibleIndicators.length}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setIsMobileBoletaOpen(true)}
-              className="bg-emerald-600 border border-emerald-500 text-white px-2 py-0.5 rounded-lg text-xs font-bold active:scale-95 shadow"
-              title="Abrir Boleta de Operações"
-            >
-              📋
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setPanelMode && setPanelMode('mode1')}
-              className={`${wsBtnBg} px-2 py-0.5 rounded-lg text-xs font-semibold border active:scale-95`}
-              title="Voltar ao Painel 1"
-            >
-              ↩️
-            </button>
-          </div>
-        </div>
-      ) : (
-      /* Top Workstation Header Toolbar - Single-Line Compact Modern Header */
-      <div className={`${wsHeaderBg} border-b px-3 py-1.5 h-11 flex items-center justify-between gap-2.5 select-none shrink-0 relative z-50 transition-colors duration-200`}>
+      {/* Top Workstation Header Toolbar - Apenas Desktop (No Mobile é substituído pelo botão discreto no gráfico e drawer) */}
+      {!isMobile && (
+        <div className={`${wsHeaderBg} border-b px-3 py-1.5 h-11 flex items-center justify-between gap-2.5 select-none shrink-0 relative z-50 transition-colors duration-200`}>
         {/* Left Section: Clean Asset Selector, Timeframe Dropdown & Indicators */}
         <div className="flex items-center gap-2 shrink-0">
           {/* Asset Panel Selector (Atua no gráfico focado) */}
@@ -1849,7 +1791,28 @@ export const TradeWorkstation: React.FC = () => {
         {/* Left Container */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Main Chart Area (Single ou Multi-Gráficos com Splitters Arrastáveis) */}
-          <div ref={chartContainerRef} className={`flex-1 relative ${isLightTheme ? 'bg-[#ffffff]' : 'bg-[#000000]'} overflow-hidden transition-colors duration-200`}>
+          <div
+            ref={chartContainerRef}
+            onTouchStart={handleChartTouchStart}
+            onTouchEnd={handleChartTouchEnd}
+            className={`flex-1 relative ${isLightTheme ? 'bg-[#ffffff]' : 'bg-[#000000]'} overflow-hidden transition-colors duration-200`}
+          >
+            {/* Botão Flutuante Discreto no Celular para Abrir Menu Lateral Esquerdo */}
+            {isMobile && (
+              <button
+                type="button"
+                onClick={() => setIsMobileLeftDrawerOpen(true)}
+                className="absolute top-4 left-3 z-30 bg-[#0c101d]/90 hover:bg-[#121828] border border-slate-700/80 hover:border-cyan-500/80 text-slate-100 px-3 py-1.5 rounded-full shadow-2xl flex items-center gap-1.5 backdrop-blur-md active:scale-95 transition-all text-xs font-black cursor-pointer select-none"
+                title="Abrir Menu de Ferramentas e Ativos [Deslize da esquerda para a direita]"
+              >
+                <span className="text-cyan-400 text-sm">☰</span>
+                <span className="font-mono text-cyan-300 font-extrabold tracking-wide">{boletaSymbol}</span>
+                <span className="text-[10px] text-slate-400 bg-slate-800/90 px-1.5 py-0.2 rounded font-mono">
+                  {focusedSlot.timeframe >= 1440 ? '1D' : focusedSlot.timeframe >= 60 ? `${focusedSlot.timeframe / 60}h` : `${focusedSlot.timeframe}m`}
+                </span>
+              </button>
+            )}
+
             <TradeChartGrid
               layout={isMobile ? 'single' : chartLayout}
               ratios={splitRatios}
@@ -2032,6 +1995,212 @@ export const TradeWorkstation: React.FC = () => {
             <span>📋</span>
             <span className="text-[8px] uppercase tracking-tighter">Opções</span>
           </button>
+        </div>
+      )}
+
+      {/* Mobile Left Vertical Drawer (Menu Vertical ao Lado Esquerdo - Discreto & Ergonômico) */}
+      {isMobile && isMobileLeftDrawerOpen && (
+        <div className="fixed inset-0 z-[9998] flex select-none">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200"
+            onClick={() => setIsMobileLeftDrawerOpen(false)}
+          />
+
+          {/* Drawer Container */}
+          <div
+            className="relative w-72 max-w-[85vw] h-full bg-[#0c101d] border-r border-slate-800/90 shadow-2xl flex flex-col z-10 animate-in slide-in-from-left duration-250 overflow-hidden"
+            style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 16px)' }}
+          >
+            {/* Drawer Header */}
+            <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
+              <div className="flex items-center gap-2">
+                <span className="text-base text-cyan-400">⚙️</span>
+                <span className="font-extrabold text-xs text-slate-200 uppercase tracking-wider">
+                  Menu Operacional
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMobileLeftDrawerOpen(false)}
+                className="w-7 h-7 rounded-lg bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-sm font-bold active:scale-95 transition cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Drawer Scrollable Body */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+              {/* Section 1: Seletor de Ativo / Painel */}
+              <div>
+                <div className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider mb-2 flex items-center justify-between">
+                  <span>📈 Ativo Selecionado</span>
+                  <span className="text-cyan-400 font-mono font-black">{boletaSymbol}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {panels?.map((p: any) => {
+                    const cleanName = p.name ? p.name.replace(/\s*\([^)]*\)/g, '').trim() : 'Painel';
+                    const isSel = (focusedSlot.panelId === p.id) || (!focusedSlot.panelId && activePanel?.id === p.id);
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, panelId: p.id }));
+                          setIsMobileLeftDrawerOpen(false);
+                        }}
+                        className={`p-2 rounded-xl text-xs font-black text-left transition flex items-center justify-between border cursor-pointer ${
+                          isSel
+                            ? 'bg-blue-600/30 border-blue-500 text-blue-300 shadow-md'
+                            : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:bg-slate-800'
+                        }`}
+                      >
+                        <span className="truncate">{cleanName}</span>
+                        {isSel && <span className="text-[10px] text-cyan-400">✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Section 2: Timeframe */}
+              <div>
+                <div className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider mb-2">
+                  ⏱️ Tempo Gráfico (Timeframe)
+                </div>
+                <div className="grid grid-cols-5 gap-1.5 font-mono font-bold text-xs">
+                  {[1, 2, 3, 5, 10, 15, 30, 60, 240, 1440].map((tf) => {
+                    const isSel = focusedSlot.timeframe === tf;
+                    const label = tf >= 1440 ? '1D' : tf >= 60 ? `${tf / 60}h` : `${tf}m`;
+                    return (
+                      <button
+                        key={tf}
+                        type="button"
+                        onClick={() => {
+                          updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, timeframe: tf }));
+                          setIsMobileLeftDrawerOpen(false);
+                        }}
+                        className={`py-1.5 rounded-lg text-center transition border cursor-pointer ${
+                          isSel
+                            ? 'bg-blue-600 border-blue-400 text-white shadow'
+                            : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Section 3: Ferramentas Técnicas & Ações */}
+              <div>
+                <div className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider mb-2">
+                  🛠️ Ferramentas & Gráfico
+                </div>
+                <div className="space-y-1.5">
+                  {/* Fit Scale [F] */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFitChartTrigger(prev => prev + 1);
+                      setIsMobileLeftDrawerOpen(false);
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-amber-950/30 hover:bg-amber-950/50 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="font-mono font-black bg-amber-500/20 px-1.5 py-0.5 rounded text-[11px] border border-amber-500/30">F</span>
+                      <span>Alinhar Escala (NinjaTrader Fit)</span>
+                    </span>
+                    <span className="text-slate-500 text-xs">›</span>
+                  </button>
+
+                  {/* Indicadores & Templates */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsIndicatorsModalOpen(true);
+                      setIsMobileLeftDrawerOpen(false);
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span>📊</span>
+                      <span>Indicadores Técnicos</span>
+                    </span>
+                    <span className="text-[10px] bg-blue-900/80 text-blue-300 px-2 py-0.5 rounded-full font-bold">
+                      {focusedVisibleIndicators.length}
+                    </span>
+                  </button>
+
+                  {/* Widgets Flutuantes */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsWidgetsModalOpen(true);
+                      setIsMobileLeftDrawerOpen(false);
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span>🧩</span>
+                      <span>Widgets e Cards no Gráfico</span>
+                    </span>
+                    <span className="text-slate-500 text-xs">›</span>
+                  </button>
+
+                  {/* Centralizar Preço [C] */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, autoCenter: !s.autoCenter }));
+                      setIsMobileLeftDrawerOpen(false);
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="font-mono font-black bg-slate-800 px-1.5 py-0.5 rounded text-[11px]">C</span>
+                      <span>Auto-Center Preço</span>
+                    </span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${focusedSlot.autoCenter ? 'bg-yellow-500/20 text-yellow-300' : 'text-slate-500'}`}>
+                      {focusedSlot.autoCenter ? 'ATIVO' : 'DESL'}
+                    </span>
+                  </button>
+
+                  {/* Reenquadrar [R] */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetViewTrigger(prev => prev + 1);
+                      setIsMobileLeftDrawerOpen(false);
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="font-mono font-black bg-slate-800 px-1.5 py-0.5 rounded text-[11px]">R</span>
+                      <span>Reenquadrar Vista (Reset View)</span>
+                    </span>
+                    <span className="text-slate-500 text-xs">›</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Section 4: Navegação */}
+              <div className="pt-2 border-t border-slate-800/80">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (setPanelMode) setPanelMode('mode1');
+                    setIsMobileLeftDrawerOpen(false);
+                  }}
+                  className="w-full p-2.5 rounded-xl bg-blue-950/40 hover:bg-blue-900/50 border border-blue-800/60 text-blue-300 text-xs font-bold flex items-center justify-center gap-2 active:scale-95 transition cursor-pointer"
+                >
+                  <span>↩️</span>
+                  <span>Alternar para Painel 1 (Dashboard)</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
