@@ -4495,7 +4495,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
             const y = safePriceToY(poc);
             if (y !== null && !isNaN(y) && y >= 0 && y <= containerEl.clientHeight) {
               const tagStyle = `position: absolute; left: 10px; top: ${y - 12}px; color: ${pocColor}; font-size: 11.5px; font-family: 'JetBrains Mono', monospace; font-weight: 700; background: #070b14f5; padding: 2.5px 8px; border-radius: 4px; border: 1px solid ${pocColor}aa; line-height: 1; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.8); z-index: 55;`;
-              upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, 'vol_poc', `🟡 VPOC ${poc.toFixed(2)}`, false, tagStyle);
+              upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, 'vol_poc', 'VPOC', false, tagStyle);
             }
           }
 
@@ -4504,7 +4504,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
               const y = safePriceToY(vah);
               if (y !== null && !isNaN(y) && y >= 0 && y <= containerEl.clientHeight) {
                 const tagStyle = `position: absolute; left: 10px; top: ${y - 12}px; color: ${vahColor}; font-size: 11.5px; font-family: 'JetBrains Mono', monospace; font-weight: 700; background: #070b14f5; padding: 2.5px 8px; border-radius: 4px; border: 1px solid ${vahColor}aa; line-height: 1; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.8); z-index: 55;`;
-                upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, 'vol_vah', `🔵 VAH 70% ${vah.toFixed(2)}`, false, tagStyle);
+                upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, 'vol_vah', 'VAH 70%', false, tagStyle);
               }
             }
 
@@ -4512,7 +4512,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
               const y = safePriceToY(val);
               if (y !== null && !isNaN(y) && y >= 0 && y <= containerEl.clientHeight) {
                 const tagStyle = `position: absolute; left: 10px; top: ${y - 12}px; color: ${valColor}; font-size: 11.5px; font-family: 'JetBrains Mono', monospace; font-weight: 700; background: #070b14f5; padding: 2.5px 8px; border-radius: 4px; border: 1px solid ${valColor}aa; line-height: 1; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.8); z-index: 55;`;
-                upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, 'vol_val', `🟣 VAL 70% ${val.toFixed(2)}`, false, tagStyle);
+                upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, 'vol_val', 'VAL 70%', false, tagStyle);
               }
             }
           }
@@ -4522,7 +4522,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
               const y = safePriceToY(np.price);
               if (y !== null && !isNaN(y) && y >= 0 && y <= containerEl.clientHeight) {
                 const tagStyle = `position: absolute; left: 10px; top: ${y - 12}px; color: #ef4444; font-size: 11px; font-family: 'JetBrains Mono', monospace; font-weight: 700; background: #070b14f5; padding: 2.5px 8px; border-radius: 4px; border: 1px solid #ef4444aa; line-height: 1; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.8); z-index: 55;`;
-                upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `vol_npoc_${np.price}_${npIdx}`, `🔴 NPOC [${np.dateStr}] ${np.price.toFixed(2)}`, false, tagStyle);
+                upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `vol_npoc_${np.price}_${npIdx}`, `NPOC [${np.dateStr}]`, false, tagStyle);
               }
             });
           }
@@ -4535,7 +4535,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
             const y = safePriceToY(blk.priceCenter);
             if (y !== null && !isNaN(y) && y >= 0 && y <= containerEl.clientHeight) {
               const tagStyle = `position: absolute; right: 95px; top: ${y - 12}px; color: ${bColor}; font-size: 11.5px; font-family: 'JetBrains Mono', monospace; font-weight: 700; background: #070b14f5; padding: 2.5px 8px; border-radius: 4px; border: 1px solid ${bColor}bb; line-height: 1; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.8); z-index: 54;`;
-              upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `vol_hvn_${blk.rank}_${bIdx}`, `📦 HVN #${blk.rank} (${blk.priceCenter.toFixed(2)})`, false, tagStyle);
+              upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `vol_hvn_${blk.rank}_${bIdx}`, `HVN #${blk.rank}`, false, tagStyle);
             }
           });
         }
@@ -5022,9 +5022,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
             const y = safePriceToY(priceVal);
             if (y !== null && !isNaN(y) && y >= 0 && y <= containerEl.clientHeight) {
               const st = getLevelStyle(key, cfg.color);
-              const formattedPrice = priceVal % 1 === 0 ? priceVal.toFixed(0) : priceVal.toFixed(2);
               const styleStr = `position: absolute; left: 8px; top: ${y - 11}px; color: ${st.color}; font-size: 12px; font-family: 'JetBrains Mono', monospace; font-weight: bold; background: #090d16f0; padding: 2.5px 7px; border-radius: 3px; border: 1px solid ${st.color}80; line-height: 1; white-space: nowrap; box-shadow: 0 2px 5px rgba(0,0,0,0.6); z-index: 52;`;
-              upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `lvl_${key}`, `${cfg.label} ${formattedPrice}`, false, styleStr);
+              upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `lvl_${key}`, cfg.label, false, styleStr);
             }
           }
         });
@@ -5038,9 +5037,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
             if (priceVal > 0) {
               const y = safePriceToY(priceVal);
               if (y !== null && !isNaN(y) && y >= 0 && y <= containerEl.clientHeight) {
-                const formattedPrice = priceVal % 1 === 0 ? priceVal.toFixed(0) : priceVal.toFixed(2);
                 const styleStr = `position: absolute; left: 8px; top: ${y - 11}px; color: #a855f7; font-size: 12px; font-family: 'JetBrains Mono', monospace; font-weight: bold; background: #090d16f0; padding: 2.5px 7px; border-radius: 3px; border: 1px solid #a855f780; line-height: 1; white-space: nowrap; box-shadow: 0 2px 5px rgba(0,0,0,0.6); z-index: 52;`;
-                upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `lvl_gex_${index}`, `GEX${gexNum} ${formattedPrice}`, false, styleStr);
+                upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `lvl_gex_${index}`, `GEX${gexNum}`, false, styleStr);
               }
             }
           });
@@ -5055,9 +5053,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
             if (priceVal > 0) {
               const y = safePriceToY(priceVal);
               if (y !== null && !isNaN(y) && y >= 0 && y <= containerEl.clientHeight) {
-                const formattedPrice = priceVal % 1 === 0 ? priceVal.toFixed(0) : priceVal.toFixed(2);
                 const styleStr = `position: absolute; left: 8px; top: ${y - 11}px; color: #3b82f6; font-size: 12px; font-family: 'JetBrains Mono', monospace; font-weight: bold; background: #090d16e0; padding: 2.5px 7px; border-radius: 3px; border: 1px solid #3b82f650; line-height: 1; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.4); z-index: 52;`;
-                upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `lvl_bl_${index}`, `BL${blNum} ${formattedPrice}`, false, styleStr);
+                upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `lvl_bl_${index}`, `BL${blNum}`, false, styleStr);
               }
             }
           });
@@ -5228,6 +5225,15 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         }
 
         if (showOrderLinesRef.current) {
+          const axisFontSize = (settings?.chart_scale_font_size || Number(typeof localStorage !== 'undefined' ? localStorage.getItem('vortex_chart_scale_font_size') : 12)) || 12;
+          const paneWidth = mainChartRef.current?.paneSize?.()?.width;
+          const priceScaleWidth = mainChartRef.current?.priceScale('right')?.width?.() || 85;
+          const priceAxisLeft = (typeof paneWidth === 'number' && paneWidth > 0)
+            ? (paneWidth + 1)
+            : Math.max(0, containerEl.clientWidth - priceScaleWidth + 1);
+          const makePriceAxisBadgeStyle = (yPos: number, bg: string, zIdx: number, opacityVal: number, extraStyle = '') =>
+            `position: absolute; left: ${priceAxisLeft}px; top: ${yPos}px; transform: translateY(-50%); color: #ffffff; background: ${bg}; font-size: ${axisFontSize}px; font-family: 'JetBrains Mono', monospace; font-weight: 500; padding: 2px 9px; border-radius: 2px; line-height: 1.25; white-space: nowrap; z-index: ${zIdx}; opacity: ${opacityVal}; ${extraStyle}`;
+
           tradesToDraw.forEach(tradeToDraw => {
           const tradeId = tradeToDraw.id || 'proposed';
           const isCustomMarker = tradeId === 'custom_marker';
@@ -5285,7 +5291,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
               const styleEntry = `position: absolute; right: 88px; top: ${y - 11}px; color: ${entryTextColor}; font-size: 13px; font-family: 'JetBrains Mono', monospace; font-weight: bold; background: ${entryBg}; padding: 3px 6px; border-radius: 3px; border: 1px solid ${entryBorder}; line-height: 1; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.4); opacity: ${isProposed ? 0.7 : 1};`;
               upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `trade_entry_${tradeId}`, entryText, false, styleEntry);
 
-              const styleBadge = `position: absolute; right: 2px; top: ${y - 9}px; color: #ffffff; background: #0284c7; font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: bold; padding: 2px 4px; border-radius: 2px; line-height: 1; white-space: nowrap; box-shadow: 0 1px 2px rgba(0,0,0,0.5); z-index: 100; opacity: ${isProposed ? 0.7 : 1};`;
+              const styleBadge = makePriceAxisBadgeStyle(y, '#0284c7', 100, isProposed ? 0.7 : 1);
               upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `trade_badge_${tradeId}`, entryPrice.toFixed(2), false, styleBadge);
             }
           }
@@ -5331,8 +5337,14 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
               const badgeBg = isDraggingSl 
                 ? (isSlGain ? '#059669' : (isSlBe ? '#0284c7' : '#b91c1c')) 
-                : (isSlGain ? '#10b981' : (isSlBe ? '#0284c7' : '#dc2626'));
-              const styleSlBadge = `position: absolute; right: 2px; top: ${y - 10}px; color: #ffffff; background: ${badgeBg}; font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: bold; padding: 2px 5px; border-radius: 2px; line-height: 1; white-space: nowrap; box-shadow: ${isDraggingSl ? `0 0 10px ${slColor}` : '0 1px 3px rgba(0,0,0,0.5)'}; z-index: ${isDraggingSl ? 200 : 110}; opacity: ${isProposed ? 0.9 : 1}; pointer-events: auto; cursor: ${isRangeMarker || isLevelMarker ? 'default' : 'ns-resize'}; user-select: none; touch-action: none;`;
+                : slColor;
+              const styleSlBadge = makePriceAxisBadgeStyle(
+                y,
+                badgeBg,
+                isDraggingSl ? 200 : 110,
+                isProposed ? 0.9 : 1,
+                `box-shadow: ${isDraggingSl ? `0 0 10px ${slColor}` : 'none'}; pointer-events: auto; cursor: ${isRangeMarker || isLevelMarker ? 'default' : 'ns-resize'}; user-select: none; touch-action: none;`
+              );
               const slBadgeTooltip = isRangeMarker ? `SL Range HL: ${stopLossPrice.toFixed(2)}` : (isLevelMarker ? `SL Nível: ${stopLossPrice.toFixed(2)}` : `Clique e arraste para ajustar o ${isSlGain ? 'Stop Gain' : (isSlBe ? 'Break-Even' : 'Stop Loss')}`);
               const slBadgeEl = upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `trade_sl_badge_${tradeId}`, stopLossPrice.toFixed(2), false, styleSlBadge, slBadgeTooltip);
               if (!isRangeMarker && !isLevelMarker) {
@@ -5375,7 +5387,13 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                 (tpEl as any).ontouchstart = (e: any) => startDraggingLevel(tradeId, 'take_profit', takeProfitPrice, e);
               }
 
-              const styleTpBadge = `position: absolute; right: 2px; top: ${y - 10}px; color: #ffffff; background: ${isDraggingTp ? '#15803d' : '#16a34a'}; font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: bold; padding: 2px 5px; border-radius: 2px; line-height: 1; white-space: nowrap; box-shadow: ${isDraggingTp ? '0 0 10px rgba(220,38,38,0.9)' : '0 1px 3px rgba(0,0,0,0.5)'}; z-index: ${isDraggingTp ? 200 : 110}; opacity: ${isProposed ? 0.7 : 1}; pointer-events: auto; cursor: ${isRangeMarker || isLevelMarker ? 'default' : 'ns-resize'}; user-select: none; touch-action: none;`;
+              const styleTpBadge = makePriceAxisBadgeStyle(
+                y,
+                isDraggingTp ? '#15803d' : '#22c55e',
+                isDraggingTp ? 200 : 110,
+                isProposed ? 0.7 : 1,
+                `box-shadow: ${isDraggingTp ? '0 0 10px rgba(34,197,94,0.9)' : 'none'}; pointer-events: auto; cursor: ${isRangeMarker || isLevelMarker ? 'default' : 'ns-resize'}; user-select: none; touch-action: none;`
+              );
               const tpBadgeTooltip = isRangeMarker ? `TP Range HL: ${takeProfitPrice.toFixed(2)}` : (isLevelMarker ? `TP Nível: ${takeProfitPrice.toFixed(2)}` : 'Clique e arraste para ajustar o Take Profit');
               const tpBadgeEl = upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `trade_tp_badge_${tradeId}`, takeProfitPrice.toFixed(2), false, styleTpBadge, tpBadgeTooltip);
               if (!isRangeMarker && !isLevelMarker) {

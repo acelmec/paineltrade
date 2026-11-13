@@ -39,6 +39,7 @@ export const TradeWorkstation: React.FC = () => {
     activePanel,
     switchPanel,
     getPanelSnapshot,
+    setVisibleMultiPanelIds,
     setPanelMode,
     settings,
     allSettings,
@@ -492,6 +493,29 @@ export const TradeWorkstation: React.FC = () => {
   useEffect(() => {
     try { localStorage.setItem('vortex_ws_slots', JSON.stringify(multiSlots)); } catch {}
   }, [multiSlots]);
+
+  // Informar ao AppContext quais painéis secundários estão visíveis no Multi-Gráfico para rodarem tick-a-tick em tempo real
+  useEffect(() => {
+    if (!setVisibleMultiPanelIds) return;
+    if (chartLayout === 'single') {
+      setVisibleMultiPanelIds([]);
+      return;
+    }
+    const slotsCount =
+      chartLayout === 'split-v' || chartLayout === 'split-h'
+        ? 2
+        : chartLayout.startsWith('triple')
+        ? 3
+        : 4;
+    const ids = multiSlots
+      .slice(1, slotsCount)
+      .map(s => s.panelId)
+      .filter(Boolean);
+    setVisibleMultiPanelIds(ids);
+    return () => {
+      setVisibleMultiPanelIds([]);
+    };
+  }, [chartLayout, multiSlots, setVisibleMultiPanelIds]);
 
   const handleSelectLayout = useCallback((nextLayout: ChartLayoutType) => {
     setChartLayout(nextLayout);

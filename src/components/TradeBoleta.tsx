@@ -91,12 +91,14 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
 
   useEffect(() => {
     let isMounted = true;
+    let offlineStreak = 0;
     const checkNinja = async () => {
       try {
         const res = await checkNinjaStatus();
         if (!isMounted) return;
         setNinjaStatus(res.status);
         if (res.status === 'online') {
+          offlineStreak = 0;
           try {
             const posData = await fetchNinjaPositionsAndOrders();
             if (isMounted) {
@@ -114,20 +116,27 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
               setActiveNinjaPosition(myPos || null);
             }
           } catch {
-            if (isMounted) {
+            offlineStreak += 1;
+            if (isMounted && offlineStreak >= 3) {
               setNinjaPositions([]);
               setActiveNinjaPosition(null);
             }
           }
         } else {
-          setNinjaPositions([]);
-          setActiveNinjaPosition(null);
+          offlineStreak += 1;
+          if (offlineStreak >= 3) {
+            setNinjaPositions([]);
+            setActiveNinjaPosition(null);
+          }
         }
       } catch {
+        offlineStreak += 1;
         if (isMounted) {
           setNinjaStatus('offline');
-          setNinjaPositions([]);
-          setActiveNinjaPosition(null);
+          if (offlineStreak >= 3) {
+            setNinjaPositions([]);
+            setActiveNinjaPosition(null);
+          }
         }
       }
     };

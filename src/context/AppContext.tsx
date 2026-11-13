@@ -1390,6 +1390,7 @@ interface AppContextType {
     loadingProgress: any;
   };
   ensurePanelDataLoaded: (panelId: string) => void;
+  setVisibleMultiPanelIds: (ids: string[]) => void;
   panelCacheVersion: number;
 
   // Gestão de Contas Demonstrativas e Copy Trade Globais
@@ -2601,6 +2602,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }>>({});
 
   const [panelCacheVersion, setPanelCacheVersion] = useState<number>(0);
+  const [visibleMultiPanelIds, setVisibleMultiPanelIdsState] = useState<string[]>([]);
+  const setVisibleMultiPanelIds = useCallback((ids: string[]) => {
+    const normalized = Array.from(new Set(ids.filter(Boolean))).sort();
+    setVisibleMultiPanelIdsState(prev => {
+      if (prev.length === normalized.length && prev.every((v, i) => v === normalized[i])) {
+        return prev;
+      }
+      return normalized;
+    });
+  }, []);
   const lastPanelCacheBumpRef = useRef<number>(0);
   const pendingPanelCacheTimerRef = useRef<any>(null);
   const bumpPanelCacheVersion = useCallback(() => {
@@ -2842,6 +2853,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }>({});
 
   const activePanelRef = useRef<any>(null);
+  const allPanelsRef = useRef<any[]>([]);
+  allPanelsRef.current = panels;
   const allSettingsRef = useRef<Record<string, any>>({});
   const adminSettingsRef = useRef<Record<string, any>>({});
   const appStartupTimestampRef = useRef<number>(Date.now());
@@ -4880,6 +4893,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (checkIsActive() && isMarketDataChanged) {
         setMarketData(finalData);
+      } else if (!checkIsActive() && isMarketDataChanged) {
+        bumpPanelCacheVersion();
       }
 
       // Se for sessão restrita, não executa verificação de alertas ou lógica de trading ativa
@@ -9903,12 +9918,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return serverReport;
     });
 
-    // Se há ordens em memória criadas recentemente (< 60s) que o servidor ainda não retornou na listagem,
-    // MANTÉM no topo para a ordem NÃO desaparecer do gráfico logo após ser aberta!
+    // Se há ordens em memória criadas recentemente (< 60s) ou ordens de copy trading locais ainda em andamento
+    // que o servidor não retornou na listagem, MANTÉM no topo para a ordem NÃO desaparecer da tela!
     currentMemory.forEach(memReport => {
       if (!mergedList.some(m => m.id === memReport.id)) {
         const ageMs = Date.now() - new Date(memReport.created_at || Date.now()).getTime();
-        if (ageMs < 60000) {
+        const isActiveLocalCopy = Boolean((memReport as any).is_copy_trade && memReport.status === 'Em Andamento');
+        if (ageMs < 60000 || isActiveLocalCopy) {
           mergedList.unshift(memReport);
         }
       }
@@ -12652,7 +12668,9 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         return trigStrat ? matchesBgPanel(trigStrat) : true;
       });
 
-      if (!isCurrentActive && (!bgPanelsAllowed || (!panelGeneralPromptEnabled && !hasOpenOpsForBgPanel && !hasDirectActiveAlgoForBgPanel && !hasSignalGeneratorPromptForBgPanel))) {
+      const isVisuallyDisplayed = isCurrentActive || visibleMultiPanelIds.includes(panelId);
+
+      if (!isVisuallyDisplayed && (!bgPanelsAllowed || (!panelGeneralPromptEnabled && !hasOpenOpsForBgPanel && !hasDirectActiveAlgoForBgPanel && !hasSignalGeneratorPromptForBgPanel))) {
         const existing = runningLoops.current.get(panelId);
         if (existing) {
           clearWorkerTimer(existing.marketTimer);
@@ -12664,11 +12682,11 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         return;
       }
 
-      // Loop ativo roda conforme a configuração personalizada (padrão 250ms ou configurado); inativos rodam a cada 5 segundos
+      // Loop ativo ou exibido no Multi-Gráfico roda na velocidade máxima configurada (tick-a-tick); inativos rodam a cada 5 segundos
       const activeInterval = panelSettings.market_update_interval !== undefined
         ? Number(panelSettings.market_update_interval)
         : (adminSet?.market_update_interval !== undefined ? Number(adminSet.market_update_interval) : globalMarketInterval);
-      const marketInterval = isCurrentActive ? activeInterval : 5000;
+      const marketInterval = isVisuallyDisplayed ? activeInterval : 5000;
 
       const existing = runningLoops.current.get(panelId);
 
@@ -12760,7 +12778,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       });
       runningLoops.current.clear();
     };
-  }, [isAuthenticated, user, panels, allSettings, activePanel?.id, activeAccount?.id, accounts, accountStrategies, prompts, customStrategies, publicStrategies, aiEnabled, wakeTrigger, globalMarketInterval]);
+  }, [isAuthenticated, user, panels, allSettings, activePanel?.id, visibleMultiPanelIds, activeAccount?.id, accounts, accountStrategies, prompts, customStrategies, publicStrategies, aiEnabled, wakeTrigger, globalMarketInterval]);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // 📡 MOTOR DE EXECUÇÃO: COPY REMOTO (SEGUIR CONTAS & ROBÔS EXTERNOS)
@@ -14096,25 +14114,48 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
             const msg = JSON.parse(event.data);
             if (!msg || !msg.type) return;
 
-            const targetPanel = activePanelRef.current || activePanel;
+            const incomingInst = msg.instance_id || msg.data?.instance_id;
+            let targetPanel = activePanelRef.current || activePanel;
+            if (incomingInst && allPanelsRef.current.length > 0) {
+              const matched = allPanelsRef.current.find((p: any) => {
+                const pSet = allSettingsRef.current[p.id];
+                const pAdmin = !isSystemAdmin ? getAdminSetForPanel(p) : null;
+                const mktInst = pAdmin?.instance_id_market || pSet?.instance_id_market;
+                const cndInst = pAdmin?.instance_id_candles || pSet?.instance_id_candles;
+                return (
+                  p.instance_id === incomingInst ||
+                  mktInst === incomingInst ||
+                  cndInst === incomingInst
+                );
+              });
+              if (matched) {
+                targetPanel = matched;
+              }
+            }
             if (!targetPanel) return;
             const currentAdminSet = !isSystemAdmin ? getAdminSetForPanel(targetPanel) : null;
-            const targetSettings = allSettings[targetPanel.id] || settings;
+            const targetSettings = allSettingsRef.current[targetPanel.id] || allSettings[targetPanel.id] || settings;
             if (!targetSettings) return;
 
-            const cache = panelDataCache.current[targetPanel.id] || {
-              marketData: null,
-              forces: [],
-              gammaLevels: null,
-              screenshot: null,
-              candles: []
-            };
+            if (!panelDataCache.current[targetPanel.id]) {
+              panelDataCache.current[targetPanel.id] = {
+                marketData: null,
+                forces: [],
+                gammaLevels: null,
+                screenshot: null,
+                candles: [],
+                lastGammaFetch: 0,
+                lastGammaSymbol: ''
+              };
+            }
+            const cache = panelDataCache.current[targetPanel.id];
 
             if (msg.type === 'market_data' && msg.data) {
               const d = msg.data;
               const msgInst = msg.instance_id || d.instance_id;
               const expectedMarketInst = currentAdminSet?.instance_id_market || targetSettings.instance_id_market || targetPanel.instance_id;
-              if (msgInst && expectedMarketInst && msgInst !== expectedMarketInst && msgInst !== targetPanel.instance_id) {
+              const expectedCandleInst = currentAdminSet?.instance_id_candles || targetSettings.instance_id_candles || targetPanel.instance_id;
+              if (msgInst && expectedMarketInst && msgInst !== expectedMarketInst && msgInst !== expectedCandleInst && msgInst !== targetPanel.instance_id) {
                 return;
               }
 
@@ -14149,6 +14190,8 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
               cache.marketData = mData;
               if (activePanelRef.current?.id === targetPanel.id) {
                 setMarketData(mData);
+              } else {
+                bumpPanelCacheVersion();
               }
 
               // Atualiza candle em formação com proteção de sanidade
@@ -14211,7 +14254,9 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                 cache.lastMarketUpdateAt = Date.now();
                 lastRealtimeTickRef.current = Date.now();
                 cache.forces = forcesList;
-                setForces(forcesList);
+                if (activePanelRef.current?.id === targetPanel.id) {
+                  setForces(forcesList);
+                }
                 runMarketLogicForPanel(targetPanel, targetSettings, cache, cache.marketData, forcesList, cache.gammaLevels);
               }
             } else if (msg.type === 'candle' && msg.data) {
@@ -14264,6 +14309,8 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                   }
                   if (activePanelRef.current?.id === targetPanel.id) {
                     setCandles(finalCandles);
+                  } else {
+                    bumpPanelCacheVersion();
                   }
                   runMarketLogicForPanel(targetPanel, targetSettings, cache, cache.marketData, cache.forces, cache.gammaLevels);
                 }
@@ -14502,6 +14549,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       switchPanel,
       getPanelSnapshot,
       ensurePanelDataLoaded,
+      setVisibleMultiPanelIds,
       panelCacheVersion,
       accounts,
       setAccounts,

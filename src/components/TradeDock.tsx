@@ -95,6 +95,7 @@ export const TradeDock: React.FC = () => {
 
   useEffect(() => {
     let isMounted = true;
+    let offlineStreak = 0;
     const poll = async () => {
       try {
         const st = await checkNinjaStatus();
@@ -102,15 +103,23 @@ export const TradeDock: React.FC = () => {
         const isOnline = st.status === 'online';
         setNinjaOnline(isOnline);
         if (isOnline) {
+          offlineStreak = 0;
           const { positions } = await fetchNinjaPositionsAndOrders();
           if (isMounted) setNinjaPositions(positions || []);
         } else {
-          if (isMounted) setNinjaPositions([]);
+          offlineStreak += 1;
+          // Evita piscar/sumir ordens ativas em falhas ou timeouts momentâneos de 1-2 ciclos
+          if (offlineStreak >= 3 && isMounted) {
+            setNinjaPositions([]);
+          }
         }
       } catch {
+        offlineStreak += 1;
         if (isMounted) {
           setNinjaOnline(false);
-          setNinjaPositions([]);
+          if (offlineStreak >= 3) {
+            setNinjaPositions([]);
+          }
         }
       }
     };
