@@ -36,6 +36,7 @@ export interface ChartSlotConfig {
   id: string; // 'slot_0', 'slot_1', 'slot_2', 'slot_3'
   panelId: string;
   timeframe: number;
+  historyDays?: number;
   indicators: IndicatorConfig[];
   autoCenter: boolean;
   showTradeMarkers: boolean;

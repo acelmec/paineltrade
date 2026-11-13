@@ -54,13 +54,11 @@ export const ReplayBoleta: React.FC<ReplayBoletaProps> = ({
   onBreakevenPosition,
   onOpenAccountModal
 }) => {
-  // Tabs: [DADOS DO TRADE] vs [CONTROLE DE RISCO]
-  const [activeTab, setActiveTab] = useState<'trade' | 'risk'>('trade');
-
-  // Sizing Mode
+  // Sizing Mode (LOTE vs FINANCEIRO)
   const [sizingMode, setSizingMode] = useState<'lote' | 'risco'>(() => {
     return (localStorage.getItem('vortex_replay_sizing_mode') as any) || 'lote';
   });
+  const activeTab: 'trade' | 'risk' = sizingMode === 'risco' ? 'risk' : 'trade';
   const [contracts, setContracts] = useState<number>(() => {
     return Number(localStorage.getItem('vortex_replay_contracts')) || 1;
   });
@@ -69,8 +67,12 @@ export const ReplayBoleta: React.FC<ReplayBoletaProps> = ({
   });
 
   // Stop & Take Mode: PONTOS vs NÍVEL vs GRÁFICO vs COPILOT vs RANGE HL
+  // Padrão obrigatório ao abrir o gráfico: sempre iniciar em 'pontos' (P)
   const [stopMode, setStopMode] = useState<'pontos' | 'nivel' | 'grafico' | 'copilot' | 'range'>(() => {
-    return (localStorage.getItem('vortex_replay_stop_mode') as any) || 'nivel';
+    try {
+      localStorage.setItem('vortex_replay_stop_mode', 'pontos');
+    } catch {}
+    return 'pontos';
   });
 
   // Range HL Mode (R) State: Referência de Candles e Multiplicador de TP
@@ -587,13 +589,13 @@ export const ReplayBoleta: React.FC<ReplayBoletaProps> = ({
           </div>
         </div>
 
-        {/* 3. TABS: [DADOS DO TRADE] | [CONTROLE DE RISCO] */}
+        {/* 3. TABS: LOTE | FINANCEIRO */}
         <div className="bg-[#151e33] p-0.5 rounded-lg border border-slate-800 flex gap-0.5 text-[9.5px] font-extrabold tracking-wider uppercase">
           <button
             type="button"
             onClick={() => {
-              setActiveTab('trade');
               setSizingMode('lote');
+              localStorage.setItem('vortex_replay_sizing_mode', 'lote');
             }}
             className={`flex-1 py-1 rounded transition text-center cursor-pointer ${
               activeTab === 'trade'
@@ -601,13 +603,13 @@ export const ReplayBoleta: React.FC<ReplayBoletaProps> = ({
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            [DADOS DO TRADE]
+            LOTE
           </button>
           <button
             type="button"
             onClick={() => {
-              setActiveTab('risk');
               setSizingMode('risco');
+              localStorage.setItem('vortex_replay_sizing_mode', 'risco');
             }}
             className={`flex-1 py-1 rounded transition text-center cursor-pointer ${
               activeTab === 'risk'
@@ -615,7 +617,7 @@ export const ReplayBoleta: React.FC<ReplayBoletaProps> = ({
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            [CONTROLE DE RISCO]
+            FINANCEIRO
           </button>
         </div>
 
@@ -1147,7 +1149,7 @@ export const ReplayBoleta: React.FC<ReplayBoletaProps> = ({
               <span className={`text-[10px] font-extrabold uppercase tracking-wider ${
                 isATMActive ? 'text-amber-400' : 'text-slate-400'
               }`}>
-                🎯 ATIVAR ESTRATÉGIA ATM
+                ATIVAR ESTRATÉGIA ATM
               </span>
             </label>
             {isATMActive && (
@@ -1216,18 +1218,17 @@ export const ReplayBoleta: React.FC<ReplayBoletaProps> = ({
 
         {/* 8. BOTÕES DE GESTÃO / EMERGÊNCIA */}
         <div className="space-y-1 pt-0.5">
-          {/* ⛔ FECHAR TUDO */}
+          {/* FECHAR TUDO */}
           <button
             type="button"
             onClick={onClosePosition}
             disabled={!isPositionOpen}
             className="w-full bg-amber-400 hover:bg-amber-300 disabled:opacity-40 active:scale-95 text-slate-950 font-black py-1.5 px-2 rounded-lg text-[10px] transition flex items-center justify-center gap-1 shadow uppercase tracking-wider cursor-pointer"
           >
-            <span>⛔</span>
             <span>FECHAR TUDO</span>
           </button>
 
-          {/* 🔄 INVERTER & 🛡️ BREAKEVEN */}
+          {/* INVERTER & BREAKEVEN */}
           <div className="grid grid-cols-2 gap-1">
             <button
               type="button"
@@ -1235,7 +1236,6 @@ export const ReplayBoleta: React.FC<ReplayBoletaProps> = ({
               disabled={!isPositionOpen}
               className="bg-[#1e293b] hover:bg-slate-700 disabled:opacity-40 active:scale-95 text-slate-200 font-bold py-1 px-1.5 rounded-lg text-[9px] transition flex items-center justify-center gap-1 border border-slate-700 shadow-sm cursor-pointer"
             >
-              <span>🔄</span>
               <span>INVERTER</span>
             </button>
             <button
@@ -1244,7 +1244,6 @@ export const ReplayBoleta: React.FC<ReplayBoletaProps> = ({
               disabled={!isPositionOpen}
               className="bg-blue-900/60 hover:bg-blue-800 disabled:opacity-40 active:scale-95 text-blue-200 font-bold py-1 px-1.5 rounded-lg text-[9px] transition flex items-center justify-center gap-1 border border-blue-700/80 shadow-sm cursor-pointer"
             >
-              <span>🛡️</span>
               <span>BREAKEVEN</span>
             </button>
           </div>

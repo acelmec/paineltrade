@@ -5,6 +5,7 @@ import type { Candle, GammaLevels } from '../services/db';
 import {
   resolvePanelTickSize,
   roundToTick,
+  getTickDecimals,
   isSameAsset,
   fetchForces1mHistorySupabase,
   processMomentumMatrixSeries,
@@ -469,6 +470,24 @@ function calculateEMACD(
   };
 }
 
+const BLACK_CROSSHAIR_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M12 2v20M2 12h20' stroke='%23ffffff' stroke-width='3' stroke-linecap='square'/%3E%3Cpath d='M12 2v20M2 12h20' stroke='%23000000' stroke-width='1.5' stroke-linecap='square'/%3E%3C/svg%3E") 12 12, crosshair`;
+
+export const isLightChartBackground = (bg?: string): boolean => {
+  if (!bg) return false;
+  const hex = bg.trim().toLowerCase();
+  if (hex === '#fff' || hex === '#ffffff' || hex === 'white') return true;
+  const clean = hex.replace('#', '');
+  if (clean.length === 6) {
+    const r = parseInt(clean.slice(0, 2), 16);
+    const g = parseInt(clean.slice(2, 4), 16);
+    const b = parseInt(clean.slice(4, 6), 16);
+    if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
+      return (0.299 * r + 0.587 * g + 0.114 * b) > 160;
+    }
+  }
+  return false;
+};
+
 export const getChartThemeColors = (themeName?: string, customOverrides?: any) => {
   let baseColors = {
     bg: '#000000',
@@ -523,7 +542,7 @@ export const getChartThemeColors = (themeName?: string, customOverrides?: any) =
         textColor: '#334155',
         gridColor: '#e2e8f0',
         borderColor: '#cbd5e1',
-        crosshairColor: '#64748b',
+        crosshairColor: '#0f172a',
         upColor: '#16a34a',
         downColor: '#dc2626',
         wickUpColor: '#16a34a',
@@ -1127,6 +1146,108 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
   const { showSma9, showEma21, showEma50, showRsi, showMacd, showPva, showEMacd, showFvg } = panelIndicators;
 
+  const [cursorMode, setCursorMode] = useState<'crosshair' | 'arrow'>(() => {
+    try {
+      return localStorage.getItem('vortex_chart_cursor_mode') === 'arrow' ? 'arrow' : 'crosshair';
+    } catch {
+      return 'crosshair';
+    }
+  });
+  const cursorModeRef = useRef<'crosshair' | 'arrow'>(cursorMode);
+  useEffect(() => {
+    cursorModeRef.current = cursorMode;
+  }, [cursorMode]);
+
+  useEffect(() => {
+    const handleCursorModeChanged = (e: any) => {
+      const nextMode = e?.detail?.mode === 'arrow' ? 'arrow' : 'crosshair';
+      setCursorMode(nextMode);
+    };
+    window.addEventListener('vortex_cursor_mode_changed', handleCursorModeChanged);
+    return () => window.removeEventListener('vortex_cursor_mode_changed', handleCursorModeChanged);
+  }, []);
+
+  const [isLightChartBg, setIsLightChartBg] = useState<boolean>(() => {
+    try {
+      const activeKey = settings?.chart_color_theme || localStorage.getItem('vortex_chart_theme') || 'ninja_carbon';
+      return isLightChartBackground(getChartThemeColors(activeKey).bg);
+    } catch {
+      return false;
+    }
+  });
+
+  const [inspectedCandle, setInspectedCandle] = useState<{
+    candle: any;
+    x: number;
+    y: number;
+    tickSize: number;
+  } | null>(null);
+  const isRightInspectingRef = useRef<boolean>(false);
+
+  const updateInspectedCandleAtClientPos = useCallback((clientX: number, clientY: number) => {
+    const container = mainContainerRef.current;
+    const chart = mainChartRef.current;
+    const data = chartDataRef.current;
+    if (!container || !chart || !data || data.length === 0) {
+      setInspectedCandle(null);
+      return;
+    }
+    const rect = container.getBoundingClientRect();
+    const mouseX = clientX - rect.left;
+    const mouseY = clientY - rect.top;
+    if (mouseX < 0 || mouseY < 0 || mouseX > rect.width || mouseY > rect.height) {
+      setInspectedCandle(null);
+      return;
+    }
+    const logical = chart.timeScale().coordinateToLogical(mouseX);
+    if (logical === null || isNaN(logical)) {
+      setInspectedCandle(null);
+      return;
+    }
+    const idx = Math.round(logical);
+    if (idx < 0 || idx >= data.length) {
+      setInspectedCandle(null);
+      return;
+    }
+    const targetCandle = data[idx];
+    if (!targetCandle) {
+      setInspectedCandle(null);
+      return;
+    }
+    const tickSize = resolvePanelTickSize(activePanel, settings);
+    setInspectedCandle({
+      candle: targetCandle,
+      x: mouseX,
+      y: mouseY,
+      tickSize
+    });
+  }, [activePanel, settings]);
+
+  useEffect(() => {
+    const handleGlobalMove = (e: PointerEvent | MouseEvent) => {
+      if (!isRightInspectingRef.current) return;
+      updateInspectedCandleAtClientPos(e.clientX, e.clientY);
+    };
+    const stopInspect = () => {
+      if (isRightInspectingRef.current) {
+        isRightInspectingRef.current = false;
+        setInspectedCandle(null);
+      }
+    };
+    window.addEventListener('pointermove', handleGlobalMove);
+    window.addEventListener('pointerup', stopInspect);
+    window.addEventListener('pointercancel', stopInspect);
+    window.addEventListener('mouseup', stopInspect);
+    window.addEventListener('blur', stopInspect);
+    return () => {
+      window.removeEventListener('pointermove', handleGlobalMove);
+      window.removeEventListener('pointerup', stopInspect);
+      window.removeEventListener('pointercancel', stopInspect);
+      window.removeEventListener('mouseup', stopInspect);
+      window.removeEventListener('blur', stopInspect);
+    };
+  }, [updateInspectedCandleAtClientPos]);
+
   const [isBoletaCollapsed, setIsBoletaCollapsed] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(`vortex_hide_boleta_${activePanel?.id || 'main'}`);
@@ -1276,10 +1397,9 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
   const [manualTradeMode, setManualTradeMode] = useState<'nivel' | 'pontos' | 'grafico' | 'copilot' | 'range'>(() => {
     try {
-      const saved = localStorage.getItem('vortex_stop_mode') as any;
-      if (saved) return saved;
+      localStorage.setItem('vortex_stop_mode', 'pontos');
     } catch {}
-    return (settings?.chart_manual_trade_mode as any) || 'pontos';
+    return 'pontos';
   });
   const [manualSizingMode, setManualSizingMode] = useState<'lote' | 'risco'>(() => {
     try {
@@ -1335,6 +1455,17 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   useEffect(() => {
     try { localStorage.setItem('vortex_stop_mode', manualTradeMode); } catch {}
   }, [manualTradeMode]);
+
+  useEffect(() => {
+    const handleForcePontos = () => {
+      setManualTradeMode('pontos');
+      try {
+        localStorage.setItem(isSimulator ? 'vortex_replay_stop_mode' : 'vortex_stop_mode', 'pontos');
+      } catch {}
+    };
+    window.addEventListener('vortex_force_stop_mode_pontos', handleForcePontos);
+    return () => window.removeEventListener('vortex_force_stop_mode_pontos', handleForcePontos);
+  }, [isSimulator]);
 
   useEffect(() => {
     if (!mainChartRef.current) return;
@@ -1977,6 +2108,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   }, [activeWidgetsProp, ingestBlockTrades]);
 
   const initialSyncedPanelIdRef = useRef<string | null>(null);
+  const lastSyncedSettingsTradeModeRef = useRef<string | null>(null);
+  const lastSyncedSettingsSizingModeRef = useRef<string | null>(null);
 
   // Sincronizar configurações quando carregadas do Supabase ou alteradas na Boleta
   useEffect(() => {
@@ -1985,13 +2118,25 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     if (isNewPanel) {
       initialSyncedPanelIdRef.current = activePanel?.id || 'main';
       isFirstDataLoadRef.current = true;
-    }
-    if (settings.chart_manual_trade_mode && (isNewPanel || settings.chart_manual_trade_mode !== manualTradeMode)) {
+      setManualTradeMode('pontos');
+      lastSyncedSettingsTradeModeRef.current = settings.chart_manual_trade_mode || 'pontos';
+      try {
+        localStorage.setItem(isSimulator ? 'vortex_replay_stop_mode' : 'vortex_stop_mode', 'pontos');
+      } catch {}
+    } else if (settings.chart_manual_trade_mode && settings.chart_manual_trade_mode !== lastSyncedSettingsTradeModeRef.current && settings.chart_manual_trade_mode !== manualTradeMode) {
+      lastSyncedSettingsTradeModeRef.current = settings.chart_manual_trade_mode;
       setManualTradeMode(settings.chart_manual_trade_mode);
+    } else if (settings.chart_manual_trade_mode) {
+      lastSyncedSettingsTradeModeRef.current = settings.chart_manual_trade_mode;
     }
     if (settings.chart_manual_sizing_mode) {
       const mode = settings.chart_manual_sizing_mode === 'risco' ? 'risco' : 'lote';
-      if (isNewPanel || mode !== manualSizingMode) setManualSizingMode(mode);
+      if (isNewPanel || (mode !== lastSyncedSettingsSizingModeRef.current && mode !== manualSizingMode)) {
+        lastSyncedSettingsSizingModeRef.current = mode;
+        setManualSizingMode(mode);
+      } else {
+        lastSyncedSettingsSizingModeRef.current = mode;
+      }
     }
     if (settings.chart_manual_risk_usd !== undefined) {
       const r = Number(settings.chart_manual_risk_usd);
@@ -2388,13 +2533,13 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         let newStop = entry;
         if (r.side === 'COMPRA') {
           newStop = (curPrice >= entry + 1.5) ? (entry + 0.5) : entry;
-          if (curPrice > 0 && newStop >= curPrice - 0.25) {
-            newStop = Math.min(entry, curPrice - 0.25);
+          if (curPrice > 0 && newStop >= curPrice - tickSize) {
+            newStop = Math.min(entry, curPrice - tickSize);
           }
         } else if (r.side === 'VENDA') {
           newStop = (curPrice <= entry - 1.5 && curPrice > 0) ? (entry - 0.5) : entry;
-          if (curPrice > 0 && newStop <= curPrice + 0.25) {
-            newStop = Math.max(entry, curPrice + 0.25);
+          if (curPrice > 0 && newStop <= curPrice + tickSize) {
+            newStop = Math.max(entry, curPrice + tickSize);
           }
         }
         return {
@@ -2582,8 +2727,11 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
   useEffect(() => {
     const handleStartMarking = () => {
+      lastChartSelectionTimeRef.current = 0;
       setMarkingSlTpState('marking_sl');
+      markingSlTpStateRef.current = 'marking_sl';
       setTempSlPrice(null);
+      tempSlPriceRef.current = null;
       setCustomMarkersVersion(v => v + 1);
       if (updateTradePriceLinesRef.current) updateTradePriceLinesRef.current();
       if (updateLevelLabelsRef.current) updateLevelLabelsRef.current();
@@ -2613,11 +2761,17 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   markingSlTpStateRef.current = markingSlTpState;
   const tempSlPriceRef = useRef(tempSlPrice);
   tempSlPriceRef.current = tempSlPrice;
+  const lastChartSelectionTimeRef = useRef<number>(0);
   const handleChartPriceSelectionRef = useRef<((clickY: number) => void) | null>(null);
 
   const handleChartPriceSelection = useCallback((clickY: number) => {
     const currentState = markingSlTpStateRef.current;
     if (!currentState || !candleSeriesRef.current || !mainContainerRef.current) return;
+
+    // Evita disparo duplo/triplo no mesmo clique/toque (subscribeClick + onClick + touchend)
+    const now = Date.now();
+    if (now - lastChartSelectionTimeRef.current < 250) return;
+    lastChartSelectionTimeRef.current = now;
 
     const series = candleSeriesRef.current;
     const price = series.coordinateToPrice ? series.coordinateToPrice(clickY) : null;
@@ -2633,12 +2787,14 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       setTempSlPrice(cleanPrice);
       tempSlPriceRef.current = cleanPrice;
       localStorage.setItem(keySl, String(cleanPrice));
+      localStorage.removeItem(keyTp);
       localStorage.setItem(keyMode, 'grafico');
       setMarkingSlTpState('marking_tp');
       markingSlTpStateRef.current = 'marking_tp';
       setCustomMarkersVersion(v => v + 1);
       if (updateTradePriceLinesRef.current) updateTradePriceLinesRef.current();
       if (updateLevelLabelsRef.current) updateLevelLabelsRef.current();
+      window.dispatchEvent(new CustomEvent('vortex_custom_sltp_updated', { detail: { sl: cleanPrice, tp: null } }));
     } else if (currentState === 'marking_tp') {
       const sl = tempSlPriceRef.current || cleanPrice;
       const tp = cleanPrice;
@@ -3585,7 +3741,28 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       isHistoryPlottedRef.current = false;
       lastChartDataLengthRef.current = 0;
       lastChartDataTimeRef.current = 0;
+      lastRecentCandlesRef.current = '';
+      lastAppliedLevelsKeyRef.current = '';
+      lastAppliedMarkersStrRef.current = '';
+      currentPriceRef.current = null;
       autoCenterHalfSpanRef.current = null;
+      lastSmaCountRef.current = 0;
+      lastEma21CountRef.current = 0;
+      lastEma50CountRef.current = 0;
+      lastRsiCountRef.current = 0;
+      lastMacdCountRef.current = 0;
+      lastEmacdHistCountRef.current = 0;
+      confirmedMacdDivergencesRef.current.clear();
+
+      if (candleSeriesRef.current) {
+        activePriceLinesRef.current.forEach(line => {
+          try { candleSeriesRef.current?.removePriceLine(line); } catch (_) {}
+        });
+        activePriceLinesRef.current = [];
+        tradePriceLinesMapRef.current.clear();
+        try { candleSeriesRef.current.setData([]); } catch (_) {}
+      }
+
       if (mainChartRef.current) {
         try {
           mainChartRef.current.priceScale('right').applyOptions({
@@ -3686,6 +3863,11 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     }
 
     if (!resolvedPrice || isNaN(resolvedPrice) || resolvedPrice <= 0 || !candleSeriesRef.current || !lastCandle) {
+      return;
+    }
+
+    // Proteção contra salto anômalo (> 8%) durante troca de ativo ou dessincronia temporária
+    if (lastCandle.close > 0 && Math.abs(resolvedPrice - lastCandle.close) / lastCandle.close > 0.08) {
       return;
     }
 
@@ -5420,7 +5602,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           }
         }
 
-        if (showOrderLinesRef.current) {
+        {
+          const showCards = showOrderLinesRef.current;
           const axisFontSize = (settings?.chart_scale_font_size || Number(typeof localStorage !== 'undefined' ? localStorage.getItem('vortex_chart_scale_font_size') : 12)) || 12;
           const paneWidth = mainChartRef.current?.paneSize?.()?.width;
           const priceScaleWidth = mainChartRef.current?.priceScale('right')?.width?.() || 85;
@@ -5464,33 +5647,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                 ? (opt.take_profit !== null ? Number(opt.take_profit) : 0)
                 : rawTakeProfitPrice);
 
-          if (!isCustomMarker && !isRangeMarker && !isLevelMarker && !isNaN(entryPrice) && entryPrice > 0) {
-            const y = safePriceToY(entryPrice);
-            if (y !== null && !isNaN(y) && y >= -40 && y <= containerEl.clientHeight + 40) {
-              const currentPriceVal = currentPriceRef.current || (chartDataRef.current.length > 0 ? chartDataRef.current[chartDataRef.current.length - 1].close : entryPrice);
-              const isBuy = sideText === 'COMPRA' || sideText === 'BUY';
-              const curPtsDiff = isBuy ? (currentPriceVal - entryPrice) : (entryPrice - currentPriceVal);
-              const curPnlUsd = curPtsDiff * contractsCount * pointValueForPanel;
-              const pnlSign = curPnlUsd >= 0 ? '+' : '-';
-              const ptsSign = curPtsDiff >= 0 ? '+' : '-';
-              const pnlFormatted = `${pnlSign}$${Math.abs(curPnlUsd).toFixed(2)}`;
-              const ptsFormatted = `${ptsSign}${Math.abs(curPtsDiff).toFixed(2)} pts`;
-
-              const entryText = isProposed 
-                ? `${sideText || 'ENTRADA'} ${qtyPrefix}(PENDENTE)` 
-                : `${sideText || 'ENTRADA'} ${qtyPrefix}(${pnlFormatted} | ${ptsFormatted})`;
-              
-              const entryBg = isProposed ? '#090d16e0' : (curPnlUsd >= 0 ? '#064e3be0' : '#4c0519e0');
-              const entryBorder = isProposed ? '#38bdf8' : (curPnlUsd >= 0 ? '#10b981' : '#f43f5e');
-              const entryTextColor = isProposed ? '#38bdf8' : (curPnlUsd >= 0 ? '#34d399' : '#fb7185');
-
-              const styleEntry = `position: absolute; right: 88px; top: ${y - 11}px; color: ${entryTextColor}; font-size: 13px; font-family: 'JetBrains Mono', monospace; font-weight: bold; background: ${entryBg}; padding: 3px 6px; border-radius: 3px; border: 1px solid ${entryBorder}; line-height: 1; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.4); opacity: ${isProposed ? 0.7 : 1};`;
-              upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `trade_entry_${tradeId}`, entryText, false, styleEntry);
-
-              const styleBadge = makePriceAxisBadgeStyle(y, '#0284c7', 100, isProposed ? 0.7 : 1);
-              upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `trade_badge_${tradeId}`, entryPrice.toFixed(2), false, styleBadge);
-            }
-          }
+          let slEl: HTMLElement | null = null;
+          let tpEl: HTMLElement | null = null;
 
           if (!isNaN(stopLossPrice) && stopLossPrice > 0) {
             const y = safePriceToY(stopLossPrice);
@@ -5518,17 +5676,19 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
               const slBorder = isDraggingSl ? (isSlGain ? '2px solid #34d399' : (isSlBe ? '2px solid #38bdf8' : '2px solid #f87171')) : `1.5px solid ${slColor}`;
               const slShadow = isDraggingSl ? `0 0 12px ${slColor}` : '0 1px 4px rgba(0,0,0,0.5)';
 
-              const styleSl = `position: absolute; right: ${rightOffset}px; top: ${y - 12}px; color: ${slColor}; font-size: 13px; font-family: 'JetBrains Mono', monospace; font-weight: bold; background: ${slBg}; padding: 3px 7px; border-radius: 4px; border: ${slBorder}; line-height: 1; white-space: nowrap; box-shadow: ${slShadow}; opacity: ${isProposed ? 0.9 : 1}; pointer-events: auto; cursor: ${isRangeMarker || isLevelMarker ? 'default' : 'ns-resize'}; user-select: none; touch-action: none; z-index: ${isDraggingSl ? 200 : 110};`;
-              const slTooltip = isRangeMarker
-                ? `SL Range HL (${sideText}): ${stopLossPrice.toFixed(2)} (${ptsDiffStr} | ${slUsdStr}). Baseado na ${sideText === 'COMPRA' ? 'mínima' : 'máxima'} dos candles.`
-                : (isLevelMarker
-                    ? `SL Nível (${sideText}): ${stopLossPrice.toFixed(2)} (${ptsDiffStr} | ${slUsdStr}). Baseado em níveis técnicos e gamma.`
-                    : `${isSlGain ? 'Stop Gain' : (isSlBe ? 'Break-Even' : 'Stop Loss')}: ${stopLossPrice.toFixed(2)} (${ptsDiffStr}). Clique e arraste para ajustar.`);
-              const slEl = upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `trade_sl_${tradeId}`, `<span>${slTitle}${ptsLabel}</span>`, true, styleSl, slTooltip);
-              if (!isRangeMarker && !isLevelMarker) {
-                (slEl as any).onpointerdown = (e: any) => startDraggingLevel(tradeId, 'stop_loss', stopLossPrice, e);
-                (slEl as any).onmousedown = (e: any) => startDraggingLevel(tradeId, 'stop_loss', stopLossPrice, e);
-                (slEl as any).ontouchstart = (e: any) => startDraggingLevel(tradeId, 'stop_loss', stopLossPrice, e);
+              if (showCards) {
+                const styleSl = `position: absolute; right: ${rightOffset}px; top: ${y - 12}px; color: ${slColor}; font-size: 13px; font-family: 'JetBrains Mono', monospace; font-weight: bold; background: ${slBg}; padding: 3px 7px; border-radius: 4px; border: ${slBorder}; line-height: 1; white-space: nowrap; box-shadow: ${slShadow}; opacity: ${isProposed ? 0.9 : 1}; pointer-events: auto; cursor: ${isRangeMarker || isLevelMarker ? 'default' : 'ns-resize'}; user-select: none; touch-action: none; z-index: ${isDraggingSl ? 200 : 110};`;
+                const slTooltip = isRangeMarker
+                  ? `SL Range HL (${sideText}): ${stopLossPrice.toFixed(2)} (${ptsDiffStr} | ${slUsdStr}). Baseado na ${sideText === 'COMPRA' ? 'mínima' : 'máxima'} dos candles.`
+                  : (isLevelMarker
+                      ? `SL Nível (${sideText}): ${stopLossPrice.toFixed(2)} (${ptsDiffStr} | ${slUsdStr}). Baseado em níveis técnicos e gamma.`
+                      : `${isSlGain ? 'Stop Gain' : (isSlBe ? 'Break-Even' : 'Stop Loss')}: ${stopLossPrice.toFixed(2)} (${ptsDiffStr}). Clique e arraste para ajustar.`);
+                slEl = upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `trade_sl_${tradeId}`, `<span>${slTitle}${ptsLabel}</span>`, true, styleSl, slTooltip);
+                if (!isRangeMarker && !isLevelMarker) {
+                  (slEl as any).onpointerdown = (e: any) => startDraggingLevel(tradeId, 'stop_loss', stopLossPrice, e);
+                  (slEl as any).onmousedown = (e: any) => startDraggingLevel(tradeId, 'stop_loss', stopLossPrice, e);
+                  (slEl as any).ontouchstart = (e: any) => startDraggingLevel(tradeId, 'stop_loss', stopLossPrice, e);
+                }
               }
 
               const badgeBg = isDraggingSl 
@@ -5570,17 +5730,19 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                         ? `TP NÍVEL (${sideText}) ↕`
                         : `ALVO${targetNumStr} ↕`));
 
-              const styleTp = `position: absolute; right: ${rightOffset}px; top: ${y - 12}px; color: #22c55e; font-size: 13px; font-family: 'JetBrains Mono', monospace; font-weight: bold; background: ${isDraggingTp ? '#14532d' : '#090d16e0'}; padding: 3px 7px; border-radius: 4px; border: ${isDraggingTp ? '2px solid #4ade80' : '1.5px solid #22c55e'}; line-height: 1; white-space: nowrap; box-shadow: ${isDraggingTp ? '0 0 12px rgba(34,197,94,0.9)' : '0 1px 4px rgba(0,0,0,0.5)'}; opacity: ${isProposed ? 0.7 : 1}; pointer-events: auto; cursor: ${isRangeMarker || isLevelMarker ? 'default' : 'ns-resize'}; user-select: none; touch-action: none; z-index: ${isDraggingTp ? 200 : 110};`;
-              const tpTooltip = isRangeMarker
-                ? `TP Range HL (${sideText}): ${takeProfitPrice.toFixed(2)} (${tpUsdStr} | ${ptsDiffStr}). Baseado no fator multiplicador.`
-                : (isLevelMarker
-                    ? `TP Nível (${sideText}): ${takeProfitPrice.toFixed(2)} (${tpUsdStr} | ${ptsDiffStr}). Baseado em níveis técnicos e gamma.`
-                    : `Take Profit: ${takeProfitPrice.toFixed(2)} (${tpUsdStr} | ${ptsDiffStr}). Clique e arraste para ajustar.`);
-              const tpEl = upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `trade_tp_${tradeId}`, `<span>${tpTitle}${ptsLabel}</span>`, true, styleTp, tpTooltip);
-              if (!isRangeMarker && !isLevelMarker) {
-                (tpEl as any).onpointerdown = (e: any) => startDraggingLevel(tradeId, 'take_profit', takeProfitPrice, e);
-                (tpEl as any).onmousedown = (e: any) => startDraggingLevel(tradeId, 'take_profit', takeProfitPrice, e);
-                (tpEl as any).ontouchstart = (e: any) => startDraggingLevel(tradeId, 'take_profit', takeProfitPrice, e);
+              if (showCards) {
+                const styleTp = `position: absolute; right: ${rightOffset}px; top: ${y - 12}px; color: #22c55e; font-size: 13px; font-family: 'JetBrains Mono', monospace; font-weight: bold; background: ${isDraggingTp ? '#14532d' : '#090d16e0'}; padding: 3px 7px; border-radius: 4px; border: ${isDraggingTp ? '2px solid #4ade80' : '1.5px solid #22c55e'}; line-height: 1; white-space: nowrap; box-shadow: ${isDraggingTp ? '0 0 12px rgba(34,197,94,0.9)' : '0 1px 4px rgba(0,0,0,0.5)'}; opacity: ${isProposed ? 0.7 : 1}; pointer-events: auto; cursor: ${isRangeMarker || isLevelMarker ? 'default' : 'ns-resize'}; user-select: none; touch-action: none; z-index: ${isDraggingTp ? 200 : 110};`;
+                const tpTooltip = isRangeMarker
+                  ? `TP Range HL (${sideText}): ${takeProfitPrice.toFixed(2)} (${tpUsdStr} | ${ptsDiffStr}). Baseado no fator multiplicador.`
+                  : (isLevelMarker
+                      ? `TP Nível (${sideText}): ${takeProfitPrice.toFixed(2)} (${tpUsdStr} | ${ptsDiffStr}). Baseado em níveis técnicos e gamma.`
+                      : `Take Profit: ${takeProfitPrice.toFixed(2)} (${tpUsdStr} | ${ptsDiffStr}). Clique e arraste para ajustar.`);
+                tpEl = upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `trade_tp_${tradeId}`, `<span>${tpTitle}${ptsLabel}</span>`, true, styleTp, tpTooltip);
+                if (!isRangeMarker && !isLevelMarker) {
+                  (tpEl as any).onpointerdown = (e: any) => startDraggingLevel(tradeId, 'take_profit', takeProfitPrice, e);
+                  (tpEl as any).onmousedown = (e: any) => startDraggingLevel(tradeId, 'take_profit', takeProfitPrice, e);
+                  (tpEl as any).ontouchstart = (e: any) => startDraggingLevel(tradeId, 'take_profit', takeProfitPrice, e);
+                }
               }
 
               const styleTpBadge = makePriceAxisBadgeStyle(
@@ -5597,6 +5759,43 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                 (tpBadgeEl as any).onmousedown = (e: any) => startDraggingLevel(tradeId, 'take_profit', takeProfitPrice, e);
                 (tpBadgeEl as any).ontouchstart = (e: any) => startDraggingLevel(tradeId, 'take_profit', takeProfitPrice, e);
               }
+            }
+          }
+
+          if (!isCustomMarker && !isRangeMarker && !isLevelMarker && !isNaN(entryPrice) && entryPrice > 0) {
+            const y = safePriceToY(entryPrice);
+            if (y !== null && !isNaN(y) && y >= -40 && y <= containerEl.clientHeight + 40) {
+              const currentPriceVal = currentPriceRef.current || (chartDataRef.current.length > 0 ? chartDataRef.current[chartDataRef.current.length - 1].close : entryPrice);
+              const isBuy = sideText === 'COMPRA' || sideText === 'BUY';
+              const curPtsDiff = isBuy ? (currentPriceVal - entryPrice) : (entryPrice - currentPriceVal);
+              const curPnlUsd = curPtsDiff * contractsCount * pointValueForPanel;
+              const pnlSign = curPnlUsd >= 0 ? '+' : '-';
+              const ptsSign = curPtsDiff >= 0 ? '+' : '-';
+              const pnlFormatted = `${pnlSign}$${Math.abs(curPnlUsd).toFixed(2)}`;
+              const ptsFormatted = `${ptsSign}${Math.abs(curPtsDiff).toFixed(2)} pts`;
+
+              if (showCards) {
+                const entryText = !isMobile
+                  ? (sideText || 'ENTRADA')
+                  : (isProposed
+                      ? `${sideText || 'ENTRADA'} ${qtyPrefix}(PENDENTE)`
+                      : `${sideText || 'ENTRADA'} ${qtyPrefix}(${pnlFormatted} | ${ptsFormatted})`);
+
+                const entryBg = isProposed ? '#090d16e0' : (curPnlUsd >= 0 ? '#064e3be0' : '#4c0519e0');
+                const entryBorder = isProposed ? '#38bdf8' : (curPnlUsd >= 0 ? '#10b981' : '#f43f5e');
+                const entryTextColor = isProposed ? '#38bdf8' : (curPnlUsd >= 0 ? '#34d399' : '#fb7185');
+
+                const refCardWidth = Math.max(slEl ? slEl.offsetWidth : 0, tpEl ? tpEl.offsetWidth : 0);
+                const entryPositionStyle = (!isMobile && refCardWidth > 0)
+                  ? `right: ${rightOffset + refCardWidth / 2}px; transform: translateX(50%);`
+                  : `right: ${rightOffset}px;`;
+
+                const styleEntry = `position: absolute; ${entryPositionStyle} top: ${y - 11}px; color: ${entryTextColor}; font-size: 13px; font-family: 'JetBrains Mono', monospace; font-weight: bold; background: ${entryBg}; padding: 3px 6px; border-radius: 3px; border: 1px solid ${entryBorder}; line-height: 1; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.4); opacity: ${isProposed ? 0.7 : 1};`;
+                upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `trade_entry_${tradeId}`, entryText, false, styleEntry);
+              }
+
+              const styleBadge = makePriceAxisBadgeStyle(y, '#0284c7', 100, isProposed ? 0.7 : 1);
+              upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `trade_badge_${tradeId}`, entryPrice.toFixed(2), false, styleBadge);
             }
           }
         });
@@ -5987,7 +6186,17 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         horzLines: { color: themeColors.gridColor },
       },
       crosshair: {
-        mode: 1, // CrosshairMode.Normal
+        mode: cursorModeRef.current === 'arrow' ? 2 : 1,
+        vertLine: {
+          visible: cursorModeRef.current !== 'arrow',
+          color: themeColors.crosshairColor,
+          labelBackgroundColor: isLightChartBackground(themeColors.bg) ? '#0f172a' : '#1e293b',
+        },
+        horzLine: {
+          visible: cursorModeRef.current !== 'arrow',
+          color: themeColors.crosshairColor,
+          labelBackgroundColor: isLightChartBackground(themeColors.bg) ? '#0f172a' : '#1e293b',
+        },
       },
       handleScale: {
         mouseWheel: false,
@@ -6133,10 +6342,14 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                 }
 
                 // If live currentPrice is present and we're looking near real-time (rightmost bars),
-                // ensure the vertical price scale always encloses the current price
+                // ensure the vertical price scale always encloses the current price (guarded against cross-asset stale price)
                 const curPrice = currentPriceRef.current;
                 if (curPrice !== null && curPrice !== undefined && curPrice > 0 && !isNaN(curPrice)) {
-                  if (toIndex >= currentData.length - 15) {
+                  const isCompatibleWithCandles = candleMin === Infinity || (
+                    candleMin > 0 && candleMax > 0 &&
+                    curPrice >= candleMin * 0.65 && curPrice <= candleMax * 1.35
+                  );
+                  if (isCompatibleWithCandles && toIndex >= currentData.length - 15) {
                     if (curPrice < candleMin) candleMin = curPrice;
                     if (curPrice > candleMax) candleMax = curPrice;
                   }
@@ -7251,6 +7464,9 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     const applyCurrentTheme = (themeKey?: string) => {
       const activeKey = themeKey || settings?.chart_color_theme || localStorage.getItem('vortex_chart_theme') || 'black';
       const colors = getChartThemeColors(activeKey);
+      const lightBg = isLightChartBackground(colors.bg);
+      setIsLightChartBg(lightBg);
+      const isArrow = cursorModeRef.current === 'arrow';
 
       if (mainChartRef.current) {
         mainChartRef.current.applyOptions({
@@ -7261,6 +7477,19 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           grid: {
             vertLines: { color: colors.gridColor },
             horzLines: { color: colors.gridColor }
+          },
+          crosshair: {
+            mode: isArrow ? 2 : 1,
+            vertLine: {
+              visible: !isArrow,
+              color: colors.crosshairColor,
+              labelBackgroundColor: lightBg ? '#0f172a' : '#1e293b',
+            },
+            horzLine: {
+              visible: !isArrow,
+              color: colors.crosshairColor,
+              labelBackgroundColor: lightBg ? '#0f172a' : '#1e293b',
+            },
           },
           timeScale: {
             borderColor: colors.borderColor
@@ -7349,6 +7578,32 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     settings?.chart_scale_font_size
   ]);
 
+  // Atualiza modo do cursor (Mira vs Seta livre) em tempo real no gráfico
+  useEffect(() => {
+    if (!mainChartRef.current) return;
+    const activeKey = settings?.chart_color_theme || localStorage.getItem('vortex_chart_theme') || 'black';
+    const colors = getChartThemeColors(activeKey);
+    const lightBg = isLightChartBackground(colors.bg);
+    const isArrow = cursorMode === 'arrow';
+    try {
+      mainChartRef.current.applyOptions({
+        crosshair: {
+          mode: isArrow ? 2 : 1,
+          vertLine: {
+            visible: !isArrow,
+            color: colors.crosshairColor,
+            labelBackgroundColor: lightBg ? '#0f172a' : '#1e293b',
+          },
+          horzLine: {
+            visible: !isArrow,
+            color: colors.crosshairColor,
+            labelBackgroundColor: lightBg ? '#0f172a' : '#1e293b',
+          },
+        }
+      });
+    } catch (_) {}
+  }, [cursorMode, settings?.chart_color_theme]);
+
   // Helper para alinhar o timestamp de ordens/sinais exatamente ao timestamp do candle correspondente na tela
   const findCandleTimeForDate = useCallback((dateInput: any, candles: any[], tfMinutes: number = 1): number | null => {
     if (!candles || candles.length === 0 || !dateInput) return null;
@@ -7388,22 +7643,6 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
   const updateTradePriceLines = useCallback(() => {
     if (!candleSeriesRef.current) return;
-
-    if (!showOrderLines) {
-      if (lastAppliedLevelsKeyRef.current !== '__hidden_orders__' || activePriceLinesRef.current.length > 0) {
-        lastAppliedLevelsKeyRef.current = '__hidden_orders__';
-        activePriceLinesRef.current.forEach(line => {
-          try {
-            if (candleSeriesRef.current) {
-              candleSeriesRef.current.removePriceLine(line);
-            }
-          } catch (e) {}
-        });
-        activePriceLinesRef.current = [];
-        tradePriceLinesMapRef.current.clear();
-      }
-      return;
-    }
 
     const targetId = activePanel?.instance_id || instanceId || 'painel_principal';
     const activeAccountId = activeAccount?.id || null;
@@ -7688,7 +7927,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         tradePriceLinesMapRef.current.set(tradeId, { entry: lineEntry, sl: lineSl, tp: lineTp });
       });
     }
-  }, [activePanel, instanceId, activeAccount, isSimulator, simulatedReports, reports, activePosition, proposedTrade, finalContractsToUse, tempSlPrice, markingSlTpState, customMarkersVersion, showOrderLines]);
+  }, [activePanel, instanceId, activeAccount, isSimulator, simulatedReports, reports, activePosition, proposedTrade, finalContractsToUse, tempSlPrice, markingSlTpState, customMarkersVersion, showOrderLines, manualTradeMode]);
 
   useEffect(() => {
     updateTradePriceLinesRef.current = updateTradePriceLines;
@@ -7706,27 +7945,28 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       lastChartDataLengthRef.current = 0;
       lastChartDataTimeRef.current = 0;
       isFirstDataLoadRef.current = true;
-      if (chartData.length === 0) {
-        candleSeriesRef.current.setData([]);
-        if (markersPluginRef.current) {
-          try { markersPluginRef.current.setMarkers([]); } catch (_) {}
-        }
-        tradeMarkersRef.current = [];
-        dynamicMarkersRef.current = [];
-        lastAppliedMarkersStrRef.current = '';
+      candleSeriesRef.current.setData([]);
+      if (markersPluginRef.current) {
+        try { markersPluginRef.current.setMarkers([]); } catch (_) {}
       }
+      tradeMarkersRef.current = [];
+      dynamicMarkersRef.current = [];
+      lastAppliedMarkersStrRef.current = '';
       return;
     }
 
     // 1. Update main price series and indicators
     const targetColor = showPva ? '#b91c1c' : '#ef4444';
-    if (lastPriceFormatColorRef.current !== targetColor) {
-      lastPriceFormatColorRef.current = targetColor;
+    const panelTickSize = resolvePanelTickSize(activePanel, settings);
+    const panelPrecision = panelTickSize < 1 ? Math.max(2, getTickDecimals(panelTickSize)) : getTickDecimals(panelTickSize);
+    const priceFmtKey = `${targetColor}_${panelTickSize}`;
+    if (lastPriceFormatColorRef.current !== priceFmtKey) {
+      lastPriceFormatColorRef.current = priceFmtKey;
       candleSeriesRef.current.applyOptions({
         priceFormat: {
           type: 'price',
-          precision: 2,
-          minMove: 0.01,
+          precision: panelPrecision,
+          minMove: panelTickSize,
         },
         priceLineColor: targetColor
       });
@@ -8797,19 +9037,11 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
               </div>
             </div>
 
-            {/* Labels and Days Counter */}
-            <div className="flex flex-col items-center gap-1">
+            {/* Label */}
+            <div className="flex flex-col items-center">
               <span className="text-sm font-bold text-slate-100">
-                Carregando Histórico ({loadingProgress?.days || settings?.chart_history_days || 3} Dias)
+                Carregando Histórico
               </span>
-              <span className="text-xs text-slate-400 font-mono">
-                {loadingProgress?.loaded ? `${loadingProgress.loaded.toLocaleString('pt-BR')} barras recebidas` : 'Sincronizando barras de 1 minuto...'}
-              </span>
-              {loadingProgress?.total ? (
-                <span className="text-[10px] text-slate-500 font-sans">
-                  Meta: ~{loadingProgress.total.toLocaleString('pt-BR')} barras ({loadingProgress?.days || settings?.chart_history_days || 3} dias)
-                </span>
-              ) : null}
             </div>
           </div>
         </div>
@@ -9183,13 +9415,75 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           style={{ display: tempViewMode === 'candles' ? 'flex' : 'none' }}
         >
           {/* Main Chart Wrapper */}
-          <div className="w-full relative flex-1 min-h-0">
+          <div
+            className="w-full relative flex-1 min-h-0"
+            onPointerDownCapture={(e) => {
+              if (e.button === 2 && !activeDrawingTool) {
+                isRightInspectingRef.current = true;
+                updateInspectedCandleAtClientPos(e.clientX, e.clientY);
+              }
+            }}
+            onContextMenuCapture={(e) => {
+              if (!activeDrawingTool) {
+                e.preventDefault();
+              }
+            }}
+          >
             <div
               ref={mainContainerRef}
               onClick={handleChartCanvasClick}
               onTouchEnd={handlePriceScaleTouchEnd}
-              className="w-full h-full relative cursor-crosshair"
+              className="w-full h-full relative"
+              style={{
+                cursor: cursorMode === 'arrow'
+                  ? 'default'
+                  : (isLightChartBg ? BLACK_CROSSHAIR_CURSOR : 'crosshair')
+              }}
             />
+
+            {/* Card flutuante de inspeção OHLCV do candle ao segurar botão direito */}
+            {inspectedCandle && (() => {
+              const c = inspectedCandle.candle;
+              const decimals = inspectedCandle.tickSize < 1 ? Math.max(2, getTickDecimals(inspectedCandle.tickSize)) : getTickDecimals(inspectedCandle.tickSize);
+              const d = safeChartTimeToDate(c.time);
+              const dateStr = d && !isNaN(d.getTime())
+                ? new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric' }).format(d)
+                : '--/--/----';
+              const timeStr = d && !isNaN(d.getTime())
+                ? new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(d)
+                : '--:--:--';
+              const isBull = Number(c.close) >= Number(c.open);
+              const rangePts = Math.abs(Number(c.high) - Number(c.low));
+              const containerW = mainContainerRef.current?.clientWidth || 600;
+              const containerH = mainContainerRef.current?.clientHeight || 400;
+              const leftPos = Math.min(Math.max(8, inspectedCandle.x + 16), Math.max(8, containerW - 210));
+              const topPos = Math.min(Math.max(8, inspectedCandle.y + 16), Math.max(8, containerH - 195));
+              return (
+                <div
+                  className="absolute z-[99999] pointer-events-none select-none rounded-xl border border-slate-600/80 bg-[#0b1220]/95 backdrop-blur-md shadow-2xl px-3 py-2.5 text-[11px] font-mono text-slate-100 min-w-[192px]"
+                  style={{ left: `${leftPos}px`, top: `${topPos}px` }}
+                >
+                  <div className="flex items-center justify-between border-b border-slate-700/80 pb-1.5 mb-1.5 gap-3">
+                    <span className="font-bold text-cyan-300">{dateStr}</span>
+                    <span className="font-bold text-amber-300">{timeStr}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                    <span className="text-slate-400">Abertura:</span>
+                    <span className="text-right font-semibold">{Number(c.open).toFixed(decimals)}</span>
+                    <span className="text-slate-400">Máxima:</span>
+                    <span className="text-right font-semibold text-emerald-400">{Number(c.high).toFixed(decimals)}</span>
+                    <span className="text-slate-400">Mínima:</span>
+                    <span className="text-right font-semibold text-rose-400">{Number(c.low).toFixed(decimals)}</span>
+                    <span className="text-slate-400">Fechamento:</span>
+                    <span className={`text-right font-bold ${isBull ? 'text-emerald-400' : 'text-rose-400'}`}>{Number(c.close).toFixed(decimals)}</span>
+                    <span className="text-slate-400">Tamanho:</span>
+                    <span className="text-right font-semibold text-amber-300">{rangePts.toFixed(decimals)} pts</span>
+                    <span className="text-slate-400">Volume:</span>
+                    <span className="text-right font-semibold text-sky-300">{Number(c.volume || 0).toLocaleString('pt-BR')}</span>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Linha de Referência e Card de Preço quando a legenda vertical está oculta no mobile */}
             {isMobile && hidePriceScaleMobile && (
@@ -9236,6 +9530,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                 seriesRef={candleSeriesRef}
                 chartRef={mainChartRef}
                 currentSymbol={activePanel?.name || 'NQ'}
+                tickSize={resolvePanelTickSize(activePanel, settings)}
                 currentAccountId={activeAccount?.id}
                 selectedDrawingId={selectedDrawingId || null}
                 onOpenSettings={onOpenDrawingSettings || (() => {})}

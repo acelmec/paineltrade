@@ -108,13 +108,24 @@ export function resolvePanelTickSize(panel?: any, settings?: any): number {
     if (saved && Number(saved) > 0) return Number(saved);
   }
   const sym = (panel?.gamma_symbol || panel?.symbol || panel?.name || '').toUpperCase();
-  if (sym.includes('NQ') || sym.includes('MNQ') || sym.includes('ES') || sym.includes('MES') || sym.includes('RTY') || sym.includes('M2K')) {
+  if (
+    sym.includes('NQ') || sym.includes('MNQ') || sym.includes('NASDAQ') || sym.includes('NAS100') || sym.includes('US100') || sym.includes('NDX') ||
+    sym.includes('ES') || sym.includes('MES') || sym.includes('SP500') || sym.includes('S&P') || sym.includes('SPX') || sym.includes('US500') ||
+    sym.includes('RTY') || sym.includes('M2K') || sym.includes('RUSSELL')
+  ) {
     return 0.25;
   }
-  if (sym.includes('CL') || sym.includes('MCL') || sym.includes('GC') || sym.includes('MGC')) {
+  if (
+    sym.includes('CL') || sym.includes('MCL') || sym.includes('OIL') || sym.includes('WTI') || sym.includes('CRUDE') || sym.includes('PETR')
+  ) {
+    return 0.01;
+  }
+  if (
+    sym.includes('GC') || sym.includes('MGC') || sym.includes('GOLD') || sym.includes('OURO') || sym.includes('XAU')
+  ) {
     return 0.10;
   }
-  if (sym.includes('YM') || sym.includes('MYM')) {
+  if (sym.includes('YM') || sym.includes('MYM') || sym.includes('DOW') || sym.includes('US30')) {
     return 1.0;
   }
   if (sym.includes('WIN')) {

@@ -4,6 +4,7 @@ import { calculateFibonacciPrices, createNewDrawing } from '../utils/drawingEngi
 import { FIB_LEVELS } from '../types/chartDrawings';
 import { useApp } from '../context/AppContext';
 import { recordChartError } from '../utils/chartErrorLogger';
+import { resolvePanelTickSize, roundToTick } from '../services/db';
 
 interface ChartDrawingsOverlayProps {
   drawings: DrawingItem[];
@@ -15,6 +16,7 @@ interface ChartDrawingsOverlayProps {
   seriesRef: React.RefObject<any>;
   chartRef: React.RefObject<any>;
   currentSymbol?: string;
+  tickSize?: number;
   currentAccountId?: string;
   selectedDrawingId: string | null;
   onOpenSettings: (drawing: DrawingItem) => void;
@@ -47,6 +49,7 @@ export const ChartDrawingsOverlay: React.FC<ChartDrawingsOverlayProps> = ({
   seriesRef,
   chartRef,
   currentSymbol,
+  tickSize,
   currentAccountId,
   selectedDrawingId,
   onOpenSettings,
@@ -56,6 +59,7 @@ export const ChartDrawingsOverlay: React.FC<ChartDrawingsOverlayProps> = ({
   registerRedrawRef
 }) => {
   const { customStrategies, addLog } = useApp() as any;
+  const effectiveTickSize = (tickSize && tickSize > 0) ? tickSize : resolvePanelTickSize({ name: currentSymbol });
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastClickRef = useRef<{ time: number; x: number; y: number } | null>(null);
   const isHoveringRef = useRef<boolean>(false);
@@ -257,9 +261,9 @@ export const ChartDrawingsOverlay: React.FC<ChartDrawingsOverlayProps> = ({
 
     return {
       time,
-      price: Math.round(price * 100) / 100
+      price: roundToTick(price, effectiveTickSize)
     };
-  }, [seriesRef, chartRef, containerRef, chartData, timeframe]);
+  }, [seriesRef, chartRef, containerRef, chartData, timeframe, effectiveTickSize]);
 
   // Helper para verificar se um clique ou cursor está sobre algum desenho (do timeframe atual)
   const findDrawingAtCoords = useCallback((mouseX: number, mouseY: number): { drawing: DrawingItem; hitIndex: number | 'all' | 'channel_width' } | null => {
@@ -1242,7 +1246,7 @@ export const ChartDrawingsOverlay: React.FC<ChartDrawingsOverlayProps> = ({
 
       if (dragTarget.pointIndex === 'channel_width') {
         const centerPrice = (drawing.points[0].price + (drawing.points[1]?.price || drawing.points[0].price)) / 2;
-        const newDist = Math.max(5, Math.round(Math.abs(currentPoint.price - centerPrice) * 10) / 10);
+        const newDist = Math.max(effectiveTickSize, roundToTick(Math.abs(currentPoint.price - centerPrice), effectiveTickSize));
         onUpdateDrawing({ ...drawing, channelDistancePts: newDist });
       } else if (typeof dragTarget.pointIndex === 'number') {
         const idx = dragTarget.pointIndex;
@@ -1260,7 +1264,7 @@ export const ChartDrawingsOverlay: React.FC<ChartDrawingsOverlayProps> = ({
 
         const updatedPoints = dragTarget.initialPoints.map(p => ({
           time: p.time + deltaTime,
-          price: Math.round((p.price + deltaPrice) * 100) / 100,
+          price: roundToTick(p.price + deltaPrice, effectiveTickSize),
           logical: p.logical !== undefined ? p.logical + deltaLogical : undefined
         }));
         onUpdateDrawing({ ...drawing, points: updatedPoints });

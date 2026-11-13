@@ -374,10 +374,10 @@ export const TradeDock: React.FC = () => {
       <div className={`flex items-center justify-between ${dTabsBg} border-b px-3 flex-shrink-0`}>
         <div className="flex gap-1 overflow-x-auto">
           {[
-            { id: 'active_orders', label: 'Ordens Ativas', icon: '⚡', count: activeOrders.length },
-            { id: 'pending_orders', label: 'Ordens Pendentes', icon: '📝', count: pendingOrders.length },
-            { id: 'history', label: 'Histórico de Trades', icon: '📜', count: finishedHistoryFiltered.length },
-            { id: 'logs', label: 'Mensagens do Sistema', icon: '💬', count: systemLogs?.length || 0 }
+            { id: 'active_orders', label: 'Ordens Ativas', count: activeOrders.length },
+            { id: 'pending_orders', label: 'Ordens Pendentes', count: pendingOrders.length },
+            { id: 'history', label: 'Histórico de Trades', count: finishedHistoryFiltered.length },
+            { id: 'logs', label: 'Mensagens do Sistema', count: systemLogs?.length || 0 }
           ].map(tab => (
             <button
               key={tab.id}
@@ -388,7 +388,6 @@ export const TradeDock: React.FC = () => {
                   : (isLightTheme ? 'border-transparent text-slate-600 hover:text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200')
               }`}
             >
-              <span>{tab.icon}</span>
               <span>{tab.label}</span>
               {tab.count > 0 && (
                 <span className="bg-blue-600 text-white font-mono text-[10px] px-1.5 py-0.2 rounded-full font-bold">
@@ -473,7 +472,7 @@ export const TradeDock: React.FC = () => {
                             className="bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold px-2 py-0.5 rounded transition cursor-pointer"
                             title="Encerrar esta operação ativa"
                           >
-                            🛑 Zerar
+                            Zerar
                           </button>
                         </td>
                       </tr>

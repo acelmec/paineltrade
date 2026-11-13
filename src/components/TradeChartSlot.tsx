@@ -38,6 +38,7 @@ interface TradeChartSlotProps {
   onToggleMaximize: () => void;
   onChangePanel: (panelId: string) => void;
   onChangeTimeframe: (tf: number) => void;
+  onChangeHistoryDays?: (days: number) => void;
   onEditIndicator: (ind: IndicatorConfig) => void;
   onToggleIndicatorVisibility: (id: string) => void;
   onRemoveIndicator: (id: string) => void;
@@ -74,6 +75,7 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
   onToggleMaximize,
   onChangePanel,
   onChangeTimeframe,
+  onChangeHistoryDays,
   onEditIndicator,
   onToggleIndicatorVisibility,
   onRemoveIndicator,
@@ -100,7 +102,7 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
   isMidnightTheme,
   showWidgets = true,
 }) => {
-  const { panels, activePanel, getPanelSnapshot, ensurePanelDataLoaded } = useApp() as any;
+  const { panels, activePanel, getPanelSnapshot, ensurePanelDataLoaded, ensurePanelHistoryDays, allSettings, settings, saveSettings } = useApp() as any;
   const isMobile = useIsMobile();
   const slotContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -116,9 +118,30 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
     }
   }, [effectivePanelId, ensurePanelDataLoaded]);
 
+  const slotSettings = allSettings?.[effectivePanelId] || (effectivePanelId === activePanel?.id ? settings : null);
+  const slotHistoryDays = Math.max(3, Number(slot.historyDays || slotSettings?.chart_history_days) || 7);
+
+  useEffect(() => {
+    if (effectivePanelId && ensurePanelHistoryDays && slotHistoryDays > 3) {
+      ensurePanelHistoryDays(effectivePanelId, slotHistoryDays);
+    }
+  }, [effectivePanelId, slotHistoryDays, ensurePanelHistoryDays]);
+
   const snapshot = getPanelSnapshot
     ? getPanelSnapshot(effectivePanelId)
     : { candles: [], marketData: null, gammaLevels: null, isLoading: false, loadingProgress: null };
+
+  // Filtra em memória os candles para a janela de dias específica deste slot (sem afetar outros slots do mesmo ativo)
+  const slotCandles = useMemo(() => {
+    const raw = snapshot.candles || [];
+    if (raw.length === 0) return raw;
+    const lastTs = new Date(raw[raw.length - 1].timestamp).getTime();
+    if (isNaN(lastTs) || lastTs <= 0) return raw;
+    const cutoffMs = lastTs - slotHistoryDays * 24 * 60 * 60 * 1000;
+    const firstIdx = raw.findIndex((c: any) => new Date(c.timestamp).getTime() >= cutoffMs);
+    if (firstIdx <= 0) return raw;
+    return raw.slice(firstIdx);
+  }, [snapshot.candles, slotHistoryDays]);
 
   const visibleIndicators = useMemo(
     () => (slot.indicators || []).filter(i => i.visible),
@@ -216,6 +239,32 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
               <option value={60} className="bg-[#181d28] text-slate-200">1h</option>
               <option value={240} className="bg-[#181d28] text-slate-200">4h</option>
               <option value={1440} className="bg-[#181d28] text-slate-200">1D</option>
+            </select>
+
+            {/* Seletor Individual de Dias de Histórico (Isolado por gráfico, salvo no banco) */}
+            <select
+              value={slotHistoryDays}
+              onChange={(e) => {
+                e.stopPropagation();
+                onFocus();
+                const nextDays = Math.max(3, Number(e.target.value));
+                if (onChangeHistoryDays) {
+                  onChangeHistoryDays(nextDays);
+                } else if (saveSettings && effectivePanelId) {
+                  saveSettings({ chart_history_days: nextDays }, effectivePanelId);
+                }
+                if (ensurePanelHistoryDays && effectivePanelId) {
+                  ensurePanelHistoryDays(effectivePanelId, nextDays);
+                }
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className={`px-1 py-0.5 rounded border text-[10px] font-bold text-cyan-400 outline-none cursor-pointer ${selectBg}`}
+              title="Personalizar dias de histórico somente deste gráfico (salvo no banco)"
+            >
+              <option value={3} className="bg-[#181d28] text-slate-200">3d</option>
+              <option value={7} className="bg-[#181d28] text-slate-200">7d</option>
+              <option value={15} className="bg-[#181d28] text-slate-200">15d</option>
+              <option value={30} className="bg-[#181d28] text-slate-200">30d</option>
             </select>
           </div>
 
@@ -316,7 +365,8 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
         )}
 
         <CandleChart
-          candles={snapshot.candles || []}
+          key={`${slot.id}_${effectivePanelId || 'default'}`}
+          candles={slotCandles}
           panel={slotPanel}
           marketData={snapshot.marketData}
           isLoading={snapshot.isLoading}

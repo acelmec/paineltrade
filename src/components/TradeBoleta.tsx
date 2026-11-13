@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { PRESET_ATM_STRATEGIES, type ATMStrategy, type ATMBracket } from '../utils/atmRegistry';
 import { ATMStrategyModal } from './ATMStrategyModal';
@@ -11,6 +11,9 @@ interface TradeBoletaProps {
   selectedAsset: string;
   currentPrice: number;
   candles?: any[];
+  targetPanel?: any;
+  targetMarketData?: any;
+  targetGammaLevels?: any;
   isFloating?: boolean;
   onToggleFloating?: () => void;
   onClose?: () => void;
@@ -21,6 +24,9 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   selectedAsset,
   currentPrice,
   candles: candlesProp,
+  targetPanel,
+  targetMarketData,
+  targetGammaLevels,
   isFloating = false,
   onToggleFloating,
   onClose,
@@ -51,22 +57,26 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
 
   const isMobile = useIsMobile();
 
+  const effectivePanel = targetPanel || (panels || []).find((p: any) => p.name === selectedAsset || p.symbol === selectedAsset) || activePanel;
+  const effectiveSettings = (effectivePanel?.id && allSettings?.[effectivePanel.id]) ? allSettings[effectivePanel.id] : settings;
+  const effectiveMarketData = targetMarketData || marketData;
+  const effectiveGammaLevels = targetGammaLevels || gammaLevels;
+
   const activeChartCandles = typeof window !== 'undefined' && Array.isArray((window as any).__vortex_active_chart_candles) && (window as any).__vortex_active_chart_candles.length > 0
     ? (window as any).__vortex_active_chart_candles
     : null;
-  const effectiveCandles = activeChartCandles || ((candlesProp && candlesProp.length > 0) ? candlesProp : (candles || []));
+  const effectiveCandles = (candlesProp && candlesProp.length > 0) ? candlesProp : (activeChartCandles || candles || []);
 
-  const rawMarketPrice = (marketData && marketData.price && marketData.price !== '--')
-    ? parseFloat(String(marketData.price).replace(/[^\d.-]/g, ''))
+  const rawMarketPrice = (effectiveMarketData && effectiveMarketData.price && effectiveMarketData.price !== '--')
+    ? parseFloat(String(effectiveMarketData.price).replace(/[^\d.-]/g, ''))
     : null;
-  const livePrice = (rawMarketPrice && !isNaN(rawMarketPrice) && rawMarketPrice > 0)
-    ? rawMarketPrice
-    : (currentPrice && !isNaN(currentPrice) && currentPrice > 0 ? currentPrice : 0);
+  const livePrice = (currentPrice && !isNaN(currentPrice) && currentPrice > 0)
+    ? currentPrice
+    : ((rawMarketPrice && !isNaN(rawMarketPrice) && rawMarketPrice > 0) ? rawMarketPrice : 0);
 
-  const tickSize = resolvePanelTickSize(activePanel, settings);
+  const tickSize = resolvePanelTickSize(effectivePanel, effectiveSettings);
 
-  // Tabs: [DADOS DO TRADE] vs [CONTROLE DE RISCO]
-  const [activeTab, setActiveTab] = useState<'trade' | 'risk'>('trade');
+  // Tabs: LOTE vs FINANCEIRO (derivado diretamente de sizingMode para evitar dessincronia)
 
   const [ninjaStatus, setNinjaStatus] = useState<'online' | 'offline' | 'checking'>('checking');
   const isNinjaAccount = isNinjaExecutionAccount(activeAccount);
@@ -110,7 +120,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
               );
               setNinjaPositions(accPositions);
 
-              const currentAsset = activePanel?.name || selectedAsset || 'NQ';
+              const currentAsset = effectivePanel?.name || selectedAsset || 'NQ';
               const myPos = accPositions.find((p: any) =>
                 isSameAsset(p.symbol, currentAsset) &&
                 (p.marketPosition === 'BUY' || p.marketPosition === 'SELL') &&
@@ -155,7 +165,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
       setNinjaPositions([]);
       setActiveNinjaPosition(null);
     }
-  }, [isNinjaAccount, activeAccount?.id, activeAccount?.account_name, activePanel?.name, selectedAsset]);
+  }, [isNinjaAccount, activeAccount?.id, activeAccount?.account_name, effectivePanel?.name, selectedAsset]);
 
   const [, setReportsUpdateTick] = useState<number>(0);
   useEffect(() => {
@@ -170,12 +180,20 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   // Libera imediatamente qualquer lock de submissão ao trocar de ativo ou painel
   useEffect(() => {
     setIsSubmitting(false);
-  }, [activePanel?.id, selectedAsset]);
+  }, [effectivePanel?.id, selectedAsset]);
 
-  // Sizing Mode State (LOTE vs RISCO $)
-  const [sizingMode, setSizingMode] = useState<'lote' | 'risco'>(
-    settings?.chart_manual_sizing_mode === 'risco' ? 'risco' : 'lote'
-  );
+  // Sizing Mode State (LOTE vs FINANCEIRO)
+  const [sizingMode, setSizingMode] = useState<'lote' | 'risco'>(() => {
+    try {
+      const saved = localStorage.getItem('vortex_sizing_mode');
+      if (saved === 'lote' || saved === 'risco') return saved;
+    } catch {}
+    return settings?.chart_manual_sizing_mode === 'risco' ? 'risco' : 'lote';
+  });
+  const activeTab: 'trade' | 'risk' = sizingMode === 'risco' ? 'risk' : 'trade';
+  const lastLocalSizingModeChangeRef = useRef<number>(0);
+  const lastLocalStopModeChangeRef = useRef<number>(0);
+
   const [contracts, setContracts] = useState<number>(
     settings?.chart_manual_contracts !== undefined ? Number(settings.chart_manual_contracts) : 2
   );
@@ -184,9 +202,13 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   );
 
   // Stop Mode State (PONTOS vs NÍVEL vs GRÁFICO vs COPILOT vs RANGE HL)
-  const [stopMode, setStopMode] = useState<'pontos' | 'nivel' | 'grafico' | 'copilot' | 'range'>(
-    (settings?.chart_manual_trade_mode as any) || 'pontos'
-  );
+  // Padrão obrigatório ao abrir o gráfico: sempre iniciar em 'pontos' (P)
+  const [stopMode, setStopMode] = useState<'pontos' | 'nivel' | 'grafico' | 'copilot' | 'range'>(() => {
+    try {
+      localStorage.setItem('vortex_stop_mode', 'pontos');
+    } catch {}
+    return 'pontos';
+  });
 
   // Range HL Mode (R) State: Referência de Candles e Multiplicador de TP
   const [rangeCandleRef, setRangeCandleRef] = useState<number>(() => {
@@ -245,14 +267,9 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   }, [sizingMode]);
 
   useEffect(() => {
-    if (settings?.chart_manual_trade_mode && settings.chart_manual_trade_mode !== stopMode) {
-      setStopMode(settings.chart_manual_trade_mode as any);
-    }
-  }, [settings?.chart_manual_trade_mode]);
-
-  useEffect(() => {
+    if (Date.now() - lastLocalSizingModeChangeRef.current < 8000) return;
     if (settings?.chart_manual_sizing_mode && settings.chart_manual_sizing_mode !== sizingMode) {
-      setSizingMode(settings.chart_manual_sizing_mode as any);
+      setSizingMode(settings.chart_manual_sizing_mode === 'risco' ? 'risco' : 'lote');
     }
   }, [settings?.chart_manual_sizing_mode]);
   const [slPoints, setSlPoints] = useState<number>(
@@ -449,8 +466,8 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   }, [isATMActive]);
 
   // Point Value configured in the active panel (e.g. 2.00 USD/pt for NASDAQ / MNQ)
-  const pointValue = activePanel?.point_value !== undefined && activePanel?.point_value !== null
-    ? Number(activePanel.point_value)
+  const pointValue = effectivePanel?.point_value !== undefined && effectivePanel?.point_value !== null
+    ? Number(effectivePanel.point_value)
     : 2.0;
 
   // Effective SL points calculation based on active Gestão System (ATM, Gráfico, Copilot, Range HL, Nível, Pontos)
@@ -464,13 +481,13 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   const rangeSellPreview = calculateRangeHlLevels('VENDA', referencePrice, effectiveCandles, activeCandleRef, activeTpMult, tickSize);
 
   // Previsões de Nível Técnico / Gamma em tempo real
-  const nivelBuySl = roundToTick(resolveLevelPrice('COMPRA', 'SL', referencePrice, gammaLevels, slPoints, tpPoints), tickSize);
-  const nivelBuyTp = roundToTick(resolveLevelPrice('COMPRA', 'TP', referencePrice, gammaLevels, slPoints, tpPoints), tickSize);
+  const nivelBuySl = roundToTick(resolveLevelPrice('COMPRA', 'SL', referencePrice, effectiveGammaLevels, slPoints, tpPoints), tickSize);
+  const nivelBuyTp = roundToTick(resolveLevelPrice('COMPRA', 'TP', referencePrice, effectiveGammaLevels, slPoints, tpPoints), tickSize);
   const nivelBuySlPts = Math.abs(referencePrice - nivelBuySl);
   const nivelBuyTpPts = Math.abs(nivelBuyTp - referencePrice);
 
-  const nivelSellSl = roundToTick(resolveLevelPrice('VENDA', 'SL', referencePrice, gammaLevels, slPoints, tpPoints), tickSize);
-  const nivelSellTp = roundToTick(resolveLevelPrice('VENDA', 'TP', referencePrice, gammaLevels, slPoints, tpPoints), tickSize);
+  const nivelSellSl = roundToTick(resolveLevelPrice('VENDA', 'SL', referencePrice, effectiveGammaLevels, slPoints, tpPoints), tickSize);
+  const nivelSellTp = roundToTick(resolveLevelPrice('VENDA', 'TP', referencePrice, effectiveGammaLevels, slPoints, tpPoints), tickSize);
   const nivelSellSlPts = Math.abs(nivelSellSl - referencePrice);
   const nivelSellTpPts = Math.abs(referencePrice - nivelSellTp);
 
@@ -562,13 +579,13 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
       if (s.includes('CL') || s.includes('OIL')) return 'OIL';
       return s;
     }
-    return String(activePanel?.name || selectedAsset || 'ATIVO').toUpperCase();
+    return String(effectivePanel?.name || selectedAsset || 'ATIVO').toUpperCase();
   };
 
   const isReportForThisAsset = (r: any) => {
     if (!r) return false;
-    const targetSymbol = activePanel?.name || selectedAsset || 'NQ';
-    const targetPanelId = activePanel?.id || null;
+    const targetSymbol = effectivePanel?.name || selectedAsset || 'NQ';
+    const targetPanelId = effectivePanel?.id || null;
 
     // 1. O símbolo tem prioridade absoluta: se o relatório possui ativo definido e não bate com targetSymbol, descarta imediatamente
     if (r.symbol && !isSameAsset(r.symbol, targetSymbol)) return false;
@@ -589,7 +606,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
     if (r.symbol && isSameAsset(r.symbol, targetSymbol)) return true;
 
     // 6. Fallback exclusivamente se o relatório não tiver símbolo registrado
-    if (!r.symbol && !activePanel && (!r.panel_id || r.instance_id === 'painel_principal')) return true;
+    if (!r.symbol && !effectivePanel && (!r.panel_id || r.instance_id === 'painel_principal')) return true;
 
     return false;
   };
@@ -609,10 +626,10 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
     const entry = Number(r?.entry_price || 0);
     const qty = Math.max(1, Number(r?.contrato || r?.quantity || 1));
     const curPrice = resolveReportLivePrice(r);
-    const matchedPanel = resolveReportMatchedPanel(r) || (isReportForThisAsset(r) ? activePanel : null);
-    const panelSettings = matchedPanel ? allSettings?.[matchedPanel.id] : settings;
+    const matchedPanel = resolveReportMatchedPanel(r) || (isReportForThisAsset(r) ? effectivePanel : null);
+    const panelSettings = matchedPanel ? allSettings?.[matchedPanel.id] : effectiveSettings;
     const ptVal = matchedPanel
-      ? resolvePanelPointValue(matchedPanel, panelSettings || settings)
+      ? resolvePanelPointValue(matchedPanel, panelSettings || effectiveSettings)
       : pointValue;
     const pts = (curPrice > 0 && entry > 0 && r?.status === 'Em Andamento')
       ? (r.side === 'COMPRA' ? (curPrice - entry) : (entry - curPrice))
@@ -678,7 +695,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   const isShort = posQty < 0;
 
   // Lock manual entry on the current asset if this asset already has an open position (or if account blocks multi-signals across assets)
-  const currentAsset = activePanel?.name || selectedAsset || 'NQ';
+  const currentAsset = effectivePanel?.name || selectedAsset || 'NQ';
   const allowMulti = activeAccount?.allow_multi_signals !== false;
 
   const hasAssetNinjaPosition = Boolean(
@@ -753,7 +770,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
       groups.set(asset, existing);
     });
     return Array.from(groups.values());
-  }, [allAccountActiveReports, livePrice, currentPrice, panels, activePanel, settings, allSettings]);
+  }, [allAccountActiveReports, livePrice, currentPrice, panels, effectivePanel, effectiveSettings, allSettings]);
 
   // Execute Market Order (+ ATM or Manual Gestão)
   const handleExecuteOrder = async (side: 'COMPRA' | 'VENDA', isReverse = false) => {
@@ -784,7 +801,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
 
         // 🛡️ Validação Completa de Risco da Conta (Stop Diário, Meta de Lucro, Max Drawdown, Max Trades, Posição no Mesmo Ativo e Múltiplos Sinais)
         if (checkOperationalLimits) {
-          const opCheck = await checkOperationalLimits(activePanel?.id, undefined, activeAccount, true, isATMActive);
+          const opCheck = await checkOperationalLimits(effectivePanel?.id, undefined, activeAccount, true, isATMActive);
           if (!opCheck.allowed) {
             alert(`⚠️ Operação manual bloqueada pela Gestão de Risco:\n\n${opCheck.reason}`);
             return;
@@ -798,7 +815,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
         }
       }
 
-      const tickSize = resolvePanelTickSize(activePanel, settings);
+      const tickSize = resolvePanelTickSize(effectivePanel, effectiveSettings);
       const effectiveEntry = roundToTick(livePrice, tickSize);
       const initialStatus = 'Em Andamento';
 
@@ -945,7 +962,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
           await createReportAction({
             strategy_id: manualStratId,
             strategy_name: bracketsToUse.length > 1 ? `Entrada A Mercado ${side} (Alvo ${idx + 1})` : `Entrada A Mercado ${side}`,
-            instance_id: activePanel?.instance_id || 'painel_principal',
+            instance_id: effectivePanel?.instance_id || 'painel_principal',
             side,
             entry_price: effectiveEntry,
             stop_loss: slPrice,
@@ -953,11 +970,11 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
             exit_price: null,
             status: initialStatus,
             description: `[${selectedAsset}] ${activeATM.name} (${bracket.quantity}x - SL: ${actualSlPts}pt / TP: ${actualTpPts}pt${unitStr}${beStr}${trailStr})`,
-            panel_id: activePanel?.id || null,
+            panel_id: effectivePanel?.id || null,
             contrato: bracket.quantity,
             quantity: bracket.quantity,
             account_id: activeAccount?.id || null,
-            symbol: resolveAccountExecutionSymbol(activeAccount, selectedAsset || activePanel?.symbol || 'NQ'),
+            symbol: resolveAccountExecutionSymbol(activeAccount, selectedAsset || effectivePanel?.symbol || 'NQ'),
             is_atm: true,
             allow_multi: true
           } as any);
@@ -1007,8 +1024,8 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
           slPrice = roundToTick(side === 'COMPRA' ? effectiveEntry - ptsSl : effectiveEntry + ptsSl, tickSize);
           tpPrice = roundToTick(side === 'COMPRA' ? effectiveEntry + ptsTp : effectiveEntry - ptsTp, tickSize);
         } else {
-          slPrice = roundToTick(resolveLevelPrice(side, 'SL', effectiveEntry, gammaLevels, slPoints, tpPoints), tickSize);
-          tpPrice = roundToTick(resolveLevelPrice(side, 'TP', effectiveEntry, gammaLevels, slPoints, tpPoints), tickSize);
+          slPrice = roundToTick(resolveLevelPrice(side, 'SL', effectiveEntry, effectiveGammaLevels, slPoints, tpPoints), tickSize);
+          tpPrice = roundToTick(resolveLevelPrice(side, 'TP', effectiveEntry, effectiveGammaLevels, slPoints, tpPoints), tickSize);
         }
 
         // Fallback de segurança: Garante que SL e TP NUNCA sejam zero ou inválidos
@@ -1030,7 +1047,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
         await createReportAction({
           strategy_id: manualStratId,
           strategy_name: stratTitle,
-          instance_id: activePanel?.instance_id || 'painel_principal',
+          instance_id: effectivePanel?.instance_id || 'painel_principal',
           side,
           entry_price: effectiveEntry,
           stop_loss: slPrice,
@@ -1038,11 +1055,11 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
           exit_price: null,
           status: initialStatus,
           description: `[${selectedAsset}] Ordem ${stopMode === 'copilot' ? 'COPILOT IA' : stopMode === 'range' ? 'RANGE HL' : 'MERCADO'} ${side} @ ${effectiveEntry.toFixed(2)} (SL: ${slPrice.toFixed(2)} [${slPtsUsed.toFixed(1)}pt] / TP: ${tpPrice.toFixed(2)} [${tpPtsUsed.toFixed(1)}pt]${gatilhoSuffix}${rangeSuffix})`,
-          panel_id: activePanel?.id || null,
+          panel_id: effectivePanel?.id || null,
           contrato: effectiveContracts,
           quantity: effectiveContracts,
           account_id: activeAccount?.id || null,
-          symbol: resolveAccountExecutionSymbol(activeAccount, selectedAsset || activePanel?.symbol || 'NQ')
+          symbol: resolveAccountExecutionSymbol(activeAccount, selectedAsset || effectivePanel?.symbol || 'NQ')
         } as any);
 
         if (stopMode === 'grafico') {
@@ -1308,9 +1325,9 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   }, [settings?.chart_color_theme]);
 
   const isBlackTheme = currentTheme === 'black' || currentTheme === 'ninja_black';
-  const isSlateTheme = currentTheme === 'slate' || currentTheme === 'cinza_escuro' || currentTheme === 'ninja_slate';
+  const isSlateTheme = currentTheme === 'slate' || currentTheme === 'cinza_escuro' || currentTheme === 'cinza_grafite' || currentTheme === 'ninja_slate' || currentTheme === 'light' || currentTheme === 'ninja_light';
   const isMidnightTheme = currentTheme === 'midnight' || currentTheme === 'azul_noturno' || currentTheme === 'ninja_carbon' || currentTheme === 'ninja_midnight';
-  const isLightTheme = currentTheme === 'light' || currentTheme === 'cinza_grafite' || currentTheme === 'ninja_light';
+  const isLightTheme = false; // A boleta mantém superfície Cinza Grafite escura (#1a1f2c / #222838) mesmo quando o gráfico é claro/branco
 
   const bRootBg = isBlackTheme
     ? 'bg-[#000000] border-zinc-800 text-white'
@@ -1553,37 +1570,39 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
           );
         })()}
 
-        {/* 3. TABS: [DADOS DO TRADE] | [CONTROLE DE RISCO] */}
+        {/* 3. TABS: LOTE | FINANCEIRO */}
         <div className={`${bCardBg} p-0.5 rounded-lg border flex gap-0.5 text-[9.5px] font-extrabold tracking-wider uppercase`}>
           <button
             type="button"
             onClick={() => {
-              setActiveTab('trade');
+              lastLocalSizingModeChangeRef.current = Date.now();
               setSizingMode('lote');
+              localStorage.setItem('vortex_sizing_mode', 'lote');
               if (saveSettings) saveSettings({ chart_manual_sizing_mode: 'lote' });
             }}
             className={`flex-1 py-1 rounded transition text-center cursor-pointer ${
               activeTab === 'trade'
                 ? (isLightTheme ? 'bg-white text-blue-600 font-black shadow-sm border border-slate-300' : 'bg-[#1e293b] text-blue-400 font-black border-b border-blue-500 shadow-sm')
-                : (isLightTheme ? 'text-slate-600 hover:text-slate-900' : 'text-slate-400 hover:text-slate-200')
+                : (isLightTheme ? 'text-slate-600 hover:text-slate-900' : 'text-white/90 hover:text-white')
             }`}
           >
-            [DADOS DO TRADE]
+            LOTE
           </button>
           <button
             type="button"
             onClick={() => {
-              setActiveTab('risk');
+              lastLocalSizingModeChangeRef.current = Date.now();
               setSizingMode('risco');
+              localStorage.setItem('vortex_sizing_mode', 'risco');
               if (saveSettings) saveSettings({ chart_manual_sizing_mode: 'risco' });
             }}
             className={`flex-1 py-1 rounded transition text-center cursor-pointer ${
               activeTab === 'risk'
                 ? (isLightTheme ? 'bg-white text-emerald-600 font-black shadow-sm border border-slate-300' : 'bg-[#1e293b] text-emerald-400 font-black border-b border-emerald-500 shadow-sm')
-                : (isLightTheme ? 'text-slate-600 hover:text-slate-900' : 'text-slate-400 hover:text-slate-200')
+                : (isLightTheme ? 'text-slate-600 hover:text-slate-900' : 'text-white/90 hover:text-white')
             }`}
           >
-            [CONTROLE DE RISCO]
+            FINANCEIRO
           </button>
         </div>
 
@@ -1596,7 +1615,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 <label className={`text-[10px] ${bLabelColor} uppercase tracking-wider block`}>
                   CONTRATOS
                 </label>
-                <span className={`text-[10px] font-mono font-bold ${isLightTheme ? 'text-slate-700' : 'text-slate-300'}`}>
+                <span className={`text-[10px] font-mono font-bold ${isLightTheme ? 'text-slate-700' : 'text-white'}`}>
                   {contracts} {contracts > 1 ? 'contratos' : 'contrato'}
                 </span>
               </div>
@@ -1660,6 +1679,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  lastLocalStopModeChangeRef.current = Date.now();
                   setStopMode('pontos');
                   localStorage.setItem('vortex_stop_mode', 'pontos');
                   if (saveSettings) saveSettings({ chart_manual_trade_mode: 'pontos' });
@@ -1667,7 +1687,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 }}
                 title="Modo Pontos (SL e TP fixos em pontos)"
                 className={`px-2 py-0.5 rounded font-black transition cursor-pointer ${
-                  stopMode === 'pontos' ? 'bg-blue-600 text-white shadow' : (isLightTheme ? 'text-slate-600 hover:text-slate-900' : 'text-slate-400 hover:text-white')
+                  stopMode === 'pontos' ? 'bg-blue-600 text-white shadow' : (isLightTheme ? 'text-slate-600 hover:text-slate-900' : 'text-white/90 hover:text-white')
                 }`}
               >
                 P
@@ -1675,6 +1695,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  lastLocalStopModeChangeRef.current = Date.now();
                   setStopMode('nivel');
                   localStorage.setItem('vortex_stop_mode', 'nivel');
                   if (saveSettings) saveSettings({ chart_manual_trade_mode: 'nivel' });
@@ -1682,7 +1703,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 }}
                 title="Modo Nível (SL e TP calculados por níveis técnicos e gamma)"
                 className={`px-2 py-0.5 rounded font-black transition cursor-pointer ${
-                  stopMode === 'nivel' ? 'bg-blue-600 text-white shadow' : (isLightTheme ? 'text-slate-600 hover:text-slate-900' : 'text-slate-400 hover:text-white')
+                  stopMode === 'nivel' ? 'bg-blue-600 text-white shadow' : (isLightTheme ? 'text-slate-600 hover:text-slate-900' : 'text-white/90 hover:text-white')
                 }`}
               >
                 N
@@ -1690,6 +1711,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  lastLocalStopModeChangeRef.current = Date.now();
                   setStopMode('grafico');
                   localStorage.setItem('vortex_stop_mode', 'grafico');
                   if (saveSettings) saveSettings({ chart_manual_trade_mode: 'grafico' });
@@ -1697,7 +1719,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 }}
                 title="Modo Gráfico (Marcação visual interativa no gráfico)"
                 className={`px-2 py-0.5 rounded font-black transition cursor-pointer ${
-                  stopMode === 'grafico' ? 'bg-amber-600 text-white shadow' : (isLightTheme ? 'text-slate-600 hover:text-slate-900' : 'text-slate-400 hover:text-white')
+                  stopMode === 'grafico' ? 'bg-amber-600 text-white shadow' : (isLightTheme ? 'text-slate-600 hover:text-slate-900' : 'text-white/90 hover:text-white')
                 }`}
               >
                 G
@@ -1705,6 +1727,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  lastLocalStopModeChangeRef.current = Date.now();
                   setStopMode('copilot');
                   localStorage.setItem('vortex_stop_mode', 'copilot');
                   if (saveSettings) saveSettings({ chart_manual_trade_mode: 'copilot' });
@@ -1712,7 +1735,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 }}
                 title="Modo Copilot IA (Preços de SL e TP automáticos da IA com edição direta de preço)"
                 className={`px-2 py-0.5 rounded font-black transition cursor-pointer ${
-                  stopMode === 'copilot' ? 'bg-purple-600 text-white shadow' : (isLightTheme ? 'text-slate-600 hover:text-slate-900' : 'text-slate-400 hover:text-white')
+                  stopMode === 'copilot' ? 'bg-purple-600 text-white shadow' : (isLightTheme ? 'text-slate-600 hover:text-slate-900' : 'text-white/90 hover:text-white')
                 }`}
               >
                 C
@@ -1720,6 +1743,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  lastLocalStopModeChangeRef.current = Date.now();
                   setStopMode('range');
                   localStorage.setItem('vortex_stop_mode', 'range');
                   if (saveSettings) saveSettings({ chart_manual_trade_mode: 'range' });
@@ -1727,7 +1751,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 }}
                 title="Modo Range HL (Stop Loss na Mínima/Máxima dos candles e Take Profit com Fator R:R)"
                 className={`px-2 py-0.5 rounded font-black transition cursor-pointer ${
-                  stopMode === 'range' ? 'bg-emerald-600 text-white shadow' : (isLightTheme ? 'text-slate-600 hover:text-slate-900' : 'text-slate-400 hover:text-white')
+                  stopMode === 'range' ? 'bg-emerald-600 text-white shadow' : (isLightTheme ? 'text-slate-600 hover:text-slate-900' : 'text-white/90 hover:text-white')
                 }`}
               >
                 R
@@ -2239,7 +2263,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
               <span className={`text-[10px] font-extrabold uppercase tracking-wider ${
                 isATMActive ? 'text-amber-500' : (isLightTheme ? 'text-slate-600' : 'text-slate-400')
               }`}>
-                🎯 ATIVAR ESTRATÉGIA ATM
+                ATIVAR ESTRATÉGIA ATM
               </span>
             </label>
             {isATMActive && (
@@ -2295,7 +2319,6 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 : 'bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white cursor-pointer border-emerald-500/40'
             }`}
           >
-            <span className="text-sm">{isNinjaAccount || hasOpenPosition ? '🔒' : isSubmitting ? '⏳' : '⬆️'}</span>
             <span>{isSubmitting ? 'ENVIANDO...' : 'COMPRA'}</span>
           </button>
 
@@ -2321,27 +2344,25 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 : 'bg-rose-600 hover:bg-rose-500 active:scale-95 text-white cursor-pointer border-rose-500/40'
             }`}
           >
-            <span className="text-sm">{isNinjaAccount || hasOpenPosition ? '🔒' : isSubmitting ? '⏳' : '⬇️'}</span>
             <span>{isSubmitting ? 'ENVIANDO...' : 'VENDA'}</span>
           </button>
         </div>
 
         {/* 7. PANIC & EMERGENCY ACTIONS */}
         <div className="space-y-1 pt-0.5">
-          {/* ⛔ FECHAR TUDO */}
+          {/* FECHAR TUDO */}
           <button
             type="button"
             onClick={handleFlatOrder}
             className="w-full bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black py-1.5 px-2 rounded-lg text-[10px] transition flex items-center justify-center gap-1 shadow uppercase tracking-wider cursor-pointer"
           >
-            <span>⛔</span>
             <span>FECHAR TUDO</span>
           </button>
 
           {/* Elementos ocultados no modo flutuante conforme regra 5 */}
           {!isFloating && (
             <>
-          {/* 🔄 INVERTER & 🛡️ BREAKEVEN ROW */}
+          {/* INVERTER & BREAKEVEN ROW */}
           <div className="grid grid-cols-2 gap-1">
             <button
               type="button"
@@ -2356,7 +2377,6 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                   : 'bg-[#1e293b] hover:bg-slate-700 text-slate-200 border-slate-700 active:scale-95 cursor-pointer'
               } font-bold py-1 px-1.5 rounded-lg text-[9px] transition flex items-center justify-center gap-1 border shadow-sm`}
             >
-              <span>{isNinjaAccount ? '🔒' : '🔄'}</span>
               <span>INVERTER</span>
             </button>
             <button
@@ -2374,7 +2394,6 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                   : 'Break-Even indisponível: a operação precisa estar com lucro positivo para ser protegida'
               }
             >
-              <span>🛡️</span>
               <span>BREAKEVEN</span>
             </button>
           </div>

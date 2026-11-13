@@ -909,7 +909,12 @@ export const CopyTradingDashboard: React.FC = () => {
       <div className="bg-gradient-to-r from-slate-900 via-slate-850 to-blue-950/80 border border-slate-800/80 rounded-xl p-5 shadow-2xl backdrop-blur-md flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <span className="text-3xl p-2.5 bg-blue-500/10 border border-blue-500/30 rounded-xl">⚡</span>
+            <span className="p-2.5 bg-blue-500/10 border border-blue-500/30 rounded-xl flex items-center justify-center text-blue-400">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+            </span>
             <div>
               <h1 className="text-2xl md:text-3xl font-black tracking-tight text-white flex items-center gap-2">
                 CopyTrade NT8
@@ -928,7 +933,7 @@ export const CopyTradingDashboard: React.FC = () => {
                 title={`Espelhado ao vivo do computador principal com NinjaTrader 8 | Latência: ${ninjaLatency ?? 25}ms | Último sync: ${bridgeLastSyncedTime || 'agora'}`}
               >
                 <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-                <span>📱 NT8 Espelhado PC ({ninjaLatency ?? 25}ms)</span>
+                <span>NT8 Espelhado PC ({ninjaLatency ?? 25}ms)</span>
               </div>
             ) : (
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-bold bg-emerald-950/40 border-emerald-500/50 text-emerald-400">
@@ -945,7 +950,7 @@ export const CopyTradingDashboard: React.FC = () => {
 
           {/* Licença / Sessão */}
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-blue-950/40 border-blue-500/40 text-blue-300 text-xs font-bold">
-            <span>🛡️ Licença Ativa</span>
+            <span>Licença Ativa</span>
             <span className="text-[10px] text-blue-400/80 font-mono">({todayStr})</span>
           </div>
 
@@ -954,7 +959,7 @@ export const CopyTradingDashboard: React.FC = () => {
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-slate-850 border-slate-700 text-slate-300 text-xs font-bold"
             title="Contas do NinjaTrader 8 sincronizadas e ativas no painel"
           >
-            <span>🏦 {ninjaAccounts.length} Sincronizada(s)</span>
+            <span>{ninjaAccounts.length} Sincronizada(s)</span>
           </div>
 
           {/* Botão Sincronizar Contas NT8 */}
@@ -963,7 +968,7 @@ export const CopyTradingDashboard: React.FC = () => {
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white text-xs font-bold transition shadow-sm cursor-pointer"
             title="Descobrir e importar contas conectadas no NinjaTrader ou configurar Modo de Conexão (Túnel / Local)"
           >
-            <span>🔄 Sincronizar Contas</span>
+            <span>Sincronizar Contas</span>
           </button>
 
           {/* Status Auto-Sync NT8 (Regras Sincronizadas Automaticamente) */}
@@ -975,7 +980,7 @@ export const CopyTradingDashboard: React.FC = () => {
             }`}
             title={ninjaOnline ? "Sincronização Automática em Tempo Real: qualquer alteração de regras é enviada instantaneamente ao NinjaTrader 8" : "NinjaTrader Offline ou porta 8001 fechada"}
           >
-            <span className={ninjaOnline ? "text-emerald-400" : ""}>⚡</span>
+            <span className={`w-2 h-2 rounded-full ${ninjaOnline ? "bg-emerald-400" : "bg-slate-500"}`} />
             <span>{ninjaOnline ? "Auto-Sync NT8 Ativo" : "NT8 Offline"}</span>
           </div>
 
@@ -1191,7 +1196,7 @@ export const CopyTradingDashboard: React.FC = () => {
               : 'bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-850'
           }`}
         >
-          <span>👑</span> Regras de Espelhamento ({masterGroups.length} Masters / {copyConfigs.length} Slaves)
+          Regras de Espelhamento ({masterGroups.length} Masters / {copyConfigs.length} Slaves)
         </button>
 
         <button
@@ -1202,7 +1207,7 @@ export const CopyTradingDashboard: React.FC = () => {
               : 'bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-850'
           }`}
         >
-          <span>📊</span> Posições & Ordens ({openPositions.length} pos / {workingOrders.length} ord)
+          Posições & Ordens ({openPositions.length} pos / {workingOrders.length} ord)
         </button>
 
         <button
@@ -1213,7 +1218,7 @@ export const CopyTradingDashboard: React.FC = () => {
               : 'bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-850'
           }`}
         >
-          <span>📈</span> Performance das Contas
+          Performance das Contas
         </button>
 
         <button
@@ -1224,7 +1229,7 @@ export const CopyTradingDashboard: React.FC = () => {
               : 'bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-850'
           }`}
         >
-          <span>💬</span> Mensagens & Alertas ({copyMessages.length})
+          Mensagens & Alertas ({copyMessages.length})
           {copyMessages.some(m => m.type === 'REJEITADO') && (
             <span className="px-1.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black animate-pulse">
               {copyMessages.filter(m => m.type === 'REJEITADO').length}
@@ -1240,7 +1245,7 @@ export const CopyTradingDashboard: React.FC = () => {
               : 'bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-850'
           }`}
         >
-          <span>📖</span> Guia & Proteções
+          Guia & Proteções
         </button>
       </div>
 
@@ -1252,7 +1257,7 @@ export const CopyTradingDashboard: React.FC = () => {
             <div className="flex justify-between items-center bg-slate-900/60 p-3 rounded-xl border border-slate-800">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <span>👑</span> Gestão de Espelhamento Master ➔ Slaves
+                  Gestão de Espelhamento Master ➔ Slaves
                 </h3>
               </div>
               {!isRestrictedSession && (
@@ -1267,7 +1272,12 @@ export const CopyTradingDashboard: React.FC = () => {
 
             {masterGroups.length === 0 ? (
               <div className="p-8 text-center bg-slate-900/40 border border-dashed border-slate-800 rounded-xl">
-                <span className="text-4xl">⚡</span>
+                <div className="flex justify-center text-blue-400/70">
+                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                </div>
                 <h4 className="text-sm font-bold text-slate-300 mt-2">Nenhum espelhamento configurado</h4>
                 <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
                   {isRestrictedSession 
@@ -1293,7 +1303,7 @@ export const CopyTradingDashboard: React.FC = () => {
                     {/* BARRA DE CABEÇALHO DA CONTA MASTER */}
                     <div className="bg-gradient-to-r from-slate-850 via-slate-900 to-blue-950/40 p-2.5 border-b border-slate-800 flex flex-wrap justify-between items-center gap-2.5">
                       <div className="flex items-center gap-2.5">
-                        <span className="text-xl p-1 bg-amber-500/10 border border-amber-500/30 rounded-lg">👑</span>
+                        <span className="w-8 h-8 flex items-center justify-center text-xs font-black text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg shrink-0">M</span>
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Conta Master:</span>
@@ -1384,7 +1394,6 @@ export const CopyTradingDashboard: React.FC = () => {
                               {/* Nome da Slave */}
                               <td className="px-2.5 py-1.5">
                                 <div className="flex items-center gap-1.5">
-                                  <span className="text-xs">👥</span>
                                   <span className="font-bold text-white font-mono text-xs">{getAccountDisplayName(slaveRule.slave_account_id, slaveRule.slave_account_name)}</span>
                                 </div>
                               </td>
@@ -1401,11 +1410,11 @@ export const CopyTradingDashboard: React.FC = () => {
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   <span>{slaveRule.allowed_symbols || 'TODOS'}</span>
                                   <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold flex items-center gap-1" title="Proteção ATM Obrigatória: Stop Loss e Take Profit replicados compulsoriamente">
-                                      <span>🛡️</span> ATM Obrigatório
+                                      ATM Obrigatório
                                     </span>
                                   {slaveRule.close_slaves_on_master_close !== false && (
                                     <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold" title="Fecha posições na Slave automaticamente ao fechar Master">
-                                      ⚡ Zerar c/ Master
+                                      Zerar c/ Master
                                     </span>
                                   )}
                                 </div>
@@ -1480,7 +1489,7 @@ export const CopyTradingDashboard: React.FC = () => {
             <div className="flex flex-wrap justify-between items-center gap-2.5 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <span>📊</span> Posições em Aberto e Ordens Trabalhando
+                  Posições em Aberto e Ordens Trabalhando
                 </h3>
               </div>
 
@@ -1489,7 +1498,7 @@ export const CopyTradingDashboard: React.FC = () => {
                   onClick={checkStatus}
                   className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-white rounded-lg border border-slate-700 transition"
                 >
-                  🔄 Atualizar
+                  Atualizar
                 </button>
                 <button
                   onClick={handleCancelAllOrders}
@@ -1501,7 +1510,7 @@ export const CopyTradingDashboard: React.FC = () => {
                   }`}
                   title={workingOrders.length > 0 ? "Cancelar todas as ordens pendentes no NinjaTrader" : "Nenhuma ordem pendente para cancelar"}
                 >
-                  ❌ Cancelar Todas as Ordens
+                  Cancelar Todas as Ordens
                 </button>
                 <button
                   onClick={() => setIsPanicModalOpen(true)}
@@ -1512,7 +1521,7 @@ export const CopyTradingDashboard: React.FC = () => {
                   }`}
                   title="Zerar todas as posições em aberto no NinjaTrader"
                 >
-                  🛑 Zerar Todas as Posições
+                  Zerar Todas as Posições
                 </button>
               </div>
             </div>
@@ -2004,7 +2013,7 @@ export const CopyTradingDashboard: React.FC = () => {
                         : 'bg-slate-800 text-slate-400 hover:text-white'
                     }`}
                   >
-                    <span>{type === 'ALL' ? '📋 Todos' : type === 'REJEITADO' ? '🚨 Rejeitados' : type === 'COPIADO' ? '⚡ Copiados' : '⚠️ Alertas'}</span>
+                    <span>{type === 'ALL' ? 'Todos' : type === 'REJEITADO' ? 'Rejeitados' : type === 'COPIADO' ? 'Copiados' : 'Alertas'}</span>
                     <span className="text-[10px] font-mono opacity-70">
                       ({type === 'ALL' ? copyMessages.length : copyMessages.filter(m => m.type === type).length})
                     </span>
@@ -2095,9 +2104,9 @@ export const CopyTradingDashboard: React.FC = () => {
                             </span>
 
                             <span className="text-xs font-bold text-white flex items-center gap-1 shrink-0 font-mono">
-                              <span>👑 {msg.masterAccount}</span>
+                              <span className="text-amber-400">{msg.masterAccount}</span>
                               <span className="text-slate-500">➔</span>
-                              <span className="text-cyan-400">👤 {msg.slaveAccount}</span>
+                              <span className="text-cyan-400">{msg.slaveAccount}</span>
                             </span>
 
                             {msg.symbol && (
@@ -2138,7 +2147,7 @@ export const CopyTradingDashboard: React.FC = () => {
           <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-6 shadow-xl flex flex-col gap-6">
             <div>
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <span>🛡️</span> Arquitetura de Proteção e Anti-Divergência
+                Arquitetura de Proteção e Anti-Divergência
               </h3>
               <p className="text-xs text-slate-400 mt-1">
                 Entenda como o VortexWeb e o Add-On do NinjaTrader garantem a integridade operacional de suas contas.
@@ -2148,7 +2157,7 @@ export const CopyTradingDashboard: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs leading-relaxed text-slate-300">
               <div className="bg-slate-950/70 p-4 rounded-lg border border-slate-800">
                 <h4 className="font-bold text-amber-400 text-sm mb-1.5 flex items-center gap-1.5">
-                  <span>🔒</span> Proteção Anti-Reabertura (Anti-Looping)
+                  Proteção Anti-Reabertura (Anti-Looping)
                 </h4>
                 <p>
                   Se uma conta Slave tiver sua posição encerrada manualmente, por Stop Loss individual ou por trava de perda máxima diária, o motor do Add-On registra a chave única da ordem Master. A Slave <strong>NUNCA reabrirá</strong> a operação enquanto a Master permanecer no mesmo trade.
@@ -2157,7 +2166,7 @@ export const CopyTradingDashboard: React.FC = () => {
 
               <div className="bg-slate-950/70 p-4 rounded-lg border border-slate-800">
                 <h4 className="font-bold text-cyan-400 text-sm mb-1.5 flex items-center gap-1.5">
-                  <span>⚡</span> Multiplicador Fracionário (0.5x, 1.5x)
+                  Multiplicador Fracionário (0.5x, 1.5x)
                 </h4>
                 <p>
                   Com o multiplicador fracionário, um trade de 2 contratos na conta Master é automaticamente convertido para 1 contrato na conta Slave (2 × 0.5 = 1). O motor sempre arredonda de forma segura com um mínimo de 1 contrato.

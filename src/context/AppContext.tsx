@@ -1390,6 +1390,7 @@ interface AppContextType {
     loadingProgress: any;
   };
   ensurePanelDataLoaded: (panelId: string) => void;
+  ensurePanelHistoryDays: (panelId: string, requiredDays: number) => void;
   setVisibleMultiPanelIds: (ids: string[]) => void;
   panelCacheVersion: number;
 
@@ -1460,9 +1461,9 @@ interface AppContextType {
   setWindowBaseline: (baseline: { buy: number; sell: number; time: number } | null) => void;
 
   // Configurações
-  saveSettings: (updatedFields: Partial<any>, targetPanelId?: string | 'all') => Promise<boolean>;
+  saveSettings: (updatedFields: Partial<any>, targetPanelId?: string | 'all' | string[]) => Promise<boolean>;
   allSettings: Record<string, any>;
-  refreshMarketData: () => Promise<void>;
+  refreshMarketData: (overrideSettings?: any, targetPanelIds?: string[], perPanelDays?: Record<string, number>) => Promise<void>;
   authError: string | null;
 
   // Alertas ativos
@@ -1605,7 +1606,8 @@ const enrichSettingsWithVirtualConfigs = (settingsObj: any) => {
   let screenshot_update_interval = settingsObj.screenshot_update_interval !== undefined ? Number(settingsObj.screenshot_update_interval) : 3000;
   let general_prompt_master_enabled = settingsObj.general_prompt_master_enabled === true;
   let chart_candle_bar_count = settingsObj.chart_candle_bar_count !== undefined ? Number(settingsObj.chart_candle_bar_count) : 60;
-  let chart_history_days = settingsObj.chart_history_days !== undefined ? Number(settingsObj.chart_history_days) : 7;
+  let chart_history_days = settingsObj.chart_history_days !== undefined ? Math.max(3, Number(settingsObj.chart_history_days) || 3) : 7;
+  let slot_history_days = settingsObj.slot_history_days || '';
   
   // New configs
   let chart_manual_trade_mode = settingsObj.chart_manual_trade_mode || 'nivel';
@@ -1749,7 +1751,8 @@ const enrichSettingsWithVirtualConfigs = (settingsObj: any) => {
         else if (key === 'screenshot_update_interval') screenshot_update_interval = Number(val) || 3000;
         else if (key === 'general_prompt_master_enabled') general_prompt_master_enabled = val === 'true';
         else if (key === 'chart_candle_bar_count') chart_candle_bar_count = Number(val) || 60;
-        else if (key === 'chart_history_days') chart_history_days = Number(val) || 7;
+        else if (key === 'chart_history_days') chart_history_days = Math.max(3, Number(val) || 7);
+        else if (key === 'slot_history_days') slot_history_days = val || '';
         else if (key === 'chart_manual_trade_mode') chart_manual_trade_mode = val;
         else if (key === 'chart_manual_sizing_mode') chart_manual_sizing_mode = val;
         else if (key === 'chart_manual_risk_usd') chart_manual_risk_usd = Number(val) || 250;
@@ -1901,6 +1904,7 @@ const enrichSettingsWithVirtualConfigs = (settingsObj: any) => {
     general_prompt_master_enabled,
     chart_candle_bar_count,
     chart_history_days,
+    slot_history_days,
     chart_manual_trade_mode,
     chart_manual_sizing_mode,
     chart_manual_risk_usd,
@@ -2603,8 +2607,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [panelCacheVersion, setPanelCacheVersion] = useState<number>(0);
   const [visibleMultiPanelIds, setVisibleMultiPanelIdsState] = useState<string[]>([]);
+  const visibleMultiPanelIdsRef = useRef<string[]>([]);
   const setVisibleMultiPanelIds = useCallback((ids: string[]) => {
     const normalized = Array.from(new Set(ids.filter(Boolean))).sort();
+    visibleMultiPanelIdsRef.current = normalized;
     setVisibleMultiPanelIdsState(prev => {
       if (prev.length === normalized.length && prev.every((v, i) => v === normalized[i])) {
         return prev;
@@ -4081,12 +4087,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setGammaLevels(cache.gammaLevels);
     setOptionsMarket(cache.optionsMarket || null);
     setScreenshot(cache.screenshot);
-    const isPanelReady = initialLoadedPanelsRef.current.has(panelId) && cache.candles && cache.candles.length >= 10;
+    const targetDays = Math.max(3, Number(targetSettings?.chart_history_days) || 3);
+    const loadedDays = Number((cache as any).loadedHistoryDays || 0);
+    const hasCachedCandles = Boolean(cache.candles && cache.candles.length >= 10);
+    const isPanelReady = hasCachedCandles && (initialLoadedPanelsRef.current.has(panelId) || loadedDays >= targetDays);
     if (isPanelReady) {
       setCandles(cache.candles || []);
+      setIsCandlesLoading(false);
     } else {
       setCandles([]);
-      const targetDays = Number(targetSettings?.chart_history_days) || 3;
       setCandlesLoadingProgress({
         isLoading: true,
         percent: 15,
@@ -4099,16 +4108,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     setAiResult(cache.aiResult || null);
 
-    // Zera os timestamps de ciclo para forçar a busca REFRESH completa no servidor imediatamente
-    cache.lastCandlesFetch = 0;
-    cache.lastGammaFetch = 0;
-    cache.lastOptionsMarketFetch = 0;
-    cache.lastScreenshotFetch = 0;
-    cache.lastForceFetch = 0;
+    // Só busca histórico no servidor se o painel ainda não tiver o histórico solicitado em cache
+    if (!isPanelReady) {
+      cache.lastCandlesFetch = 0;
+      cache.lastGammaFetch = 0;
+      cache.lastOptionsMarketFetch = 0;
+      cache.lastScreenshotFetch = 0;
+      cache.lastForceFetch = 0;
 
-    // Disparar o ciclo de mercado imediatamente para o novo ativo selecionado
-    if (targetPanel && targetSettings) {
-      executeMarketCycleForPanel(targetPanel, targetSettings);
+      if (targetPanel && targetSettings) {
+        executeMarketCycleForPanel(targetPanel, targetSettings);
+      }
     }
   };
 
@@ -4221,14 +4231,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsAuthenticated(false);
   };
 
+  const lastLocalSettingsSaveAtRef = useRef<number>(0);
+
   // 4. Salvar Configurações
-  const saveSettings = async (updatedFields: Partial<any>, targetPanelId?: string | 'all'): Promise<boolean> => {
+  const saveSettings = async (updatedFields: Partial<any>, targetPanelId?: string | 'all' | string[]): Promise<boolean> => {
     if (isRestrictedSession) return false;
     if (!settings || !panel) return false;
+    lastLocalSettingsSaveAtRef.current = Date.now();
 
     const targetPanelIds: string[] = [];
     if (targetPanelId === 'all') {
       targetPanelIds.push(...(panels || []).map(p => p.id));
+    } else if (Array.isArray(targetPanelId)) {
+      targetPanelIds.push(...Array.from(new Set(targetPanelId.filter(Boolean))));
     } else if (targetPanelId) {
       targetPanelIds.push(targetPanelId);
     } else {
@@ -4269,6 +4284,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         `cfg:general_prompt_master_enabled:${mergedSettings.general_prompt_master_enabled || false}`,
         `cfg:chart_candle_bar_count:${mergedSettings.chart_candle_bar_count !== undefined ? mergedSettings.chart_candle_bar_count : 60}`,
         `cfg:chart_history_days:${mergedSettings.chart_history_days !== undefined ? mergedSettings.chart_history_days : 7}`,
+        `cfg:slot_history_days:${mergedSettings.slot_history_days || ''}`,
         `cfg:chart_manual_trade_mode:${mergedSettings.chart_manual_trade_mode || 'nivel'}`,
         `cfg:chart_manual_sizing_mode:${mergedSettings.chart_manual_sizing_mode || 'lote'}`,
         `cfg:chart_manual_risk_usd:${mergedSettings.chart_manual_risk_usd !== undefined ? mergedSettings.chart_manual_risk_usd : 250}`,
@@ -4400,7 +4416,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         'log_show_sistema', 'log_show_alerta', 'log_show_ia', 'log_show_erro',
         'log_show_noticia', 'market_update_interval', 'force_update_interval',
         'candles_update_interval', 'screenshot_update_interval', 'general_prompt_master_enabled',
-        'chart_candle_bar_count', 'chart_history_days', 'chart_manual_trade_mode', 'chart_manual_sl_points',
+        'chart_candle_bar_count', 'chart_history_days', 'slot_history_days', 'chart_manual_trade_mode', 'chart_manual_sl_points',
         'chart_manual_tp_points', 'chart_show_levels', 'chart_confirm_manual_trade',
         'chart_manual_ia_validate', 'alert_force_ativo', 'alert_force_buy_min',
         'alert_force_sell_max', 'alert_force_cooldown', 'alert_force_telegram',
@@ -4483,7 +4499,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (overallSuccess) {
       if (updatedFields.chart_history_days !== undefined) {
-        const nextDays = Number(updatedFields.chart_history_days) || 3;
+        const nextDays = Math.max(3, Number(updatedFields.chart_history_days) || 3);
         const nextTotal = Math.min(50000, nextDays * 1440);
         targetPanelIds.forEach(pId => {
           initialLoadedPanelsRef.current.delete(pId);
@@ -4494,17 +4510,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             c.candles = [];
           }
         });
-        setCandles([]);
-        setCandlesLoadingProgress({
-          isLoading: true,
-          percent: 15,
-          loaded: 0,
-          total: nextTotal,
-          days: nextDays,
-          isExplicitDaysChange: true
-        });
-        setIsCandlesLoading(true);
-        refreshMarketData({ chart_history_days: nextDays });
+        if (panel?.id && targetPanelIds.includes(panel.id)) {
+          setCandles([]);
+          setCandlesLoadingProgress({
+            isLoading: true,
+            percent: 15,
+            loaded: 0,
+            total: nextTotal,
+            days: nextDays,
+            isExplicitDaysChange: true
+          });
+          setIsCandlesLoading(true);
+        }
+        bumpPanelCacheVersion();
+        refreshMarketData({ chart_history_days: nextDays }, targetPanelIds);
       }
       setWakeTrigger(prev => prev + 1);
 
@@ -5802,9 +5821,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return false;
         });
 
+        const isTargetActivePanel = targetPanel.id === activePanelRef.current?.id;
         const effectiveCandles = (cache.candles && cache.candles.length >= 10) 
           ? cache.candles 
-          : ((targetPanel.candles && targetPanel.candles.length >= 10) ? targetPanel.candles : (candles && candles.length >= 10 ? candles : []));
+          : ((targetPanel.candles && targetPanel.candles.length >= 10)
+              ? targetPanel.candles
+              : (isTargetActivePanel && candles && candles.length >= 10 ? candles : []));
 
         if (effectiveCandles.length >= 10 && (!cache.candles || cache.candles.length < 10)) {
           cache.candles = effectiveCandles;
@@ -9014,8 +9036,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const effectiveCandlesInterval = checkIsActive() ? candlesInterval : Math.max(candlesInterval, 5000);
 
       const hasExisting = Boolean(cache.candles && cache.candles.length > 0);
-      const historyDays = Number(targetSettings.chart_history_days) || 3;
-      const maxCandleLimit = Math.min(50000, Math.max(720, historyDays * 1440));
+      const historyDays = Math.max(3, Number(targetSettings.chart_history_days) || 3);
+      const maxCandleLimit = Math.min(50000, Math.max(4320, historyDays * 1440));
 
       // Verificar se existe um GAP de dados (> 2 minutos) na ponta ou lacuna interna anormal (ex: computador desconectado)
       const lastExistingMs = (hasExisting && cache.candles && cache.candles.length > 0)
@@ -9054,9 +9076,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // REGRA DE OURO: Se já temos velas na memória, buscamos apenas as últimas 50 para preencher qualquer gap da ponta.
         // O limite histórico completo (ex: 4320 barras para 3 dias) só é consultado na carga inicial do painel ativo ou por recarga forçada!
         const isActivePanelNow = checkIsActive();
+        const isVisibleMultiPanel = visibleMultiPanelIdsRef.current.includes(targetPanel.id);
+        const isPanelDisplayed = isActivePanelNow || isVisibleMultiPanel;
         const isInitialForPanel = !initialLoadedPanelsRef.current.has(targetPanel.id);
-        const effectiveMaxLimit = isActivePanelNow ? maxCandleLimit : Math.min(maxCandleLimit, 500);
-        const queryLimit = (isForced || !hasExisting || (isInitialForPanel && isActivePanelNow) || hasGap) ? effectiveMaxLimit : 50;
+        const effectiveMaxLimit = isPanelDisplayed ? maxCandleLimit : Math.min(maxCandleLimit, 500);
+        const queryLimit = (isForced || !hasExisting || (isInitialForPanel && isPanelDisplayed) || hasGap) ? effectiveMaxLimit : 50;
+        const shouldShowSlotGauge = isPanelDisplayed && (!hasExisting || isInitialForPanel || isMissingHistory || queryLimit > 500);
+
+        if (shouldShowSlotGauge) {
+          (cache as any).loadingProgress = {
+            isLoading: true,
+            percent: 15,
+            loaded: 0,
+            total: queryLimit,
+            days: historyDays,
+            isExplicitDaysChange: true
+          };
+          if (isActivePanelNow) {
+            setCandlesLoadingProgress((cache as any).loadingProgress);
+            setIsCandlesLoading(true);
+          } else {
+            bumpPanelCacheVersion();
+          }
+        }
 
         // Watchdog de 30s: o semáforo isFetchingCandles NUNCA pode ficar preso (causa do gauge congelado em 15%)
         withDbTimeout(fetchCandlesSupabase(
@@ -9066,22 +9108,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           targetPanel,
           targetSettings,
           (pct, loaded, _total) => {
-            // O modal de Gauge circular só deve ser exibido na carga inicial sem velas ou troca explícita de dias
-            const shouldShowGauge = !hasExisting || isInitialForPanel;
-            if (checkIsActive() && shouldShowGauge) {
-              setCandlesLoadingProgress({
+            // O modal de Gauge circular só deve ser exibido na carga inicial sem velas, falta de histórico ou troca explícita de dias
+            if (shouldShowSlotGauge) {
+              const nextProgress = {
                 isLoading: pct < 100,
                 percent: pct,
                 loaded,
                 total: queryLimit,
                 days: historyDays,
-                isExplicitDaysChange: isInitialForPanel
-              });
+                isExplicitDaysChange: true
+              };
+              (cache as any).loadingProgress = nextProgress;
+              if (checkIsActive()) {
+                setCandlesLoadingProgress(nextProgress);
+              } else {
+                bumpPanelCacheVersion();
+              }
             }
           }
         ), 30000).then(candlesData => {
           if (candlesData && candlesData.length > 0) {
-            if (checkIsActive() || candlesData.length >= maxCandleLimit) {
+            if (isPanelDisplayed || candlesData.length >= maxCandleLimit) {
               initialLoadedPanelsRef.current.add(targetPanel.id);
             }
             // O histórico retornado por fetchCandlesSupabase é a fonte canônica higienizada
@@ -9181,6 +9228,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
 
             cache.candles = finalCandlesList;
+            if (finalCandlesList.length > 0 && isPanelDisplayed && queryLimit >= maxCandleLimit) {
+              initialLoadedPanelsRef.current.add(targetPanel.id);
+              (cache as any).loadedHistoryDays = Math.max((cache as any).loadedHistoryDays || 0, historyDays);
+            }
             if (checkIsActive() && (isDifferent || isForced || prevCandles.length === 0)) {
               setCandles(finalCandlesList);
             } else if (!checkIsActive() && (isDifferent || !hasExisting)) {
@@ -9193,9 +9244,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         }).catch(() => {}).finally(() => {
           cache.isFetchingCandles = false;
+          if ((cache as any).loadingProgress?.isLoading) {
+            (cache as any).loadingProgress = {
+              ...(cache as any).loadingProgress,
+              isLoading: false,
+              percent: 100,
+              isExplicitDaysChange: false
+            };
+          }
           if (checkIsActive()) {
             setCandlesLoadingProgress(prev => prev.isLoading ? ({ ...prev, isLoading: false, percent: 100, isExplicitDaysChange: false }) : prev);
             setIsCandlesLoading(false);
+          } else {
+            bumpPanelCacheVersion();
           }
         });
       }
@@ -9226,33 +9287,64 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const refreshMarketData = async (overrideSettings?: any) => {
-    if (activePanel && (settings || overrideSettings)) {
-      const effSettings = overrideSettings ? { ...(settings || {}), ...overrideSettings } : settings;
-      if (panelDataCache.current[activePanel.id]) {
-        panelDataCache.current[activePanel.id].lastCandlesFetch = 0;
-        panelDataCache.current[activePanel.id].lastGammaFetch = 0;
-        panelDataCache.current[activePanel.id].lastScreenshotFetch = 0;
-        panelDataCache.current[activePanel.id].lastForceFetch = 0;
-        panelDataCache.current[activePanel.id].isFetchingCandles = false;
-        if (overrideSettings?.chart_history_days !== undefined) {
-          const nextDays = Number(overrideSettings.chart_history_days) || 3;
-          const nextTotal = Math.min(50000, nextDays * 1440);
-          initialLoadedPanelsRef.current.delete(activePanel.id);
-          setCandlesLoadingProgress({
-            isLoading: true,
-            percent: 15,
-            loaded: 0,
-            total: nextTotal,
-            days: nextDays,
-            isExplicitDaysChange: true
-          });
+  const refreshMarketData = async (overrideSettings?: any, targetPanelIds?: string[], perPanelDays?: Record<string, number>) => {
+    const resolvedIds = Array.from(
+      new Set(
+        (targetPanelIds && targetPanelIds.length > 0
+          ? targetPanelIds
+          : [activePanel?.id, ...visibleMultiPanelIdsRef.current]
+        ).filter(Boolean) as string[]
+      )
+    );
+    if (resolvedIds.length === 0) return;
+
+    const tasks = resolvedIds.map(async (pId) => {
+      const targetPanel = (panels || []).find(p => p.id === pId) || (activePanel?.id === pId ? activePanel : null);
+      if (!targetPanel) return;
+
+      const baseSettings = allSettingsRef.current?.[pId] || (pId === activePanel?.id ? settings : null) || settings;
+      if (!baseSettings && !overrideSettings && !perPanelDays?.[pId]) return;
+      const customDays = perPanelDays?.[pId];
+      const mergedOverride = customDays !== undefined
+        ? { ...(overrideSettings || {}), chart_history_days: Math.max(3, customDays) }
+        : overrideSettings;
+      const effSettings = mergedOverride ? { ...(baseSettings || {}), ...mergedOverride } : baseSettings;
+
+      if (panelDataCache.current[pId]) {
+        panelDataCache.current[pId].lastCandlesFetch = 0;
+        panelDataCache.current[pId].lastGammaFetch = 0;
+        panelDataCache.current[pId].lastScreenshotFetch = 0;
+        panelDataCache.current[pId].lastForceFetch = 0;
+        panelDataCache.current[pId].isFetchingCandles = false;
+      }
+
+      if (mergedOverride?.chart_history_days !== undefined) {
+        const nextDays = Math.max(3, Number(mergedOverride.chart_history_days) || 3);
+        const nextTotal = Math.min(50000, nextDays * 1440);
+        initialLoadedPanelsRef.current.delete(pId);
+        const progressObj = {
+          isLoading: true,
+          percent: 15,
+          loaded: 0,
+          total: nextTotal,
+          days: nextDays,
+          isExplicitDaysChange: true
+        };
+        if (panelDataCache.current[pId]) {
+          (panelDataCache.current[pId] as any).loadingProgress = progressObj;
+        }
+        if (pId === activePanel?.id) {
+          setCandlesLoadingProgress(progressObj);
           setIsCandlesLoading(true);
         }
       }
-      runningMarketCycles.current.delete(activePanel.id);
-      await executeMarketCycleForPanel(activePanel, effSettings);
-    }
+
+      runningMarketCycles.current.delete(pId);
+      await executeMarketCycleForPanel(targetPanel, effSettings);
+    });
+
+    await Promise.all(tasks);
+    bumpPanelCacheVersion();
   };
 
   // Inicializar Notícias uma vez e atualizar periodicamente
@@ -10380,8 +10472,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       candles: cache?.candles || [],
       marketData: cache?.marketData || null,
       gammaLevels: cache?.gammaLevels || null,
-      isLoading: Boolean(cache?.isFetchingCandles && (!cache?.candles || cache.candles.length === 0)),
-      loadingProgress: null
+      isLoading: Boolean(cache?.isFetchingCandles && (!cache?.candles || cache.candles.length === 0 || (cache as any)?.loadingProgress?.isLoading)),
+      loadingProgress: (cache as any)?.loadingProgress || null
     };
   }, [activePanel?.id, candles, marketData, gammaLevels, isCandlesLoading, candlesLoadingProgress, panelCacheVersion]);
 
@@ -10390,15 +10482,74 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetPanel = (panels || []).find(p => p.id === panelId);
     if (!targetPanel) return;
     const cache = panelDataCache.current[panelId];
-    if (!cache || !cache.candles || cache.candles.length === 0) {
-      const pSettings = allSettings?.[panelId] || settings;
+    const pSettings = allSettings?.[panelId] || {
+      ...(settings || {}),
+      instance_id_screen: targetPanel.instance_id,
+      instance_id_market: targetPanel.instance_id,
+      gamma_symbol: targetPanel.symbol || targetPanel.name
+    };
+    const historyDays = Math.max(3, Number(pSettings?.chart_history_days) || 3);
+    const loadedDays = Number((cache as any)?.loadedHistoryDays || 0);
+    const hasCachedCandles = Boolean(cache && cache.candles && cache.candles.length > 0);
+    const hasRequiredHistory = hasCachedCandles && (loadedDays >= historyDays || initialLoadedPanelsRef.current.has(panelId));
+    const needsInitialOrBackfill = !hasCachedCandles || !hasRequiredHistory;
+    if (needsInitialOrBackfill && !cache?.isFetchingCandles) {
       if (pSettings) {
+        if (!panelDataCache.current[panelId]) {
+          panelDataCache.current[panelId] = {
+            marketData: null,
+            forces: [],
+            gammaLevels: null,
+            screenshot: null,
+            candles: [],
+            lastGammaFetch: 0,
+            lastGammaSymbol: '',
+            lastScreenshotFetch: 0,
+            lastCandlesFetch: 0,
+            lastForceFetch: 0
+          };
+        }
+        (panelDataCache.current[panelId] as any).loadingProgress = {
+          isLoading: true,
+          percent: 15,
+          loaded: 0,
+          total: Math.min(50000, historyDays * 1440),
+          days: historyDays,
+          isExplicitDaysChange: true
+        };
+        bumpPanelCacheVersion();
         executeMarketCycleForPanel(targetPanel, pSettings).then(() => {
           bumpPanelCacheVersion();
         }).catch(() => {});
       }
     }
   }, [panels, allSettings, settings, bumpPanelCacheVersion]);
+
+  const ensurePanelHistoryDays = useCallback((panelId: string, requiredDays: number) => {
+    if (!panelId) return;
+    const targetDays = Math.max(3, Number(requiredDays) || 3);
+    const cache = panelDataCache.current[panelId];
+    const cachedCandles = cache?.candles;
+    const loadedDays = Number((cache as any)?.loadedHistoryDays || 0);
+
+    if (cachedCandles && cachedCandles.length > 0) {
+      if (loadedDays >= targetDays) {
+        return; // Já carregado em memória: zero requisição ao servidor
+      }
+      const firstMs = new Date(cachedCandles[0].timestamp).getTime();
+      const lastMs = new Date(cachedCandles[cachedCandles.length - 1].timestamp).getTime();
+      if (!isNaN(firstMs) && !isNaN(lastMs) && lastMs > firstMs) {
+        const coveredDays = (lastMs - firstMs) / (24 * 60 * 60 * 1000);
+        if (coveredDays >= targetDays - 1.5) {
+          if (cache) (cache as any).loadedHistoryDays = Math.max(loadedDays, targetDays);
+          return; // Já possui cobertura temporal suficiente em memória
+        }
+      }
+    }
+
+    // Só busca no servidor se realmente precisar de mais dias do que o já carregado
+    refreshMarketData({ chart_history_days: targetDays }, [panelId]);
+  }, []);
 
   const updateReportAction = async (
     id: string,
@@ -14405,7 +14556,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
             3000
           ).catch(() => ({ data: null, error: true }));
 
-          if (!settingsError && settingsData) {
+          if (!settingsError && settingsData && Date.now() - lastLocalSettingsSaveAtRef.current > 8000) {
             const enriched = enrichSettingsWithVirtualConfigs(settingsData);
             setSettings(enriched);
             syncStateFromSettings(enriched);
@@ -14549,6 +14700,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       switchPanel,
       getPanelSnapshot,
       ensurePanelDataLoaded,
+      ensurePanelHistoryDays,
       setVisibleMultiPanelIds,
       panelCacheVersion,
       accounts,

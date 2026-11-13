@@ -39,6 +39,7 @@ export const TradeWorkstation: React.FC = () => {
     activePanel,
     switchPanel,
     getPanelSnapshot,
+    ensurePanelHistoryDays,
     setVisibleMultiPanelIds,
     setPanelMode,
     settings,
@@ -668,6 +669,48 @@ export const TradeWorkstation: React.FC = () => {
     try { localStorage.setItem('vortex_ws_slots', JSON.stringify(multiSlots)); } catch {}
   }, [multiSlots]);
 
+  // Restaurar personalização de dias por slot salva no banco de dados (cfg:slot_history_days)
+  useEffect(() => {
+    const rawMap = settings?.slot_history_days;
+    if (!rawMap || typeof rawMap !== 'string') return;
+    const parsedMap: Record<string, number> = {};
+    rawMap.split(',').forEach((entry: string) => {
+      const [slotId, daysStr] = entry.split(':');
+      const d = Number(daysStr);
+      if (slotId && !isNaN(d) && d >= 3) {
+        parsedMap[slotId.trim()] = d;
+      }
+    });
+    if (Object.keys(parsedMap).length === 0) return;
+    setMultiSlots(prev => {
+      let changed = false;
+      const next = prev.map(s => {
+        const dbDays = parsedMap[s.id];
+        if (dbDays && s.historyDays !== dbDays) {
+          changed = true;
+          return { ...s, historyDays: dbDays };
+        }
+        return s;
+      });
+      return changed ? next : prev;
+    });
+  }, [settings?.slot_history_days]);
+
+  const handleChangeSlotHistoryDays = useCallback((slotIdx: number, nextDaysRaw: number) => {
+    const nextDays = Math.max(3, Number(nextDaysRaw) || 3);
+    setMultiSlots(prev => {
+      const next = prev.map((s, i) => (i === slotIdx ? { ...s, historyDays: nextDays } : s));
+      const serialized = next
+        .filter(s => s.historyDays && s.historyDays >= 3)
+        .map(s => `${s.id}:${s.historyDays}`)
+        .join(',');
+      if (saveSettings && serialized) {
+        saveSettings({ slot_history_days: serialized });
+      }
+      return next;
+    });
+  }, [saveSettings]);
+
   // Informar ao AppContext quais painéis secundários estão visíveis no Multi-Gráfico para rodarem tick-a-tick em tempo real
   useEffect(() => {
     if (!setVisibleMultiPanelIds) return;
@@ -682,7 +725,7 @@ export const TradeWorkstation: React.FC = () => {
         ? 3
         : 4;
     const ids = multiSlots
-      .slice(1, slotsCount)
+      .slice(0, slotsCount)
       .map(s => s.panelId)
       .filter(Boolean);
     setVisibleMultiPanelIds(ids);
@@ -701,7 +744,12 @@ export const TradeWorkstation: React.FC = () => {
     } else if (nextLayout.startsWith('triple')) {
       setFocusedSlotIndex(prev => (prev > 2 ? 0 : prev));
     }
-    try { localStorage.setItem('vortex_ws_layout', nextLayout); } catch {}
+    try {
+      localStorage.setItem('vortex_ws_layout', nextLayout);
+      localStorage.setItem('vortex_stop_mode', 'pontos');
+      window.dispatchEvent(new CustomEvent('vortex_force_stop_mode_pontos'));
+      window.dispatchEvent(new CustomEvent('vortex_custom_sl_tp_updated'));
+    } catch {}
     setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
   }, []);
 
@@ -1086,6 +1134,24 @@ export const TradeWorkstation: React.FC = () => {
   });
 
   const [activeDrawingTool, setActiveDrawingTool] = useState<DrawingToolType | null>(null);
+  const [cursorMode, setCursorMode] = useState<'crosshair' | 'arrow'>(() => {
+    try {
+      const saved = localStorage.getItem('vortex_chart_cursor_mode');
+      return saved === 'arrow' ? 'arrow' : 'crosshair';
+    } catch {
+      return 'crosshair';
+    }
+  });
+  const handleToggleCursorMode = () => {
+    setCursorMode(prev => {
+      const next = prev === 'crosshair' ? 'arrow' : 'crosshair';
+      try {
+        localStorage.setItem('vortex_chart_cursor_mode', next);
+        window.dispatchEvent(new CustomEvent('vortex_cursor_mode_changed', { detail: { mode: next } }));
+      } catch {}
+      return next;
+    });
+  };
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
   const [isDrawingsMenuOpen, setIsDrawingsMenuOpen] = useState<boolean>(false);
   const [isDrawingSettingsOpen, setIsDrawingSettingsOpen] = useState<boolean>(false);
@@ -1555,6 +1621,20 @@ export const TradeWorkstation: React.FC = () => {
             </span>
           </button>
 
+          {/* Cursor Mode Toggle: Mira (Crosshair) vs Seta (Livre) */}
+          <button
+            onClick={handleToggleCursorMode}
+            className={`px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer shadow border ${
+              cursorMode === 'arrow'
+                ? 'bg-sky-600 text-white border-sky-400'
+                : 'bg-slate-800/80 hover:bg-slate-700 border-slate-600/60 text-slate-200'
+            }`}
+            title={cursorMode === 'arrow' ? 'Modo Seta (movimento livre) — Clique para voltar ao modo Cursor (Mira)' : 'Modo Cursor (Mira) — Clique para mudar para modo Seta (movimento livre)'}
+          >
+            <span>{cursorMode === 'arrow' ? '↖' : '✛'}</span>
+            <span className="hidden sm:inline">{cursorMode === 'arrow' ? 'Seta' : 'Cursor'}</span>
+          </button>
+
           {/* Drawings Tool Selector Button / Listbox */}
           <div className="relative">
             <button
@@ -1702,34 +1782,56 @@ export const TradeWorkstation: React.FC = () => {
             )}
           </div>
 
-          {/* History Lookback Selector */}
+          {/* Atualização forçada dos gráficos abertos (e seletor apenas no modo 1 Gráfico) */}
           <div className={`flex items-center gap-1.5 ${wsInputBg} border px-2 py-1 rounded-lg text-xs shrink-0`}>
-            <span className="text-[11px] text-slate-400 font-semibold">📅</span>
-            <select
-              value={settings?.chart_history_days || 7}
-              onChange={(e) => {
-                const nextDays = Number(e.target.value);
-                saveSettings({ chart_history_days: nextDays });
-                if (refreshMarketData) {
-                  refreshMarketData({ chart_history_days: nextDays });
-                }
-              }}
-              className="bg-transparent text-xs font-bold text-blue-400 outline-none cursor-pointer"
-              title="Histórico de velas carregadas do banco de dados / NinjaTrader local"
-            >
-              <option value={3} className="bg-[#181d28] text-slate-200">3 Dias</option>
-              <option value={7} className="bg-[#181d28] text-slate-200">7 Dias</option>
-              <option value={15} className="bg-[#181d28] text-slate-200">15 Dias</option>
-              <option value={30} className="bg-[#181d28] text-slate-200">30 Dias</option>
-            </select>
+            {chartLayout === 'single' && (
+              <select
+                value={Math.max(3, Number(getEffectiveSlot(0).historyDays || settings?.chart_history_days) || 7)}
+                onChange={(e) => {
+                  const nextDays = Math.max(3, Number(e.target.value));
+                  handleChangeSlotHistoryDays(0, nextDays);
+                  if (ensurePanelHistoryDays && pKey) {
+                    ensurePanelHistoryDays(pKey, nextDays);
+                  }
+                }}
+                className="bg-transparent text-xs font-bold text-blue-400 outline-none cursor-pointer"
+                title="Personalizar dias de histórico deste gráfico (mín. 3 dias, salvo no banco)"
+              >
+                <option value={3} className="bg-[#181d28] text-slate-200">3 Dias</option>
+                <option value={7} className="bg-[#181d28] text-slate-200">7 Dias</option>
+                <option value={15} className="bg-[#181d28] text-slate-200">15 Dias</option>
+                <option value={30} className="bg-[#181d28] text-slate-200">30 Dias</option>
+              </select>
+            )}
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                if (refreshMarketData) refreshMarketData();
+                if (!refreshMarketData) return;
+                const slotsCount =
+                  chartLayout === 'single'
+                    ? 1
+                    : chartLayout === 'split-v' || chartLayout === 'split-h'
+                    ? 2
+                    : chartLayout.startsWith('triple')
+                    ? 3
+                    : 4;
+                const activeSlots = chartLayout === 'single'
+                  ? [getEffectiveSlot(0)]
+                  : Array.from({ length: slotsCount }, (_, i) => getEffectiveSlot(i));
+                const perPanelDays: Record<string, number> = {};
+                activeSlots.forEach(s => {
+                  const pid = s.panelId || pKey;
+                  if (!pid) return;
+                  const sSettings = allSettings?.[pid] || settings;
+                  const d = Math.max(3, Number(s.historyDays || sSettings?.chart_history_days) || 7);
+                  perPanelDays[pid] = Math.max(perPanelDays[pid] || 0, d);
+                });
+                const openPanelIds = Object.keys(perPanelDays);
+                refreshMarketData(undefined, openPanelIds.length > 0 ? openPanelIds : undefined, perPanelDays);
               }}
               className="p-0.5 hover:bg-slate-700/60 rounded text-slate-400 hover:text-cyan-300 transition active:scale-95"
-              title="Sincronizar e preencher lacunas de velas (Gaps) com o histórico completo"
+              title="Atualizar forçadamente o histórico de cada janela conforme configurado"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -1999,6 +2101,9 @@ export const TradeWorkstation: React.FC = () => {
                     onChangeTimeframe={(nextTf) =>
                       updateSlotByIndex(slotIdx, s => ({ ...s, timeframe: nextTf }))
                     }
+                    onChangeHistoryDays={(nextDays) =>
+                      handleChangeSlotHistoryDays(slotIdx, nextDays)
+                    }
                     onEditIndicator={(ind) => {
                       setFocusedSlotIndex(slotIdx);
                       setEditingIndicatorForModal(ind);
@@ -2078,6 +2183,9 @@ export const TradeWorkstation: React.FC = () => {
               selectedAsset={boletaSymbol}
               currentPrice={boletaPrice}
               candles={boletaCandles}
+              targetPanel={boletaTargetPanel}
+              targetMarketData={boletaSnapshot?.marketData}
+              targetGammaLevels={boletaSnapshot?.gammaLevels}
               isFloating={false}
               onToggleFloating={toggleBoletaFloating}
               onClose={toggleRightBoleta}
@@ -2569,6 +2677,9 @@ export const TradeWorkstation: React.FC = () => {
                 selectedAsset={boletaSymbol}
                 currentPrice={boletaPrice}
                 candles={boletaCandles}
+                targetPanel={boletaTargetPanel}
+                targetMarketData={boletaSnapshot?.marketData}
+                targetGammaLevels={boletaSnapshot?.gammaLevels}
                 isFloating={false}
                 onClose={() => setIsMobileBoletaOpen(false)}
               />
@@ -2626,6 +2737,9 @@ export const TradeWorkstation: React.FC = () => {
             selectedAsset={boletaSymbol}
             currentPrice={boletaPrice}
             candles={boletaCandles}
+            targetPanel={boletaTargetPanel}
+            targetMarketData={boletaSnapshot?.marketData}
+            targetGammaLevels={boletaSnapshot?.gammaLevels}
             isFloating={true}
             onToggleFloating={toggleBoletaFloating}
             onClose={toggleRightBoleta}
