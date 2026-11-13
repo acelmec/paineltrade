@@ -185,7 +185,7 @@ export const AppContent: React.FC = () => {
       {/* Main Content Area */}
       <div className={`w-full max-w-full overflow-x-hidden transition-all duration-300 ${
         isMobile 
-          ? (isWorkstationActive ? 'p-0 pl-0 pb-0 h-full overflow-hidden' : 'p-[6px] pl-0 pb-20 min-h-screen') 
+          ? (isWorkstationActive ? 'p-0 pl-0 pb-0 h-full overflow-hidden' : 'p-[6px] pl-0 pb-20 pt-[max(env(safe-area-inset-top,0px),36px)] min-h-screen') 
           : (collapsed ? 'p-[6px] md:p-2 pl-[6px] md:pl-[70px]' : 'p-[6px] md:p-2 pl-[6px] md:pl-[230px]')
       }`}>
         <ErrorBoundary fallbackTitle="Erro na Interface do Painel">

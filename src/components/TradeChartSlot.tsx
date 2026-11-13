@@ -249,7 +249,7 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
       <div className="flex-1 relative overflow-hidden">
         {/* Legenda de Indicadores */}
         {slot.showIndicatorsLegend && (
-          <div className="absolute top-1.5 left-2 z-20 flex flex-col gap-0.5 pointer-events-auto select-none">
+          <div className={`absolute ${isMobile ? 'top-12 left-2.5' : 'top-1.5 left-2'} z-20 flex flex-col gap-0.5 pointer-events-auto select-none`}>
             {slot.indicators.map((ind) => (
               <div
                 key={ind.id}

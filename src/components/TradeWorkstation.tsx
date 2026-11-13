@@ -191,6 +191,8 @@ export const TradeWorkstation: React.FC = () => {
     try { localStorage.setItem('vortex_ws_auto_center', String(autoCenter)); } catch {}
   }, [autoCenter]);
 
+  const lastSyncPKeyRef = useRef<string>(pKey);
+
   const [showTradeMarkers, setShowTradeMarkers] = useState<boolean>(() => {
     try {
       const savedKey = localStorage.getItem(`vortex_ws_show_trade_markers_${pKey}`);
@@ -202,12 +204,6 @@ export const TradeWorkstation: React.FC = () => {
       return true;
     }
   });
-  useEffect(() => {
-    try {
-      localStorage.setItem('vortex_ws_show_trade_markers', String(showTradeMarkers));
-      localStorage.setItem(`vortex_ws_show_trade_markers_${pKey}`, String(showTradeMarkers));
-    } catch {}
-  }, [showTradeMarkers, pKey]);
 
   const [showOrderLines, setShowOrderLines] = useState<boolean>(() => {
     try {
@@ -220,12 +216,6 @@ export const TradeWorkstation: React.FC = () => {
       return true;
     }
   });
-  useEffect(() => {
-    try {
-      localStorage.setItem('vortex_ws_show_order_lines', String(showOrderLines));
-      localStorage.setItem(`vortex_ws_show_order_lines_${pKey}`, String(showOrderLines));
-    } catch {}
-  }, [showOrderLines, pKey]);
 
   const [showRobots, setShowRobots] = useState<boolean>(() => {
     try {
@@ -234,9 +224,57 @@ export const TradeWorkstation: React.FC = () => {
       return false;
     }
   });
+
   useEffect(() => {
     try { localStorage.setItem('vortex_ws_show_robots', String(showRobots)); } catch {}
   }, [showRobots]);
+
+  // Sincronização e Restauração de preferências por ativo ao trocar de painel (sem sobrescrever valores com defaults)
+  useEffect(() => {
+    if (lastSyncPKeyRef.current !== pKey) {
+      lastSyncPKeyRef.current = pKey;
+      try {
+        const savedTmKey = localStorage.getItem(`vortex_ws_show_trade_markers_${pKey}`);
+        if (savedTmKey !== null) {
+          setShowTradeMarkers(savedTmKey !== 'false');
+        } else {
+          const savedTm = localStorage.getItem('vortex_ws_show_trade_markers');
+          if (savedTm !== null) setShowTradeMarkers(savedTm !== 'false');
+        }
+
+        const savedOlKey = localStorage.getItem(`vortex_ws_show_order_lines_${pKey}`);
+        if (savedOlKey !== null) {
+          setShowOrderLines(savedOlKey !== 'false');
+        } else {
+          const savedOl = localStorage.getItem('vortex_ws_show_order_lines');
+          if (savedOl !== null) setShowOrderLines(savedOl !== 'false');
+        }
+
+        const savedIndKey = localStorage.getItem(`vortex_show_ind_legend_${pKey}`);
+        if (savedIndKey !== null) {
+          setShowIndicatorsLegend(savedIndKey !== 'false');
+        } else {
+          const savedInd = localStorage.getItem('vortex_ws_show_indicators_legend');
+          if (savedInd !== null) setShowIndicatorsLegend(savedInd !== 'false');
+        }
+      } catch {}
+      return;
+    }
+
+    try {
+      localStorage.setItem('vortex_ws_show_trade_markers', String(showTradeMarkers));
+      localStorage.setItem(`vortex_ws_show_trade_markers_${pKey}`, String(showTradeMarkers));
+    } catch {}
+  }, [showTradeMarkers, pKey]);
+
+  useEffect(() => {
+    if (lastSyncPKeyRef.current === pKey) {
+      try {
+        localStorage.setItem('vortex_ws_show_order_lines', String(showOrderLines));
+        localStorage.setItem(`vortex_ws_show_order_lines_${pKey}`, String(showOrderLines));
+      } catch {}
+    }
+  }, [showOrderLines, pKey]);
   const [dockHeight, setDockHeight] = useState<number>(180); // Height of bottom dock in pixels
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -403,10 +441,12 @@ export const TradeWorkstation: React.FC = () => {
   });
 
   useEffect(() => {
-    try {
-      localStorage.setItem(`vortex_show_ind_legend_${pKey}`, String(showIndicatorsLegend));
-      localStorage.setItem('vortex_ws_show_indicators_legend', String(showIndicatorsLegend));
-    } catch {}
+    if (lastSyncPKeyRef.current === pKey) {
+      try {
+        localStorage.setItem(`vortex_show_ind_legend_${pKey}`, String(showIndicatorsLegend));
+        localStorage.setItem('vortex_ws_show_indicators_legend', String(showIndicatorsLegend));
+      } catch {}
+    }
   }, [showIndicatorsLegend, pKey]);
 
   const handleToggleIndicatorsLegend = useCallback((show: boolean) => {
@@ -828,13 +868,23 @@ export const TradeWorkstation: React.FC = () => {
       }
     } catch {}
 
-    // Sincroniza do Supabase em background
+    // Sincroniza do Supabase em background apenas se não houver customização local
     fetchAccountChartStateSupabase('global', pKey).then(remoteState => {
       if (remoteState) {
-        if (remoteState.indicators && Array.isArray(remoteState.indicators) && remoteState.indicators.length > 0) {
+        const hasLocalInds = Boolean(
+          localStorage.getItem(`vortex_active_indicators_${pKey}`) ||
+          localStorage.getItem(`vortex_active_indicators_${currentSymbol}`) ||
+          localStorage.getItem('vortex_global_active_indicators')
+        );
+        if (!hasLocalInds && remoteState.indicators && Array.isArray(remoteState.indicators) && remoteState.indicators.length > 0) {
           setActiveIndicators(remoteState.indicators);
         }
-        if (remoteState.widgets && Array.isArray(remoteState.widgets) && remoteState.widgets.length > 0) {
+        const hasLocalWids = Boolean(
+          localStorage.getItem(`vortex_active_widgets_${pKey}`) ||
+          localStorage.getItem(`vortex_active_widgets_${currentSymbol}`) ||
+          localStorage.getItem('vortex_global_active_widgets')
+        );
+        if (!hasLocalWids && remoteState.widgets && Array.isArray(remoteState.widgets) && remoteState.widgets.length > 0) {
           setActiveWidgets(remoteState.widgets);
         }
         if (remoteState.timeframe && typeof remoteState.timeframe === 'number') {
@@ -1419,6 +1469,7 @@ export const TradeWorkstation: React.FC = () => {
   return (
     <div
       style={isMobile ? {
+        paddingTop: 'max(env(safe-area-inset-top, 0px), 36px)',
         paddingBottom: isBottomNavCollapsed
           ? 'max(env(safe-area-inset-bottom, 0px), 24px)'
           : 'calc(max(env(safe-area-inset-bottom, 0px), 24px) + 72px)'
@@ -1908,7 +1959,7 @@ export const TradeWorkstation: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsMobileLeftDrawerOpen(true)}
-                style={{ top: 'max(env(safe-area-inset-top, 0px) + 8px, 18px)' }}
+                style={{ top: '8px' }}
                 className="absolute left-3 z-30 bg-[#0c101d]/90 hover:bg-[#121828] border border-slate-700/80 hover:border-cyan-500/80 text-slate-100 px-3 py-1.5 rounded-full shadow-2xl flex items-center gap-1.5 backdrop-blur-md active:scale-95 transition-all text-xs font-black cursor-pointer select-none"
                 title="Abrir Menu de Ferramentas e Ativos [Deslize da esquerda para a direita]"
               >
