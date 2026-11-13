@@ -1352,21 +1352,32 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   }, [hidePriceScaleMobile, isMobile]);
 
   const lastPriceScaleTapRef = useRef<number>(0);
+  const lastChartTapRef = useRef<number>(0);
   const handlePriceScaleTouchEnd = useCallback((e: React.TouchEvent) => {
     if (!isMobile) return;
     const touch = e.changedTouches?.[0];
     if (!touch || !mainContainerRef.current) return;
     const rect = mainContainerRef.current.getBoundingClientRect();
+    const now = Date.now();
+
     // Toque nos últimos 75px da largura do gráfico (onde fica a escala de preço vertical)
     if (touch.clientX >= rect.right - 75) {
-      const now = Date.now();
       if (now - lastPriceScaleTapRef.current < 350) {
         setHidePriceScaleMobile(prev => !prev);
         lastPriceScaleTapRef.current = 0;
         return;
       }
       lastPriceScaleTapRef.current = now;
+      return;
     }
+
+    // Toque no corpo do gráfico: dois toques rápidos mostram ou ocultam o menu do rodapé
+    if (now - lastChartTapRef.current < 350) {
+      window.dispatchEvent(new CustomEvent('vortex_toggle_bottom_nav'));
+      lastChartTapRef.current = 0;
+      return;
+    }
+    lastChartTapRef.current = now;
   }, [isMobile]);
   // Estado de Marcação Interativa de SL/TP no Gráfico (Passo 1: SL, Passo 2: TP)
   const [markingSlTpState, setMarkingSlTpState] = useState<'marking_sl' | 'marking_tp' | null>(null);
@@ -8738,18 +8749,6 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     window.addEventListener('touchend', handleEnd);
   };
 
-  const handleAdjustSubPanelHeight = (delta: number) => {
-    const next = Math.max(60, Math.min(320, (indicatorHeightRef.current || subPanelHeight) + delta));
-    setSubPanelHeight(next);
-    indicatorHeightRef.current = next;
-    try {
-      localStorage.setItem('vortex_subpanel_height', String(next));
-    } catch {}
-    if (resizeChartsRef.current) {
-      resizeChartsRef.current();
-    }
-  };
-
   return (
     <div ref={chartRootRef} className="flex flex-col w-full select-none relative" style={{ height }} onDoubleClickCapture={onDoubleClick}>
       {Boolean(((loadingProgress?.isLoading && (loadingProgress.percent < 100) && (!aggregatedCandles || aggregatedCandles.length === 0 || loadingProgress?.isExplicitDaysChange)) || ((!aggregatedCandles || aggregatedCandles.length === 0) && !isSimulator)) && tempViewMode === 'candles') && (
@@ -9262,22 +9261,6 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                   <div className="w-8 h-0.5 bg-slate-900 rounded-full" />
                 </div>
               </div>
-              {/* Quick Height Control */}
-              <div className="absolute top-1 right-2 z-20 flex items-center gap-1 bg-slate-950/85 backdrop-blur border border-slate-800/80 px-1.5 py-0.5 rounded text-[8.5px] font-mono text-slate-300 shadow select-none">
-                <span className="text-[7.5px] uppercase text-slate-400 font-bold mr-0.5">RSI {subPanelHeight}px</span>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(-20); }}
-                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
-                  title="Diminuir altura (-20px)"
-                >-</button>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(+20); }}
-                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
-                  title="Aumentar altura (+20px)"
-                >+</button>
-              </div>
               <div ref={rsiContainerRef} className="w-full h-full border-t border-slate-850 overflow-hidden" />
             </div>
           )}
@@ -9295,22 +9278,6 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                 <div className="h-1 bg-slate-700/80 group-hover:bg-cyan-400 group-active:bg-cyan-400 w-24 rounded-full transition-all flex items-center justify-center shadow-md">
                   <div className="w-8 h-0.5 bg-slate-900 rounded-full" />
                 </div>
-              </div>
-              {/* Quick Height Control */}
-              <div className="absolute top-1 right-2 z-20 flex items-center gap-1 bg-slate-950/85 backdrop-blur border border-slate-800/80 px-1.5 py-0.5 rounded text-[8.5px] font-mono text-slate-300 shadow select-none">
-                <span className="text-[7.5px] uppercase text-slate-400 font-bold mr-0.5">MACD {subPanelHeight}px</span>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(-20); }}
-                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
-                  title="Diminuir altura (-20px)"
-                >-</button>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(+20); }}
-                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
-                  title="Aumentar altura (+20px)"
-                >+</button>
               </div>
               <div ref={macdContainerRef} className="w-full h-full border-t border-slate-850 overflow-hidden" />
             </div>
@@ -9330,22 +9297,6 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                   <div className="w-8 h-0.5 bg-slate-900 rounded-full" />
                 </div>
               </div>
-              {/* Quick Height Control */}
-              <div className="absolute top-1 right-2 z-20 flex items-center gap-1 bg-slate-950/85 backdrop-blur border border-slate-800/80 px-1.5 py-0.5 rounded text-[8.5px] font-mono text-slate-300 shadow select-none">
-                <span className="text-[7.5px] uppercase text-slate-400 font-bold mr-0.5">eMACD {subPanelHeight}px</span>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(-20); }}
-                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
-                  title="Diminuir altura (-20px)"
-                >-</button>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(+20); }}
-                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
-                  title="Aumentar altura (+20px)"
-                >+</button>
-              </div>
               <div ref={emacdContainerRef} className="w-full h-full border-t border-slate-850 overflow-hidden" />
             </div>
           )}
@@ -9364,22 +9315,6 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                   <div className="w-8 h-0.5 bg-slate-900 rounded-full" />
                 </div>
               </div>
-              {/* Quick Height Control */}
-              <div className="absolute top-1 right-2 z-20 flex items-center gap-1 bg-slate-950/85 backdrop-blur border border-slate-800/80 px-1.5 py-0.5 rounded text-[8.5px] font-mono text-slate-300 shadow select-none">
-                <span className="text-[7.5px] uppercase text-slate-400 font-bold mr-0.5">HEATMAP {subPanelHeight}px</span>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(-20); }}
-                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
-                  title="Diminuir altura (-20px)"
-                >-</button>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(+20); }}
-                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
-                  title="Aumentar altura (+20px)"
-                >+</button>
-              </div>
               <div ref={timeHeatmapContainerRef} className="w-full h-full border-t border-slate-850 overflow-hidden" />
             </div>
           )}
@@ -9397,22 +9332,6 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                 <div className="h-1 bg-slate-700/80 group-hover:bg-cyan-400 group-active:bg-cyan-400 w-24 rounded-full transition-all flex items-center justify-center shadow-md">
                   <div className="w-8 h-0.5 bg-slate-900 rounded-full" />
                 </div>
-              </div>
-              {/* Quick Height Control */}
-              <div className="absolute top-1 right-2 z-20 flex items-center gap-1 bg-slate-950/85 backdrop-blur border border-slate-800/80 px-1.5 py-0.5 rounded text-[8.5px] font-mono text-slate-300 shadow select-none">
-                <span className="text-[7.5px] uppercase text-slate-400 font-bold mr-0.5">TREND {subPanelHeight}px</span>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(-20); }}
-                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
-                  title="Diminuir altura (-20px)"
-                >-</button>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(+20); }}
-                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
-                  title="Aumentar altura (+20px)"
-                >+</button>
               </div>
               <div ref={axionTrendContainerRef} className="w-full h-full border-t border-slate-850 overflow-hidden" />
             </div>

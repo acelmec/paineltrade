@@ -105,15 +105,35 @@ export const TradeWorkstation: React.FC = () => {
     touchStartYRef.current = touch.clientY;
   };
 
+  const lastWsDoubleTapRef = useRef<number>(0);
   const handleChartTouchEnd = (e: React.TouchEvent) => {
     if (!isMobile || touchStartXRef.current === null || touchStartYRef.current === null) return;
     const touch = e.changedTouches[0];
     const dx = touch.clientX - touchStartXRef.current;
     const dy = touch.clientY - touchStartYRef.current;
+    const isSmallMove = Math.abs(dx) < 15 && Math.abs(dy) < 15;
+
     // Se o toque iniciou na lateral esquerda (< 55px) e arrastou para a direita (> 40px)
     if (touchStartXRef.current < 55 && dx > 40 && Math.abs(dx) > Math.abs(dy)) {
       setIsMobileLeftDrawerOpen(true);
+      touchStartXRef.current = null;
+      touchStartYRef.current = null;
+      return;
     }
+
+    // Dois toques rápidos na tela mostram ou ocultam o menu de rodapé
+    if (isSmallMove) {
+      const now = Date.now();
+      if (now - lastWsDoubleTapRef.current < 350) {
+        window.dispatchEvent(new CustomEvent('vortex_toggle_bottom_nav'));
+        lastWsDoubleTapRef.current = 0;
+        touchStartXRef.current = null;
+        touchStartYRef.current = null;
+        return;
+      }
+      lastWsDoubleTapRef.current = now;
+    }
+
     touchStartXRef.current = null;
     touchStartYRef.current = null;
   };
@@ -1397,7 +1417,14 @@ export const TradeWorkstation: React.FC = () => {
     : (boletaCandles.length > 0 ? boletaCandles[boletaCandles.length - 1].close : currentPrice);
 
   return (
-    <div className={`w-full ${isMobile ? (isBottomNavCollapsed ? 'h-full pb-0' : 'h-full pb-[68px]') : 'h-[calc(100vh-20px)]'} ${wsRootBg} flex flex-col font-sans overflow-hidden transition-all duration-200`}>
+    <div
+      style={isMobile ? {
+        paddingBottom: isBottomNavCollapsed
+          ? 'max(env(safe-area-inset-bottom, 0px), 24px)'
+          : 'calc(max(env(safe-area-inset-bottom, 0px), 24px) + 72px)'
+      } : undefined}
+      className={`w-full ${isMobile ? 'h-full' : 'h-[calc(100vh-20px)]'} ${wsRootBg} flex flex-col font-sans overflow-hidden transition-all duration-200`}
+    >
       {/* Top Workstation Header Toolbar - Apenas Desktop (No Mobile é substituído pelo botão discreto no gráfico e drawer) */}
       {!isMobile && (
         <div className={`${wsHeaderBg} border-b px-3 py-1.5 h-11 flex items-center justify-between gap-2.5 select-none shrink-0 relative z-50 transition-colors duration-200`}>
