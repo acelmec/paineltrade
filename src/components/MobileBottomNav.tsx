@@ -39,6 +39,38 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   const touchStartXRef = useRef(0);
   const hasMovedRef = useRef(false);
 
+  // Estado para recolher/ocultar o menu do rodapé e liberar espaço total para os gráficos e boleta
+  const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('vortex_mobile_bottom_nav_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleCollapsed = (next?: boolean) => {
+    setIsCollapsed(prev => {
+      const val = next !== undefined ? next : !prev;
+      try {
+        localStorage.setItem('vortex_mobile_bottom_nav_collapsed', String(val));
+      } catch {}
+      window.dispatchEvent(new CustomEvent('vortex_bottom_nav_collapsed', { detail: { isCollapsed: val } }));
+      return val;
+    });
+  };
+
+  useEffect(() => {
+    const handleToggleEvent = (e: any) => {
+      if (e?.detail?.isCollapsed !== undefined) {
+        toggleCollapsed(e.detail.isCollapsed);
+      } else {
+        toggleCollapsed();
+      }
+    };
+    window.addEventListener('vortex_toggle_bottom_nav', handleToggleEvent);
+    return () => window.removeEventListener('vortex_toggle_bottom_nav', handleToggleEvent);
+  }, []);
+
   // Mouse Dragging (Desktop)
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!scrollRef.current) return;
@@ -230,9 +262,25 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         ] : [])
       ];
 
+  if (isCollapsed) {
+    return (
+      <div className="md:hidden fixed bottom-1.5 right-3 z-[9990] select-none pointer-events-auto animate-in fade-in zoom-in-90 duration-200">
+        <button
+          type="button"
+          onClick={() => toggleCollapsed(false)}
+          className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#0c101d]/95 hover:bg-[#161d31] border border-cyan-500/70 shadow-[0_4px_16px_rgba(0,0,0,0.85)] backdrop-blur-md text-cyan-300 font-extrabold text-[10.5px] active:scale-95 transition-all cursor-pointer"
+          title="Expandir Menu de Páginas do Rodapé"
+        >
+          <span className="text-cyan-400 text-xs">▲</span>
+          <span>MENU</span>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-[9990] bg-[#0c101d]/95 backdrop-blur-xl border-t border-slate-800/90 shadow-[0_-6px_25px_rgba(0,0,0,0.6)] select-none"
+      className="md:hidden fixed bottom-0 left-0 right-0 z-[9990] bg-[#0c101d]/95 backdrop-blur-xl border-t border-slate-800/90 shadow-[0_-6px_25px_rgba(0,0,0,0.6)] select-none animate-in slide-in-from-bottom duration-200"
       style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 6px)' }}
       aria-label="Navegação Mobile"
     >
@@ -255,6 +303,19 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
             overscrollBehaviorX: 'contain'
           }}
         >
+          {/* Botão para Ocultar Menu e Liberar Espaço para Gráficos / Boleta */}
+          <button
+            type="button"
+            onClick={() => toggleCollapsed(true)}
+            className="flex flex-col items-center justify-center min-w-[48px] px-1.5 py-1 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 text-slate-300 transition-all active:scale-95 shrink-0 select-none shadow-sm mr-0.5"
+            title="Ocultar Menu para liberar espaço total da tela"
+          >
+            <div className="text-sm leading-tight pointer-events-none text-cyan-400">▼</div>
+            <span className="text-[8.5px] tracking-tight font-black mt-0.5 text-slate-400 whitespace-nowrap pointer-events-none">
+              Ocultar
+            </span>
+          </button>
+
           {navItems.map((item) => {
             const active = item.isActive !== undefined ? item.isActive : currentPage === item.id;
             return (

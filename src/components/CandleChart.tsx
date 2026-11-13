@@ -833,7 +833,18 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   const forecastModeRef = useRef<'historico' | 'hurst'>(forecastMode);
   forecastModeRef.current = forecastMode;
 
-  const indicatorHeightRef = useRef<number>(90);
+  const [subPanelHeight, setSubPanelHeight] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('vortex_subpanel_height');
+      if (saved) {
+        const val = Number(saved);
+        if (val >= 60 && val <= 350) return val;
+      }
+    } catch {}
+    return 100;
+  });
+  const indicatorHeightRef = useRef<number>(subPanelHeight);
+  indicatorHeightRef.current = subPanelHeight;
   const resizeChartsRef = useRef<(() => void) | null>(null);
 
   const mainChartRef = useRef<IChartApi | null>(null);
@@ -1993,7 +2004,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     if (settings.chart_show_levels !== undefined && (isNewPanel || settings.chart_show_levels !== showLevels)) {
       setShowLevels(settings.chart_show_levels);
     }
-    if (settings.chart_show_trade_markers !== undefined && (isNewPanel || settings.chart_show_trade_markers !== showTradeMarkers)) {
+    if (showTradeMarkersProp === undefined && settings.chart_show_trade_markers !== undefined && (isNewPanel || settings.chart_show_trade_markers !== showTradeMarkers)) {
       setShowTradeMarkers(settings.chart_show_trade_markers);
     }
   }, [settings, activePanel?.id]);
@@ -6025,7 +6036,9 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     }
     const toolbarHeight = isZoomed && toolbarRef.current ? toolbarRef.current.offsetHeight : (isZoomed ? 36 : 0);
     const isBoletaVisible = tempViewMode === 'candles' && !hideManualTradeBar && !isBoletaCollapsed;
-    const bottomControlsHeight = isBoletaVisible && bottomControlsRef.current ? bottomControlsRef.current.offsetHeight : (isBoletaVisible ? 72 : 0);
+    const bottomControlsHeight = isBoletaVisible && bottomControlsRef.current
+      ? bottomControlsRef.current.offsetHeight
+      : (isBoletaVisible ? (isMobile ? 112 : 105) : 0);
     const containerPadding = 8;
     const availableHeight = Math.max(200, totalHeight - toolbarHeight - bottomControlsHeight - containerPadding);
 
@@ -6042,9 +6055,9 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     // Set initial ref value if not already set or if container height changed
     const defaultIndicatorHeight = Math.max(70, Math.min(120, Math.floor((availableHeight - indicatorSpacing) * 0.22)));
     if (!indicatorHeightRef.current || indicatorHeightRef.current === 90) {
-      indicatorHeightRef.current = defaultIndicatorHeight;
+      indicatorHeightRef.current = subPanelHeight || defaultIndicatorHeight;
     }
-    const indicatorHeight = indicatorHeightRef.current;
+    const indicatorHeight = indicatorHeightRef.current || subPanelHeight || defaultIndicatorHeight;
     const mainChartHeight = availableHeight - indicatorSpacing - (indicatorHeight * activeIndicatorCount);
 
     const lastActiveIndicator = effectiveShowMomentumMatrix ? 'momentumMatrix' : (effectiveShowAxionTrendSubPanel ? 'axionTrend' : (effectiveShowTimeHeatmap ? 'timeHeatmap' : (effectiveShowEMacd ? 'emacd' : (effectiveShowMacd ? 'macd' : (effectiveShowRsi ? 'rsi' : 'main')))));
@@ -6958,7 +6971,9 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       }
       const toolbarHeight = isZoomed && toolbarRef.current ? toolbarRef.current.offsetHeight : (isZoomed ? 36 : 0);
       const isBoletaVisible = tempViewMode === 'candles' && !hideManualTradeBar && !isBoletaCollapsed;
-      const bottomControlsHeight = isBoletaVisible && bottomControlsRef.current ? bottomControlsRef.current.offsetHeight : (isBoletaVisible ? 72 : 0);
+      const bottomControlsHeight = isBoletaVisible && bottomControlsRef.current
+        ? bottomControlsRef.current.offsetHeight
+        : (isBoletaVisible ? (isMobile ? 112 : 105) : 0);
       const containerPadding = 8;
       const availableHeight = Math.max(200, totalHeight - toolbarHeight - bottomControlsHeight - containerPadding);
       
@@ -6971,7 +6986,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       if (effectiveShowMomentumMatrix) activeIndicatorCount++;
 
       const indicatorSpacing = activeIndicatorCount * 5;
-      const indicatorHeight = indicatorHeightRef.current;
+      const indicatorHeight = indicatorHeightRef.current || subPanelHeight;
       const mainChartHeight = availableHeight - indicatorSpacing - (indicatorHeight * activeIndicatorCount);
       const width = chartRootRef.current.clientWidth > 0 ? chartRootRef.current.clientWidth : 500;
 
@@ -8693,14 +8708,15 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     e.preventDefault();
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
     const startY = clientY;
-    const startHeight = indicatorHeightRef.current;
+    const startHeight = indicatorHeightRef.current || subPanelHeight;
 
     const handleMove = (moveEvent: MouseEvent | TouchEvent) => {
       const currentY = 'touches' in moveEvent ? moveEvent.touches[0].clientY : moveEvent.clientY;
       const deltaY = currentY - startY;
       // Dragging upwards increases height, downwards decreases height
-      const newHeight = Math.max(60, Math.min(250, startHeight - deltaY));
+      const newHeight = Math.max(60, Math.min(320, Math.round(startHeight - deltaY)));
       indicatorHeightRef.current = newHeight;
+      setSubPanelHeight(newHeight);
       if (resizeChartsRef.current) {
         resizeChartsRef.current();
       }
@@ -8711,12 +8727,27 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       window.removeEventListener('mouseup', handleEnd);
       window.removeEventListener('touchmove', handleMove);
       window.removeEventListener('touchend', handleEnd);
+      try {
+        localStorage.setItem('vortex_subpanel_height', String(indicatorHeightRef.current));
+      } catch {}
     };
 
     window.addEventListener('mousemove', handleMove);
     window.addEventListener('mouseup', handleEnd);
     window.addEventListener('touchmove', handleMove, { passive: false });
     window.addEventListener('touchend', handleEnd);
+  };
+
+  const handleAdjustSubPanelHeight = (delta: number) => {
+    const next = Math.max(60, Math.min(320, (indicatorHeightRef.current || subPanelHeight) + delta));
+    setSubPanelHeight(next);
+    indicatorHeightRef.current = next;
+    try {
+      localStorage.setItem('vortex_subpanel_height', String(next));
+    } catch {}
+    if (resizeChartsRef.current) {
+      resizeChartsRef.current();
+    }
   };
 
   return (
@@ -8920,7 +8951,12 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setShowTradeMarkers(!showTradeMarkers);
+                      const next = !showTradeMarkers;
+                      setShowTradeMarkers(next);
+                      try {
+                        localStorage.setItem('vortex_ws_show_trade_markers', String(next));
+                        localStorage.setItem(`vortex_ws_show_trade_markers_${activePanel?.id || 'main'}`, String(next));
+                      } catch {}
                     }}
                     className={`px-1 py-0.5 rounded border font-black transition active:scale-95 cursor-pointer text-[8.5px] shadow-sm min-w-[16px] text-center ${
                       showTradeMarkers
@@ -9214,14 +9250,33 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           
           {/* RSI Sub-chart */}
           {effectiveShowRsi && (
-            <div className="w-full mt-1 relative flex flex-col shrink-0 overflow-hidden" style={{ height: indicatorHeightRef.current || 90 }}>
+            <div className="w-full mt-1 relative flex flex-col shrink-0 overflow-hidden" style={{ height: subPanelHeight }}>
               {/* Splitter Resize Handle */}
               <div 
-                className="h-1.5 hover:bg-indigo-500/50 cursor-ns-resize transition-all w-full flex items-center justify-center group z-20 absolute -top-1"
+                className="h-5 -top-2.5 hover:bg-cyan-500/20 active:bg-cyan-500/30 cursor-ns-resize transition-all w-full flex items-center justify-center group z-30 absolute select-none"
                 onMouseDown={startResizeDrag}
                 onTouchStart={startResizeDrag}
+                title="Arraste para ajustar a altura dos osciladores"
               >
-                <div className="h-[2px] bg-slate-800 group-hover:bg-indigo-500 w-16 rounded transition-all" />
+                <div className="h-1 bg-slate-700/80 group-hover:bg-cyan-400 group-active:bg-cyan-400 w-24 rounded-full transition-all flex items-center justify-center shadow-md">
+                  <div className="w-8 h-0.5 bg-slate-900 rounded-full" />
+                </div>
+              </div>
+              {/* Quick Height Control */}
+              <div className="absolute top-1 right-2 z-20 flex items-center gap-1 bg-slate-950/85 backdrop-blur border border-slate-800/80 px-1.5 py-0.5 rounded text-[8.5px] font-mono text-slate-300 shadow select-none">
+                <span className="text-[7.5px] uppercase text-slate-400 font-bold mr-0.5">RSI {subPanelHeight}px</span>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(-20); }}
+                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
+                  title="Diminuir altura (-20px)"
+                >-</button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(+20); }}
+                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
+                  title="Aumentar altura (+20px)"
+                >+</button>
               </div>
               <div ref={rsiContainerRef} className="w-full h-full border-t border-slate-850 overflow-hidden" />
             </div>
@@ -9229,14 +9284,33 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
           {/* MACD Sub-chart */}
           {effectiveShowMacd && (
-            <div className="w-full mt-1 relative flex flex-col shrink-0 overflow-hidden" style={{ height: indicatorHeightRef.current || 90 }}>
+            <div className="w-full mt-1 relative flex flex-col shrink-0 overflow-hidden" style={{ height: subPanelHeight }}>
               {/* Splitter Resize Handle */}
               <div 
-                className="h-1.5 hover:bg-indigo-500/50 cursor-ns-resize transition-all w-full flex items-center justify-center group z-20 absolute -top-1"
+                className="h-5 -top-2.5 hover:bg-cyan-500/20 active:bg-cyan-500/30 cursor-ns-resize transition-all w-full flex items-center justify-center group z-30 absolute select-none"
                 onMouseDown={startResizeDrag}
                 onTouchStart={startResizeDrag}
+                title="Arraste para ajustar a altura dos osciladores"
               >
-                <div className="h-[2px] bg-slate-800 group-hover:bg-indigo-500 w-16 rounded transition-all" />
+                <div className="h-1 bg-slate-700/80 group-hover:bg-cyan-400 group-active:bg-cyan-400 w-24 rounded-full transition-all flex items-center justify-center shadow-md">
+                  <div className="w-8 h-0.5 bg-slate-900 rounded-full" />
+                </div>
+              </div>
+              {/* Quick Height Control */}
+              <div className="absolute top-1 right-2 z-20 flex items-center gap-1 bg-slate-950/85 backdrop-blur border border-slate-800/80 px-1.5 py-0.5 rounded text-[8.5px] font-mono text-slate-300 shadow select-none">
+                <span className="text-[7.5px] uppercase text-slate-400 font-bold mr-0.5">MACD {subPanelHeight}px</span>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(-20); }}
+                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
+                  title="Diminuir altura (-20px)"
+                >-</button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(+20); }}
+                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
+                  title="Aumentar altura (+20px)"
+                >+</button>
               </div>
               <div ref={macdContainerRef} className="w-full h-full border-t border-slate-850 overflow-hidden" />
             </div>
@@ -9244,14 +9318,33 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
           {/* e-MACD Sub-chart */}
           {effectiveShowEMacd && (
-            <div className="w-full mt-1 relative flex flex-col shrink-0 overflow-hidden" style={{ height: indicatorHeightRef.current || 90 }}>
+            <div className="w-full mt-1 relative flex flex-col shrink-0 overflow-hidden" style={{ height: subPanelHeight }}>
               {/* Splitter Resize Handle */}
               <div 
-                className="h-1.5 hover:bg-indigo-500/50 cursor-ns-resize transition-all w-full flex items-center justify-center group z-20 absolute -top-1"
+                className="h-5 -top-2.5 hover:bg-cyan-500/20 active:bg-cyan-500/30 cursor-ns-resize transition-all w-full flex items-center justify-center group z-30 absolute select-none"
                 onMouseDown={startResizeDrag}
                 onTouchStart={startResizeDrag}
+                title="Arraste para ajustar a altura dos osciladores"
               >
-                <div className="h-[2px] bg-slate-800 group-hover:bg-indigo-500 w-16 rounded transition-all" />
+                <div className="h-1 bg-slate-700/80 group-hover:bg-cyan-400 group-active:bg-cyan-400 w-24 rounded-full transition-all flex items-center justify-center shadow-md">
+                  <div className="w-8 h-0.5 bg-slate-900 rounded-full" />
+                </div>
+              </div>
+              {/* Quick Height Control */}
+              <div className="absolute top-1 right-2 z-20 flex items-center gap-1 bg-slate-950/85 backdrop-blur border border-slate-800/80 px-1.5 py-0.5 rounded text-[8.5px] font-mono text-slate-300 shadow select-none">
+                <span className="text-[7.5px] uppercase text-slate-400 font-bold mr-0.5">eMACD {subPanelHeight}px</span>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(-20); }}
+                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
+                  title="Diminuir altura (-20px)"
+                >-</button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(+20); }}
+                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
+                  title="Aumentar altura (+20px)"
+                >+</button>
               </div>
               <div ref={emacdContainerRef} className="w-full h-full border-t border-slate-850 overflow-hidden" />
             </div>
@@ -9259,14 +9352,33 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
           {/* Time Heatmap Sub-chart */}
           {effectiveShowTimeHeatmap && (
-            <div className="w-full mt-1 relative flex flex-col shrink-0 overflow-hidden" style={{ height: indicatorHeightRef.current || 90 }}>
+            <div className="w-full mt-1 relative flex flex-col shrink-0 overflow-hidden" style={{ height: subPanelHeight }}>
               {/* Splitter Resize Handle */}
               <div 
-                className="h-1.5 hover:bg-indigo-500/50 cursor-ns-resize transition-all w-full flex items-center justify-center group z-20 absolute -top-1"
+                className="h-5 -top-2.5 hover:bg-cyan-500/20 active:bg-cyan-500/30 cursor-ns-resize transition-all w-full flex items-center justify-center group z-30 absolute select-none"
                 onMouseDown={startResizeDrag}
                 onTouchStart={startResizeDrag}
+                title="Arraste para ajustar a altura dos osciladores"
               >
-                <div className="h-[2px] bg-slate-800 group-hover:bg-indigo-500 w-16 rounded transition-all" />
+                <div className="h-1 bg-slate-700/80 group-hover:bg-cyan-400 group-active:bg-cyan-400 w-24 rounded-full transition-all flex items-center justify-center shadow-md">
+                  <div className="w-8 h-0.5 bg-slate-900 rounded-full" />
+                </div>
+              </div>
+              {/* Quick Height Control */}
+              <div className="absolute top-1 right-2 z-20 flex items-center gap-1 bg-slate-950/85 backdrop-blur border border-slate-800/80 px-1.5 py-0.5 rounded text-[8.5px] font-mono text-slate-300 shadow select-none">
+                <span className="text-[7.5px] uppercase text-slate-400 font-bold mr-0.5">HEATMAP {subPanelHeight}px</span>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(-20); }}
+                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
+                  title="Diminuir altura (-20px)"
+                >-</button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(+20); }}
+                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
+                  title="Aumentar altura (+20px)"
+                >+</button>
               </div>
               <div ref={timeHeatmapContainerRef} className="w-full h-full border-t border-slate-850 overflow-hidden" />
             </div>
@@ -9274,14 +9386,33 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
           {/* Axion Trend Sub-chart (Histogram + MACD Bollinger Bands + Colored Bolinhas) */}
           {effectiveShowAxionTrendSubPanel && (
-            <div className="w-full mt-1 relative flex flex-col shrink-0 overflow-hidden" style={{ height: indicatorHeightRef.current || 90 }}>
+            <div className="w-full mt-1 relative flex flex-col shrink-0 overflow-hidden" style={{ height: subPanelHeight }}>
               {/* Splitter Resize Handle */}
               <div 
-                className="h-1.5 hover:bg-indigo-500/50 cursor-ns-resize transition-all w-full flex items-center justify-center group z-20 absolute -top-1"
+                className="h-5 -top-2.5 hover:bg-cyan-500/20 active:bg-cyan-500/30 cursor-ns-resize transition-all w-full flex items-center justify-center group z-30 absolute select-none"
                 onMouseDown={startResizeDrag}
                 onTouchStart={startResizeDrag}
+                title="Arraste para ajustar a altura dos osciladores"
               >
-                <div className="h-[2px] bg-slate-800 group-hover:bg-indigo-500 w-16 rounded transition-all" />
+                <div className="h-1 bg-slate-700/80 group-hover:bg-cyan-400 group-active:bg-cyan-400 w-24 rounded-full transition-all flex items-center justify-center shadow-md">
+                  <div className="w-8 h-0.5 bg-slate-900 rounded-full" />
+                </div>
+              </div>
+              {/* Quick Height Control */}
+              <div className="absolute top-1 right-2 z-20 flex items-center gap-1 bg-slate-950/85 backdrop-blur border border-slate-800/80 px-1.5 py-0.5 rounded text-[8.5px] font-mono text-slate-300 shadow select-none">
+                <span className="text-[7.5px] uppercase text-slate-400 font-bold mr-0.5">TREND {subPanelHeight}px</span>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(-20); }}
+                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
+                  title="Diminuir altura (-20px)"
+                >-</button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleAdjustSubPanelHeight(+20); }}
+                  className="w-4 h-4 rounded bg-slate-800 hover:bg-slate-700 active:bg-cyan-600 text-white font-black flex items-center justify-center cursor-pointer active:scale-95 transition"
+                  title="Aumentar altura (+20px)"
+                >+</button>
               </div>
               <div ref={axionTrendContainerRef} className="w-full h-full border-t border-slate-850 overflow-hidden" />
             </div>
@@ -9289,14 +9420,17 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
           {/* Momentum Matrix Sub-chart (NQ+ES, Mag7 Techs, VIX, DXY a cada 1m) */}
           {effectiveShowMomentumMatrix && (
-            <div className="w-full mt-1 relative flex flex-col shrink-0 overflow-hidden bg-slate-950/70 rounded-md border border-slate-800/80 shadow-md" style={{ height: indicatorHeightRef.current || 95 }}>
+            <div className="w-full mt-1 relative flex flex-col shrink-0 overflow-hidden bg-slate-950/70 rounded-md border border-slate-800/80 shadow-md" style={{ height: subPanelHeight }}>
               {/* Splitter Resize Handle */}
               <div 
-                className="h-1.5 hover:bg-cyan-500/50 cursor-ns-resize transition-all w-full flex items-center justify-center group z-20 absolute -top-1"
+                className="h-5 -top-2.5 hover:bg-cyan-500/20 active:bg-cyan-500/30 cursor-ns-resize transition-all w-full flex items-center justify-center group z-30 absolute select-none"
                 onMouseDown={startResizeDrag}
                 onTouchStart={startResizeDrag}
+                title="Arraste para ajustar a altura dos osciladores"
               >
-                <div className="h-[2px] bg-slate-800 group-hover:bg-cyan-500 w-16 rounded transition-all" />
+                <div className="h-1 bg-slate-700/80 group-hover:bg-cyan-400 group-active:bg-cyan-400 w-24 rounded-full transition-all flex items-center justify-center shadow-md">
+                  <div className="w-8 h-0.5 bg-slate-900 rounded-full" />
+                </div>
               </div>
 
               {/* Subpanel Header Overlay with Real-time Badges */}
@@ -9397,8 +9531,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
       {/* Bottom controls: Modern 4-row High Efficiency Boleta */}
       {tempViewMode === 'candles' && !hideManualTradeBar && !isBoletaCollapsed && (
-        <div ref={bottomControlsRef} className="px-2 py-1.5 bg-[#090d16] border-t border-slate-800/90 text-xs font-sans select-none w-full flex flex-col gap-1 shadow-2xl">
-          {/* Row 1: Account Selector + Sizing Mode (LOTE vs RISCO $) + Collapse Chevron */}
+        <div ref={bottomControlsRef} className={`px-2 py-1.5 bg-[#090d16] border-t border-slate-800/90 text-xs font-sans select-none w-full flex flex-col gap-1 shadow-2xl shrink-0 z-40 ${isMobile ? 'mb-0.5' : ''}`}>
+          {/* Row 1: Account Selector + Sizing Mode (LOTE vs RISCO $) + Full Boleta / ATM Button + Collapse Chevron */}
           <div className="flex items-center justify-between gap-1">
             {/* Account Selector */}
             <div className="flex-1 min-w-0 max-w-[200px] sm:max-w-[260px]">
@@ -9432,7 +9566,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
               ) : null}
             </div>
 
-            {/* Sizing Mode (LOTE vs RISCO $) & Collapse Chevron */}
+            {/* Sizing Mode (LOTE vs RISCO $), Full Boleta/ATM Button & Collapse Chevron */}
             <div className="flex items-center gap-1 shrink-0">
               <div className="flex items-center bg-[#121622] border border-slate-700/80 rounded p-0.5 text-[9px] font-bold shadow-sm">
                 <button
@@ -9468,6 +9602,20 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                   RISCO ($)
                 </button>
               </div>
+
+              {/* Botão para Abrir Boleta Completa (ATM & Configurações Avançadas) */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.dispatchEvent(new CustomEvent('vortex_open_mobile_boleta'));
+                }}
+                className="px-2 py-0.5 rounded bg-blue-900/60 hover:bg-blue-800 active:bg-blue-700 border border-blue-500/60 text-blue-300 hover:text-white font-extrabold text-[9px] flex items-center gap-1 active:scale-95 transition cursor-pointer shadow-sm tracking-tight"
+                title="Abrir Boleta Completa (Estratégias ATM, Stops Dinâmicos e Alvos Parciais)"
+              >
+                <span>📋</span>
+                <span>OPÇÕES / ATM</span>
+              </button>
 
               {/* Collapse Chevron Button */}
               <button

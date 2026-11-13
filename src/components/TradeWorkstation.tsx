@@ -70,6 +70,31 @@ export const TradeWorkstation: React.FC = () => {
   const isMobile = useIsMobile();
   const [isMobileBoletaOpen, setIsMobileBoletaOpen] = useState<boolean>(false);
   const [isMobileLeftDrawerOpen, setIsMobileLeftDrawerOpen] = useState<boolean>(false);
+
+  // Estado para saber se o menu inferior mobile está recolhido (liberando 100% da tela)
+  const [isBottomNavCollapsed, setIsBottomNavCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('vortex_mobile_bottom_nav_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    const handleBottomNavEvent = (e: any) => {
+      setIsBottomNavCollapsed(Boolean(e?.detail?.isCollapsed));
+      setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+    };
+    window.addEventListener('vortex_bottom_nav_collapsed', handleBottomNavEvent);
+    return () => window.removeEventListener('vortex_bottom_nav_collapsed', handleBottomNavEvent);
+  }, []);
+
+  useEffect(() => {
+    const handleOpenBoleta = () => setIsMobileBoletaOpen(true);
+    window.addEventListener('vortex_open_mobile_boleta', handleOpenBoleta);
+    return () => window.removeEventListener('vortex_open_mobile_boleta', handleOpenBoleta);
+  }, []);
+
   const touchStartXRef = useRef<number | null>(null);
   const touchStartYRef = useRef<number | null>(null);
 
@@ -148,27 +173,39 @@ export const TradeWorkstation: React.FC = () => {
 
   const [showTradeMarkers, setShowTradeMarkers] = useState<boolean>(() => {
     try {
+      const savedKey = localStorage.getItem(`vortex_ws_show_trade_markers_${pKey}`);
+      if (savedKey !== null) return savedKey !== 'false';
       const saved = localStorage.getItem('vortex_ws_show_trade_markers');
-      return saved !== 'false';
+      if (saved !== null) return saved !== 'false';
+      return true;
     } catch {
       return true;
     }
   });
   useEffect(() => {
-    try { localStorage.setItem('vortex_ws_show_trade_markers', String(showTradeMarkers)); } catch {}
-  }, [showTradeMarkers]);
+    try {
+      localStorage.setItem('vortex_ws_show_trade_markers', String(showTradeMarkers));
+      localStorage.setItem(`vortex_ws_show_trade_markers_${pKey}`, String(showTradeMarkers));
+    } catch {}
+  }, [showTradeMarkers, pKey]);
 
   const [showOrderLines, setShowOrderLines] = useState<boolean>(() => {
     try {
+      const savedKey = localStorage.getItem(`vortex_ws_show_order_lines_${pKey}`);
+      if (savedKey !== null) return savedKey !== 'false';
       const saved = localStorage.getItem('vortex_ws_show_order_lines');
-      return saved !== 'false';
+      if (saved !== null) return saved !== 'false';
+      return true;
     } catch {
       return true;
     }
   });
   useEffect(() => {
-    try { localStorage.setItem('vortex_ws_show_order_lines', String(showOrderLines)); } catch {}
-  }, [showOrderLines]);
+    try {
+      localStorage.setItem('vortex_ws_show_order_lines', String(showOrderLines));
+      localStorage.setItem(`vortex_ws_show_order_lines_${pKey}`, String(showOrderLines));
+    } catch {}
+  }, [showOrderLines, pKey]);
 
   const [showRobots, setShowRobots] = useState<boolean>(() => {
     try {
@@ -202,17 +239,30 @@ export const TradeWorkstation: React.FC = () => {
 
   const [showBottomDock, setShowBottomDock] = useState<boolean>(() => {
     try {
-      const saved = localStorage.getItem(`vortex_workstation_show_dock_${pKey}`);
-      return saved !== 'false';
+      const savedKey = localStorage.getItem(`vortex_workstation_show_dock_${pKey}`);
+      if (savedKey !== null) return savedKey !== 'false';
+      const saved = localStorage.getItem('vortex_workstation_show_dock');
+      if (saved !== null) return saved !== 'false';
+      return true;
     } catch {
       return true;
     }
   });
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(`vortex_workstation_show_dock_${pKey}`, String(showBottomDock));
+      localStorage.setItem('vortex_workstation_show_dock', String(showBottomDock));
+    } catch {}
+  }, [showBottomDock, pKey]);
+
   const toggleBottomDock = useCallback(() => {
     setShowBottomDock(prev => {
       const next = !prev;
-      try { localStorage.setItem(`vortex_workstation_show_dock_${pKey}`, String(next)); } catch {}
+      try {
+        localStorage.setItem(`vortex_workstation_show_dock_${pKey}`, String(next));
+        localStorage.setItem('vortex_workstation_show_dock', String(next));
+      } catch {}
       setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
       return next;
     });
@@ -322,17 +372,28 @@ export const TradeWorkstation: React.FC = () => {
 
   const [showIndicatorsLegend, setShowIndicatorsLegend] = useState<boolean>(() => {
     try {
-      const saved = localStorage.getItem(`vortex_show_ind_legend_${pKey}`);
-      return saved !== 'false';
+      const savedKey = localStorage.getItem(`vortex_show_ind_legend_${pKey}`);
+      if (savedKey !== null) return savedKey !== 'false';
+      const saved = localStorage.getItem('vortex_ws_show_indicators_legend');
+      if (saved !== null) return saved !== 'false';
+      return true;
     } catch {
       return true;
     }
   });
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(`vortex_show_ind_legend_${pKey}`, String(showIndicatorsLegend));
+      localStorage.setItem('vortex_ws_show_indicators_legend', String(showIndicatorsLegend));
+    } catch {}
+  }, [showIndicatorsLegend, pKey]);
+
   const handleToggleIndicatorsLegend = useCallback((show: boolean) => {
     setShowIndicatorsLegend(show);
     try {
       localStorage.setItem(`vortex_show_ind_legend_${pKey}`, String(show));
+      localStorage.setItem('vortex_ws_show_indicators_legend', String(show));
     } catch {}
   }, [pKey]);
 
@@ -642,6 +703,11 @@ export const TradeWorkstation: React.FC = () => {
       }
       if (next0.indicators !== current0.indicators) {
         setActiveIndicators(next0.indicators);
+        try {
+          localStorage.setItem(`vortex_active_indicators_${pKey}`, JSON.stringify(next0.indicators));
+          localStorage.setItem('vortex_global_active_indicators', JSON.stringify(next0.indicators));
+          localStorage.setItem('vortex_workstation_indicators', JSON.stringify(next0.indicators));
+        } catch {}
       }
       if (next0.autoCenter !== current0.autoCenter) setAutoCenter(next0.autoCenter);
       if (next0.showTradeMarkers !== current0.showTradeMarkers) setShowTradeMarkers(next0.showTradeMarkers);
@@ -650,6 +716,7 @@ export const TradeWorkstation: React.FC = () => {
         setShowIndicatorsLegend(next0.showIndicatorsLegend);
       }
       if (next0.showRobots !== current0.showRobots) setShowRobots(next0.showRobots);
+      setMultiSlots(prev => prev.map((s, i) => (i === 0 ? next0 : s)));
       return;
     }
     setMultiSlots(prev => prev.map((s, i) => (i === idx ? updater(s) : s)));
@@ -1330,7 +1397,7 @@ export const TradeWorkstation: React.FC = () => {
     : (boletaCandles.length > 0 ? boletaCandles[boletaCandles.length - 1].close : currentPrice);
 
   return (
-    <div className={`w-full ${isMobile ? 'h-full pb-[60px]' : 'h-[calc(100vh-20px)]'} ${wsRootBg} flex flex-col font-sans overflow-hidden transition-colors duration-200`}>
+    <div className={`w-full ${isMobile ? (isBottomNavCollapsed ? 'h-full pb-0' : 'h-full pb-[68px]') : 'h-[calc(100vh-20px)]'} ${wsRootBg} flex flex-col font-sans overflow-hidden transition-all duration-200`}>
       {/* Top Workstation Header Toolbar - Apenas Desktop (No Mobile é substituído pelo botão discreto no gráfico e drawer) */}
       {!isMobile && (
         <div className={`${wsHeaderBg} border-b px-3 py-1.5 h-11 flex items-center justify-between gap-2.5 select-none shrink-0 relative z-50 transition-colors duration-200`}>
@@ -2169,6 +2236,40 @@ export const TradeWorkstation: React.FC = () => {
               {/* Section 3: Ferramentas Técnicas & Ações */}
               <div>
                 <div className="space-y-1.5">
+                  {/* Boleta Completa & Estratégias ATM */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMobileLeftDrawerOpen(false);
+                      setIsMobileBoletaOpen(true);
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-blue-950/70 hover:bg-blue-900/80 border border-blue-500/50 text-blue-100 text-xs font-black flex items-center justify-between active:scale-95 transition cursor-pointer shadow-md"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="text-sm">📋</span>
+                      <span>Boleta Completa & ATM</span>
+                    </span>
+                    <span className="text-[10px] text-cyan-400 font-bold">ABRIR ›</span>
+                  </button>
+
+                  {/* Menu do Rodapé (Ocultar / Exibir) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      window.dispatchEvent(new CustomEvent('vortex_toggle_bottom_nav'));
+                      setIsMobileLeftDrawerOpen(false);
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="text-sm">📱</span>
+                      <span>Menu de Páginas do Rodapé</span>
+                    </span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${!isBottomNavCollapsed ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-500'}`}>
+                      {!isBottomNavCollapsed ? 'VISÍVEL' : 'OCULTO'}
+                    </span>
+                  </button>
+
                   {/* Validação Inteligente IA [IA] */}
                   <button
                     type="button"
