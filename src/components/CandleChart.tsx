@@ -140,6 +140,7 @@ interface CandleChartProps {
   activeWidgets?: any[];
   panel?: any;
   marketData?: any;
+  isFocused?: boolean;
 }
 
 const LEVEL_CONFIGS: Record<string, { label: string; color: string }> = {
@@ -806,7 +807,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   onOpenIndicatorsManager,
   activeWidgets: activeWidgetsRaw,
   panel: panelProp,
-  marketData: marketDataProp
+  marketData: marketDataProp,
+  isFocused = true
 }) => {
   const activeIndicatorsKey = useMemo(() => {
     if (!activeIndicatorsRaw) return '__undef__';
@@ -2252,6 +2254,11 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
   const finalContractsToUse = manualSizingMode === 'risco' ? calculatedRiskContracts : (manualContracts || 1);
 
+  useEffect(() => {
+    if (updateTradePriceLinesRef.current) updateTradePriceLinesRef.current();
+    if (updateLevelLabelsRef.current) updateLevelLabelsRef.current(true);
+  }, [finalContractsToUse, manualSizingMode, manualRiskUsd, manualContracts, customMarkersVersion, tempSlPrice, markingSlTpState]);
+
   const handleManualTrade = async (side: 'COMPRA' | 'VENDA') => {
     // 1) Verificar se o mercado está em andamento (se temos dados ativos e não repetitivos)
     if (!marketData || !marketData.timestamp || marketData.timestamp === '--:--:--') {
@@ -2724,9 +2731,19 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
   const activePriceLinesRef = useRef<any[]>([]);
   const updateTradePriceLinesRef = useRef<(() => void) | null>(null);
+  const isFocusedRef = useRef<boolean>(isFocused);
+  isFocusedRef.current = isFocused;
+  const activePanelIdRef = useRef<string | null>(activePanel?.id || null);
+  activePanelIdRef.current = activePanel?.id || null;
 
   useEffect(() => {
     const handleStartMarking = () => {
+      if (!isFocusedRef.current) return;
+
+      try {
+        localStorage.setItem('vortex_custom_sltp_panel_id', activePanelIdRef.current || 'main');
+      } catch {}
+
       lastChartSelectionTimeRef.current = 0;
       setMarkingSlTpState('marking_sl');
       markingSlTpStateRef.current = 'marking_sl';
@@ -2743,9 +2760,23 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       if (savedMode && (savedMode === 'pontos' || savedMode === 'nivel' || savedMode === 'grafico' || savedMode === 'copilot' || savedMode === 'range')) {
         setManualTradeMode(savedMode as any);
       }
+      if (!isReplay && typeof window !== 'undefined') {
+        const savedSizing = localStorage.getItem('vortex_manual_sizing_mode') || localStorage.getItem('vortex_sizing_mode');
+        if (savedSizing === 'lote' || savedSizing === 'risco') {
+          setManualSizingMode(savedSizing);
+        }
+        const savedContracts = localStorage.getItem('vortex_manual_contracts');
+        if (savedContracts !== null && !isNaN(Number(savedContracts)) && Number(savedContracts) > 0) {
+          setManualContracts(Number(savedContracts));
+        }
+        const savedRisk = localStorage.getItem('vortex_manual_risk_usd');
+        if (savedRisk !== null && !isNaN(Number(savedRisk)) && Number(savedRisk) > 0) {
+          setManualRiskUsd(Number(savedRisk));
+        }
+      }
       setCustomMarkersVersion(v => v + 1);
       if (updateTradePriceLinesRef.current) updateTradePriceLinesRef.current();
-      if (updateLevelLabelsRef.current) updateLevelLabelsRef.current();
+      if (updateLevelLabelsRef.current) updateLevelLabelsRef.current(true);
     };
     window.addEventListener('vortex_start_marking_sltp', handleStartMarking);
     window.addEventListener('vortex_custom_sltp_updated', handleCustomSlTpUpdated);
@@ -5493,10 +5524,14 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         const currentStopMode = typeof window !== 'undefined' ? localStorage.getItem(keyMode) : null;
         const savedSl = typeof window !== 'undefined' ? localStorage.getItem(keySl) : null;
         const savedTp = typeof window !== 'undefined' ? localStorage.getItem(keyTp) : null;
-        const customSl = tempSlPrice !== null ? tempSlPrice : (markingSlTpState === 'marking_sl' ? null : (savedSl ? Number(savedSl) : null));
-        const customTp = (markingSlTpState === 'marking_sl' || markingSlTpState === 'marking_tp') ? null : (savedTp ? Number(savedTp) : null);
+        const activeMarkingState = markingSlTpStateRef.current;
+        const activeTempSl = tempSlPriceRef.current;
+        const customSl = activeTempSl !== null ? activeTempSl : (activeMarkingState === 'marking_sl' ? null : (savedSl ? Number(savedSl) : null));
+        const customTp = (activeMarkingState === 'marking_sl' || activeMarkingState === 'marking_tp') ? null : (savedTp ? Number(savedTp) : null);
+        const markerPanelId = typeof window !== 'undefined' ? localStorage.getItem('vortex_custom_sltp_panel_id') : null;
+        const isMarkerForThisPanel = isSimulatorMode || isSimulator || !markerPanelId || !activePanel?.id || markerPanelId === activePanel.id;
 
-        if (!hasRealTrades && (currentStopMode === 'grafico' || markingSlTpState !== null) && (customSl !== null || customTp !== null)) {
+        if (!hasRealTrades && isMarkerForThisPanel && (currentStopMode === 'grafico' || activeMarkingState !== null) && (customSl !== null || customTp !== null)) {
           const refEntry = currentPriceRef.current || (chartDataRef.current.length > 0 ? chartDataRef.current[chartDataRef.current.length - 1].close : 0);
           tradesToDraw.push({
             id: 'custom_marker',
@@ -7700,10 +7735,14 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     const currentStopMode = typeof window !== 'undefined' ? localStorage.getItem(keyMode) : null;
     const savedSl = typeof window !== 'undefined' ? localStorage.getItem(keySl) : null;
     const savedTp = typeof window !== 'undefined' ? localStorage.getItem(keyTp) : null;
-    const customSl = tempSlPrice !== null ? tempSlPrice : (markingSlTpState === 'marking_sl' ? null : (savedSl ? Number(savedSl) : null));
-    const customTp = (markingSlTpState === 'marking_sl' || markingSlTpState === 'marking_tp') ? null : (savedTp ? Number(savedTp) : null);
+    const activeMarkingState = markingSlTpStateRef.current;
+    const activeTempSl = tempSlPriceRef.current;
+    const customSl = activeTempSl !== null ? activeTempSl : (activeMarkingState === 'marking_sl' ? null : (savedSl ? Number(savedSl) : null));
+    const customTp = (activeMarkingState === 'marking_sl' || activeMarkingState === 'marking_tp') ? null : (savedTp ? Number(savedTp) : null);
+    const markerPanelId = typeof window !== 'undefined' ? localStorage.getItem('vortex_custom_sltp_panel_id') : null;
+    const isMarkerForThisPanel = isSimulatorMode || isSimulator || !markerPanelId || !activePanel?.id || markerPanelId === activePanel.id;
 
-    if (!hasRealTrades && (currentStopMode === 'grafico' || markingSlTpState !== null) && (customSl !== null || customTp !== null)) {
+    if (!hasRealTrades && isMarkerForThisPanel && (currentStopMode === 'grafico' || activeMarkingState !== null) && (customSl !== null || customTp !== null)) {
       const refEntry = currentPriceRef.current || (chartDataRef.current.length > 0 ? chartDataRef.current[chartDataRef.current.length - 1].close : 0);
       tradesToDraw.push({
         id: 'custom_marker',

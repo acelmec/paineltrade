@@ -396,6 +396,7 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
           onDeleteDrawing={onDeleteDrawing}
           activeDrawingTool={isFocused ? activeDrawingTool : null}
           selectedDrawingId={isFocused ? selectedDrawingId : null}
+          isFocused={isFocused}
           onSelectDrawing={(d) => onSelectDrawing(d)}
           onOpenDrawingSettings={onOpenDrawingSettings}
         />

@@ -385,6 +385,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   const handleClearCustomMarkers = () => {
     localStorage.removeItem('vortex_custom_sl_price');
     localStorage.removeItem('vortex_custom_tp_price');
+    localStorage.removeItem('vortex_custom_sltp_panel_id');
     setCustomSlPrice(null);
     setCustomTpPrice(null);
     window.dispatchEvent(new CustomEvent('vortex_custom_sltp_updated', { detail: { sl: null, tp: null } }));
@@ -392,12 +393,16 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
 
   const updateContractsSetting = (val: number) => {
     setContracts(val);
+    try { localStorage.setItem('vortex_manual_contracts', String(val)); } catch {}
     if (saveSettings) saveSettings({ chart_manual_contracts: val });
+    window.dispatchEvent(new CustomEvent('vortex_custom_sltp_updated'));
   };
 
   const updateRiskUsdSetting = (val: number) => {
     setRiskUsd(val);
+    try { localStorage.setItem('vortex_manual_risk_usd', String(val)); } catch {}
     if (saveSettings) saveSettings({ chart_manual_risk_usd: val });
+    window.dispatchEvent(new CustomEvent('vortex_custom_sltp_updated'));
   };
 
   const updateSlPointsSetting = (val: number) => {
@@ -1578,7 +1583,9 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
               lastLocalSizingModeChangeRef.current = Date.now();
               setSizingMode('lote');
               localStorage.setItem('vortex_sizing_mode', 'lote');
+              localStorage.setItem('vortex_manual_sizing_mode', 'lote');
               if (saveSettings) saveSettings({ chart_manual_sizing_mode: 'lote' });
+              window.dispatchEvent(new CustomEvent('vortex_custom_sltp_updated'));
             }}
             className={`flex-1 py-1 rounded transition text-center cursor-pointer ${
               activeTab === 'trade'
@@ -1594,7 +1601,9 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
               lastLocalSizingModeChangeRef.current = Date.now();
               setSizingMode('risco');
               localStorage.setItem('vortex_sizing_mode', 'risco');
+              localStorage.setItem('vortex_manual_sizing_mode', 'risco');
               if (saveSettings) saveSettings({ chart_manual_sizing_mode: 'risco' });
+              window.dispatchEvent(new CustomEvent('vortex_custom_sltp_updated'));
             }}
             className={`flex-1 py-1 rounded transition text-center cursor-pointer ${
               activeTab === 'risk'
@@ -1892,7 +1901,9 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    window.dispatchEvent(new CustomEvent('vortex_start_marking_sltp'));
+                    window.dispatchEvent(new CustomEvent('vortex_start_marking_sltp', {
+                      detail: { panelId: activePanel?.id || null }
+                    }));
                   }}
                   className="flex-1 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-md shadow transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
                 >
