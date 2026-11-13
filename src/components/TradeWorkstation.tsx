@@ -26,7 +26,7 @@ import {
 } from '../utils/widgetRegistry';
 import type { DrawingItem, DrawingToolType } from '../types/chartDrawings';
 import { DrawingSettingsModal } from './DrawingSettingsModal';
-import { getAccountManualStrategyId, fetchChartDrawingsSupabase, saveChartDrawingsSupabase, fetchAccountChartStateSupabase, saveAccountChartStateSupabase, resolvePanelPointValue } from '../services/db';
+import { getAccountManualStrategyId, fetchChartDrawingsSupabase, saveChartDrawingsSupabase, fetchAccountChartStateSupabase, saveAccountChartStateSupabase } from '../services/db';
 import { evaluateDrawingTrigger } from '../utils/drawingEngine';
 import { calculateTradeManagement } from '../utils/levelPriceResolver';
 import { useIsMobile } from '../utils/platform';
@@ -70,7 +70,6 @@ export const TradeWorkstation: React.FC = () => {
   const isMobile = useIsMobile();
   const [isMobileBoletaOpen, setIsMobileBoletaOpen] = useState<boolean>(false);
   const [isMobileLeftDrawerOpen, setIsMobileLeftDrawerOpen] = useState<boolean>(false);
-  const [mobileQty, setMobileQty] = useState<number>(1);
   const touchStartXRef = useRef<number | null>(null);
   const touchStartYRef = useRef<number | null>(null);
 
@@ -136,8 +135,29 @@ export const TradeWorkstation: React.FC = () => {
   const [editingIndicatorForModal, setEditingIndicatorForModal] = useState<IndicatorConfig | null>(null);
   const [fitChartTrigger, setFitChartTrigger] = useState<number>(0);
   const [resetViewTrigger, setResetViewTrigger] = useState<number>(0);
-  const [autoCenter, setAutoCenter] = useState<boolean>(false);
-  const [showTradeMarkers, setShowTradeMarkers] = useState<boolean>(true);
+  const [autoCenter, setAutoCenter] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('vortex_ws_auto_center') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('vortex_ws_auto_center', String(autoCenter)); } catch {}
+  }, [autoCenter]);
+
+  const [showTradeMarkers, setShowTradeMarkers] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('vortex_ws_show_trade_markers');
+      return saved !== 'false';
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('vortex_ws_show_trade_markers', String(showTradeMarkers)); } catch {}
+  }, [showTradeMarkers]);
+
   const [showOrderLines, setShowOrderLines] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('vortex_ws_show_order_lines');
@@ -149,7 +169,17 @@ export const TradeWorkstation: React.FC = () => {
   useEffect(() => {
     try { localStorage.setItem('vortex_ws_show_order_lines', String(showOrderLines)); } catch {}
   }, [showOrderLines]);
-  const [showRobots, setShowRobots] = useState<boolean>(false);
+
+  const [showRobots, setShowRobots] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('vortex_ws_show_robots') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('vortex_ws_show_robots', String(showRobots)); } catch {}
+  }, [showRobots]);
   const [dockHeight, setDockHeight] = useState<number>(180); // Height of bottom dock in pixels
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -1299,31 +1329,6 @@ export const TradeWorkstation: React.FC = () => {
     ? rawBoletaPrice
     : (boletaCandles.length > 0 ? boletaCandles[boletaCandles.length - 1].close : currentPrice);
 
-  const activePositionForSymbol = useMemo(() => {
-    if (!reports || !Array.isArray(reports)) return null;
-    return reports.find((r: any) =>
-      r.status === 'Em Andamento' &&
-      (r.ativo === boletaSymbol || r.ativo?.toLowerCase() === boletaSymbol?.toLowerCase())
-    );
-  }, [reports, boletaSymbol]);
-
-  const pnlFormatted = useMemo(() => {
-    if (!activePositionForSymbol) return '';
-    const contracts = activePositionForSymbol.contracts || activePositionForSymbol.contratos || 1;
-    const pointVal = resolvePanelPointValue(activePanel, settings) || 2;
-
-    // Valor financeiro estritamente em moeda ($ USD) sem texto de pontos
-    let valMoeda = 0;
-    if (activePositionForSymbol.unrealized_pnl !== undefined && !isNaN(Number(activePositionForSymbol.unrealized_pnl))) {
-      valMoeda = Number(activePositionForSymbol.unrealized_pnl);
-    } else if (typeof activePositionForSymbol.pnl_pontos === 'number') {
-      valMoeda = activePositionForSymbol.pnl_pontos * contracts * pointVal;
-    }
-
-    const sign = valMoeda >= 0 ? '+' : '-';
-    return `${sign}$${Math.abs(valMoeda).toFixed(2)}`;
-  }, [activePositionForSymbol, activePanel, settings]);
-
   return (
     <div className={`w-full ${isMobile ? 'h-full pb-[60px]' : 'h-[calc(100vh-20px)]'} ${wsRootBg} flex flex-col font-sans overflow-hidden transition-colors duration-200`}>
       {/* Top Workstation Header Toolbar - Apenas Desktop (No Mobile é substituído pelo botão discreto no gráfico e drawer) */}
@@ -1936,76 +1941,6 @@ export const TradeWorkstation: React.FC = () => {
         )}
       </div>
 
-      {/* Mobile Ergonomic Trading Dock (NinjaTrader / TradingView Mobile Style) */}
-      {isMobile && (
-        <div className="w-full bg-[#0c101d]/95 backdrop-blur-md border-t border-slate-800/90 px-2 py-1.5 flex items-center justify-between gap-1.5 shrink-0 z-40 select-none shadow-lg">
-          {/* Seletor Rápido de Lote/Contratos */}
-          <div className="flex items-center bg-slate-900 border border-slate-700/80 rounded-lg overflow-hidden shrink-0">
-            <button
-              type="button"
-              onClick={() => setMobileQty(prev => Math.max(1, prev - 1))}
-              className="px-2.5 py-1 text-slate-300 font-black text-sm active:bg-slate-800 hover:text-white"
-            >
-              -
-            </button>
-            <span className="px-1.5 font-mono font-black text-xs text-blue-300 min-w-[22px] text-center">
-              {mobileQty}
-            </span>
-            <button
-              type="button"
-              onClick={() => setMobileQty(prev => prev + 1)}
-              className="px-2.5 py-1 text-slate-300 font-black text-sm active:bg-slate-800 hover:text-white"
-            >
-              +
-            </button>
-          </div>
-
-          {/* Botões de Ação Imediata Operacional */}
-          <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            <button
-              type="button"
-              onClick={() => setIsMobileBoletaOpen(true)}
-              className="flex-1 py-1.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-black text-xs rounded-xl shadow-md active:scale-95 transition flex flex-col items-center justify-center leading-tight min-w-0"
-            >
-              <span className="truncate">COMPRA</span>
-              <span className="text-[9px] font-mono opacity-80">{boletaPrice > 0 ? boletaPrice.toFixed(2) : 'MKT'}</span>
-            </button>
-
-            {activePositionForSymbol ? (
-              <button
-                type="button"
-                onClick={() => setIsMobileBoletaOpen(true)}
-                className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-slate-950 font-black text-[11px] rounded-xl shadow-md active:scale-95 transition flex flex-col items-center justify-center leading-tight shrink-0"
-                title="Zerar Posição Aberta"
-              >
-                <span>ZERAR</span>
-                <span className="text-[9px] font-mono">{pnlFormatted}</span>
-              </button>
-            ) : null}
-
-            <button
-              type="button"
-              onClick={() => setIsMobileBoletaOpen(true)}
-              className="flex-1 py-1.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-black text-xs rounded-xl shadow-md active:scale-95 transition flex flex-col items-center justify-center leading-tight min-w-0"
-            >
-              <span className="truncate">VENDA</span>
-              <span className="text-[9px] font-mono opacity-80">{boletaPrice > 0 ? boletaPrice.toFixed(2) : 'MKT'}</span>
-            </button>
-          </div>
-
-          {/* Botão Boleta / ATM Drawer */}
-          <button
-            type="button"
-            onClick={() => setIsMobileBoletaOpen(true)}
-            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-600/80 rounded-xl text-xs font-bold active:scale-95 transition flex flex-col items-center justify-center shrink-0"
-            title="Abrir Boleta Completa (SL, TP, ATM)"
-          >
-            <span>📋</span>
-            <span className="text-[8px] uppercase tracking-tighter">Opções</span>
-          </button>
-        </div>
-      )}
-
       {/* Mobile Left Vertical Drawer (Menu Vertical ao Lado Esquerdo - Discreto & Ergonômico) */}
       {isMobile && isMobileLeftDrawerOpen && (
         <div className="fixed inset-0 z-[9998] flex select-none">
@@ -2038,13 +1973,9 @@ export const TradeWorkstation: React.FC = () => {
             </div>
 
             {/* Drawer Scrollable Body */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
               {/* Quick NinjaTrader Controls Strip [IA, I, S, O, H, F, C, R] */}
               <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 shadow-lg">
-                <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-2 flex items-center justify-between">
-                  <span>⚡ Atalhos NinjaTrader</span>
-                  <span className="text-[9px] text-cyan-400 font-mono">1-TOQUE</span>
-                </div>
                 <div className="grid grid-cols-4 gap-1.5 font-mono font-black text-xs">
                   {/* IA */}
                   <button
@@ -2182,10 +2113,6 @@ export const TradeWorkstation: React.FC = () => {
 
               {/* Section 1: Seletor de Ativo / Painel */}
               <div>
-                <div className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider mb-2 flex items-center justify-between">
-                  <span>📈 Ativo Selecionado</span>
-                  <span className="text-cyan-400 font-mono font-black">{boletaSymbol}</span>
-                </div>
                 <div className="grid grid-cols-2 gap-1.5">
                   {panels?.map((p: any) => {
                     const cleanName = p.name ? p.name.replace(/\s*\([^)]*\)/g, '').trim() : 'Painel';
@@ -2214,9 +2141,6 @@ export const TradeWorkstation: React.FC = () => {
 
               {/* Section 2: Timeframe */}
               <div>
-                <div className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider mb-2">
-                  ⏱️ Tempo Gráfico (Timeframe)
-                </div>
                 <div className="grid grid-cols-5 gap-1.5 font-mono font-bold text-xs">
                   {[1, 2, 3, 5, 10, 15, 30, 60, 240, 1440].map((tf) => {
                     const isSel = focusedSlot.timeframe === tf;
@@ -2244,9 +2168,6 @@ export const TradeWorkstation: React.FC = () => {
 
               {/* Section 3: Ferramentas Técnicas & Ações */}
               <div>
-                <div className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider mb-2">
-                  🛠️ Ferramentas & Gráfico
-                </div>
                 <div className="space-y-1.5">
                   {/* Validação Inteligente IA [IA] */}
                   <button

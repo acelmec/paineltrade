@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useApp } from '../context/AppContext';
+import { useIsMobile } from '../utils/platform';
 import { CandleChart } from './CandleChart';
 import { ChartWidgetsOverlay } from './ChartWidgetsOverlay';
 import type { IndicatorConfig } from '../utils/indicatorRegistry';
@@ -100,6 +101,7 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
   showWidgets = true,
 }) => {
   const { panels, activePanel, getPanelSnapshot, ensurePanelDataLoaded } = useApp() as any;
+  const isMobile = useIsMobile();
   const slotContainerRef = useRef<HTMLDivElement | null>(null);
 
   const slotPanel = useMemo(() => {
@@ -336,7 +338,7 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
           setShowIndicatorsLegend={setShowIndicatorsLegend}
           showRobots={slot.showRobots}
           setShowRobots={setShowRobots}
-          hideManualTradeBar={true}
+          hideManualTradeBar={isMultiChart ? true : !isMobile}
           forceCandleView={true}
           drawings={drawings}
           onUpdateDrawing={onUpdateDrawing}

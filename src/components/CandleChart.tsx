@@ -32,6 +32,7 @@ import { playPatternSound } from '../utils/soundEffects';
 import { recordChartError } from '../utils/chartErrorLogger';
 import { scanHistoricalIndicatorSignals, type HistoricalIndicatorSignal } from '../utils/replayEngine';
 import { getStreamerBlockTrades, fetchStreamerBlockTrades } from '../services/vortexStreamer';
+import { useIsMobile } from '../utils/platform';
 
 // Formatadores memoizados de alta performance para o fuso de Brasília (America/Sao_Paulo) no eixo do gráfico
 const spChartTimeFormatter = new Intl.DateTimeFormat('pt-BR', {
@@ -690,6 +691,58 @@ export class ChartErrorBoundary extends React.Component<ChartErrorBoundaryProps,
   }
 }
 
+const MobilePriceReferenceLine: React.FC<{
+  candleSeriesRef: React.RefObject<any>;
+  currentPrice: number;
+  isLastCandleUp: boolean;
+  onRestorePriceScale: () => void;
+}> = ({ candleSeriesRef, currentPrice, isLastCandleUp, onRestorePriceScale }) => {
+  const [topCoord, setTopCoord] = useState<number | null>(null);
+
+  useEffect(() => {
+    let animId: number;
+    const updateCoord = () => {
+      if (candleSeriesRef.current && typeof candleSeriesRef.current.priceToCoordinate === 'function') {
+        const coord = candleSeriesRef.current.priceToCoordinate(currentPrice);
+        if (typeof coord === 'number' && !isNaN(coord) && coord > 0) {
+          setTopCoord(coord);
+        }
+      }
+      animId = requestAnimationFrame(updateCoord);
+    };
+    updateCoord();
+    return () => cancelAnimationFrame(animId);
+  }, [candleSeriesRef, currentPrice]);
+
+  if (topCoord === null) return null;
+
+  return (
+    <div
+      style={{ top: `${topCoord}px` }}
+      className="absolute left-0 right-0 pointer-events-none z-30 flex items-center justify-end -translate-y-1/2"
+    >
+      {/* Linha horizontal tracejada do candle até a margem direita */}
+      <div className="w-full border-b border-dashed border-cyan-400/50 shadow-sm" />
+
+      {/* Card discreto com o preço na margem direita */}
+      <div
+        onClick={(e) => {
+          e.stopPropagation();
+          onRestorePriceScale();
+        }}
+        className={`pointer-events-auto px-2 py-0.5 rounded-l-md font-mono font-black text-[10px] shadow-lg flex items-center gap-1 active:scale-95 transition cursor-pointer select-none border-l-2 shrink-0 ${
+          isLastCandleUp
+            ? 'bg-emerald-600/95 text-white border-emerald-300 shadow-[0_0_8px_rgba(16,185,129,0.5)]'
+            : 'bg-rose-600/95 text-white border-rose-300 shadow-[0_0_8px_rgba(244,63,94,0.5)]'
+        }`}
+        title="Toque para reexibir a escala vertical de preços"
+      >
+        <span>{currentPrice.toFixed(2)}</span>
+      </div>
+    </div>
+  );
+};
+
 const CandleChartInner: React.FC<CandleChartProps> = ({
   candles,
   instanceId,
@@ -1195,12 +1248,115 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     }
   }, [settings?.source_screen, forceCandleView, hideManualTradeBar]);
 
-  const [manualTradeMode, setManualTradeMode] = useState<'nivel' | 'pontos' | 'grafico' | 'copilot' | 'range'>('pontos');
-  const [manualSizingMode, setManualSizingMode] = useState<'lote' | 'risco'>('lote');
-  const [manualRiskUsd, setManualRiskUsd] = useState<number>(250);
-  const [manualSlPoints, setManualSlPoints] = useState<number>(50);
-  const [manualTpPoints, setManualTpPoints] = useState<number>(50);
-  const [manualContracts, setManualContracts] = useState<number>(1);
+  const isMobile = useIsMobile();
+  const [hidePriceScaleMobile, setHidePriceScaleMobile] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('vortex_mobile_hide_price_scale') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('vortex_mobile_hide_price_scale', String(hidePriceScaleMobile));
+    } catch {}
+  }, [hidePriceScaleMobile]);
+
+  const [manualTradeMode, setManualTradeMode] = useState<'nivel' | 'pontos' | 'grafico' | 'copilot' | 'range'>(() => {
+    try {
+      const saved = localStorage.getItem('vortex_stop_mode') as any;
+      if (saved) return saved;
+    } catch {}
+    return (settings?.chart_manual_trade_mode as any) || 'pontos';
+  });
+  const [manualSizingMode, setManualSizingMode] = useState<'lote' | 'risco'>(() => {
+    try {
+      const saved = localStorage.getItem('vortex_manual_sizing_mode') as any;
+      if (saved) return saved;
+    } catch {}
+    return (settings?.chart_manual_sizing_mode as any) || 'lote';
+  });
+  const [manualRiskUsd, setManualRiskUsd] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('vortex_manual_risk_usd');
+      if (saved) return Number(saved);
+    } catch {}
+    return Number(settings?.chart_manual_risk_usd || 250);
+  });
+  const [manualSlPoints, setManualSlPoints] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('vortex_manual_sl_points');
+      if (saved) return Number(saved);
+    } catch {}
+    return Number(settings?.chart_manual_sl_points || 50);
+  });
+  const [manualTpPoints, setManualTpPoints] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('vortex_manual_tp_points');
+      if (saved) return Number(saved);
+    } catch {}
+    return Number(settings?.chart_manual_tp_points || 50);
+  });
+  const [manualContracts, setManualContracts] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('vortex_manual_contracts');
+      if (saved) return Number(saved);
+    } catch {}
+    return Number(settings?.chart_manual_contracts || settings?.contracts || 1);
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem('vortex_manual_contracts', String(manualContracts)); } catch {}
+  }, [manualContracts]);
+  useEffect(() => {
+    try { localStorage.setItem('vortex_manual_sl_points', String(manualSlPoints)); } catch {}
+  }, [manualSlPoints]);
+  useEffect(() => {
+    try { localStorage.setItem('vortex_manual_tp_points', String(manualTpPoints)); } catch {}
+  }, [manualTpPoints]);
+  useEffect(() => {
+    try { localStorage.setItem('vortex_manual_risk_usd', String(manualRiskUsd)); } catch {}
+  }, [manualRiskUsd]);
+  useEffect(() => {
+    try { localStorage.setItem('vortex_manual_sizing_mode', manualSizingMode); } catch {}
+  }, [manualSizingMode]);
+  useEffect(() => {
+    try { localStorage.setItem('vortex_stop_mode', manualTradeMode); } catch {}
+  }, [manualTradeMode]);
+
+  useEffect(() => {
+    if (!mainChartRef.current) return;
+    try {
+      mainChartRef.current.applyOptions({
+        rightPriceScale: {
+          visible: isMobile ? !hidePriceScaleMobile : true,
+          minimumWidth: isMobile ? (hidePriceScaleMobile ? 0 : 55) : 85,
+        }
+      });
+      setTimeout(() => {
+        window.dispatchEvent(new Event('resize'));
+      }, 30);
+    } catch {}
+  }, [hidePriceScaleMobile, isMobile]);
+
+  const lastPriceScaleTapRef = useRef<number>(0);
+  const handlePriceScaleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (!isMobile) return;
+    const touch = e.changedTouches?.[0];
+    if (!touch || !mainContainerRef.current) return;
+    const rect = mainContainerRef.current.getBoundingClientRect();
+    // Toque nos últimos 75px da largura do gráfico (onde fica a escala de preço vertical)
+    if (touch.clientX >= rect.right - 75) {
+      const now = Date.now();
+      if (now - lastPriceScaleTapRef.current < 350) {
+        setHidePriceScaleMobile(prev => !prev);
+        lastPriceScaleTapRef.current = 0;
+        return;
+      }
+      lastPriceScaleTapRef.current = now;
+    }
+  }, [isMobile]);
   // Estado de Marcação Interativa de SL/TP no Gráfico (Passo 1: SL, Passo 2: TP)
   const [markingSlTpState, setMarkingSlTpState] = useState<'marking_sl' | 'marking_tp' | null>(null);
   const [tempSlPrice, setTempSlPrice] = useState<number | null>(null);
@@ -5846,10 +6002,10 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         }
       },
       rightPriceScale: {
-        visible: true,
+        visible: isMobile ? !hidePriceScaleMobile : true,
         borderColor: themeColors.borderColor,
         borderVisible: true,
-        minimumWidth: 85,
+        minimumWidth: isMobile ? (hidePriceScaleMobile ? 0 : 55) : 85,
         autoScale: true,
         scaleMargins: {
           top: 0.06,
@@ -7084,7 +7240,9 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
             borderColor: colors.borderColor
           },
           rightPriceScale: {
+            visible: isMobile ? !hidePriceScaleMobile : true,
             borderColor: colors.borderColor,
+            minimumWidth: isMobile ? (hidePriceScaleMobile ? 0 : 55) : 85,
             scaleMargins: {
               top: 0.06,
               bottom: 0.06,
@@ -8991,7 +9149,22 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         >
           {/* Main Chart Wrapper */}
           <div className="w-full relative flex-1 min-h-0">
-            <div ref={mainContainerRef} onClick={handleChartCanvasClick} className="w-full h-full relative cursor-crosshair" />
+            <div
+              ref={mainContainerRef}
+              onClick={handleChartCanvasClick}
+              onTouchEnd={handlePriceScaleTouchEnd}
+              className="w-full h-full relative cursor-crosshair"
+            />
+
+            {/* Linha de Referência e Card de Preço quando a legenda vertical está oculta no mobile */}
+            {isMobile && hidePriceScaleMobile && (
+              <MobilePriceReferenceLine
+                candleSeriesRef={candleSeriesRef}
+                currentPrice={currentPriceRef.current || (chartDataRef.current.length > 0 ? chartDataRef.current[chartDataRef.current.length - 1].close : 0)}
+                isLastCandleUp={chartDataRef.current.length > 0 ? chartDataRef.current[chartDataRef.current.length - 1].close >= chartDataRef.current[chartDataRef.current.length - 1].open : true}
+                onRestorePriceScale={() => setHidePriceScaleMobile(false)}
+              />
+            )}
 
             {/* Banner de Instrução para Marcação de SL & TP no Gráfico */}
             {markingSlTpState && (
@@ -9506,9 +9679,11 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                 <span className={activeTradeInfo?.pnlColorClass || 'text-slate-300'}>
                   {activeTradeInfo?.pnlDisplay || 'R$ 0,00'}
                 </span>
-                <span className={`text-[10px] ml-1 opacity-80 ${activeTradeInfo?.pnlColorClass || 'text-slate-400'}`}>
-                  ({activeTradeInfo?.ptsDiffDisplay || '0.0 pts'})
-                </span>
+                {!isMobile && (
+                  <span className={`text-[10px] ml-1 opacity-80 ${activeTradeInfo?.pnlColorClass || 'text-slate-400'}`}>
+                    ({activeTradeInfo?.ptsDiffDisplay || '0.0 pts'})
+                  </span>
+                )}
               </div>
 
               {/* Botão à Direita: Fechar / Zerar */}

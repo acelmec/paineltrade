@@ -250,6 +250,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           className="flex items-center gap-1.5 px-2 py-1.5 overflow-x-auto no-scrollbar w-full cursor-grab active:cursor-grabbing select-none"
           style={{
             WebkitOverflowScrolling: 'touch',
+            overflowX: 'auto',
             touchAction: 'pan-x',
             overscrollBehaviorX: 'contain'
           }}
@@ -261,8 +262,14 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
                 key={item.id}
                 onClick={() => {
                   if (hasMovedRef.current) return;
+                  // Se já está na página atual e não é dashboard/painel1/painel2, fechar voltando para o gráfico
+                  if (currentPage === item.id && item.id !== 'painel1' && item.id !== 'painel2') {
+                    setCurrentPage('dashboard');
+                    return;
+                  }
                   item.action();
                 }}
+                style={{ touchAction: 'pan-x' }}
                 className={`flex flex-col items-center justify-center min-w-[62px] px-2 py-1 rounded-xl transition-all duration-150 active:scale-95 shrink-0 select-none ${
                   active
                     ? 'bg-blue-600/25 border border-blue-500/50 text-blue-300 shadow-sm shadow-blue-950/50'
