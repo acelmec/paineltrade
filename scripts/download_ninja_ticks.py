@@ -5,7 +5,7 @@ Arquivos de saida: data/ninja_import/MNQ 12-26.txt e data/ninja_import/MES 12-26
 
 Uso: python scripts/download_ninja_ticks.py --api-key="db-..." [--days=120]
 """
-import os, sys, time, argparse, datetime as dt
+import os, sys, time, gc, argparse, datetime as dt
 import pandas as pd
 import databento as db
 
@@ -17,6 +17,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Download tick data for NinjaTrader 8")
     parser.add_argument("--api-key", type=str, default=os.environ.get("DATABENTO_API_KEY", ""), help="Databento API Key")
     parser.add_argument("--days", type=int, default=120, help="Numero de dias historicos (padrao: 120)")
+    parser.add_argument("--symbol", type=str, default="", help="Filtrar por simbolo (ex: MNQ)")
+    parser.add_argument("--slice-days", type=float, default=3.5, help="Tamanho da fatia em dias")
     parser.add_argument("--estimate-only", action="store_true", help="Apenas estima custo e tamanho sem baixar")
     return parser.parse_args()
 
@@ -65,6 +67,12 @@ def main():
         {"name": "MES 12-26", "sym": "ES.c.0", "ninja_name": "MES 12-26.txt", "digits": 2},
     ]
 
+    if args.symbol:
+        instruments = [i for i in instruments if args.symbol.upper() in i["name"].upper() or args.symbol.upper() in i["sym"].upper()]
+        if not instruments:
+            print(f"ERRO: Nenhum instrumento encontrado para o filtro '{args.symbol}'", flush=True)
+            sys.exit(1)
+
     if args.estimate_only:
         print("\n--- Estimativa de Custo e Tamanho (schema: trades) ---", flush=True)
         total_cost = 0.0
@@ -93,8 +101,8 @@ def main():
         print(f"\nCusto Total Estimado: ${total_cost:.2f} USD", flush=True)
         return
 
-    # Download em fatias semanais (7 dias) com retries e pausa para sincronização de billing
-    step = dt.timedelta(days=7)
+    # Download em fatias com retries e pausa para sincronização de billing
+    step = dt.timedelta(days=args.slice_days)
     for inst in instruments:
         print(f"\n=======================================================", flush=True)
         print(f"Iniciando download e formatacao de {inst['name']}...", flush=True)
@@ -116,7 +124,8 @@ def main():
                 nxt = min(cur + step, end)
                 print(f"   Fatia: {cur.strftime('%Y-%m-%d %H:%M')} a {nxt.strftime('%Y-%m-%d %H:%M')}...", end="", flush=True)
                 success = False
-                for attempt in range(1, 5):
+                end_reached = False
+                for attempt in range(1, 8):
                     try:
                         data = client.timeseries.get_range(
                             dataset="GLBX.MDP3",
@@ -127,7 +136,8 @@ def main():
                             stype_in="continuous"
                         )
                         df = data.to_df()
-                        if not df.empty:
+                        total_ticks = len(df)
+                        if total_ticks > 0:
                             df.index = df.index.tz_convert(TZ)
                             ts_str = df.index.strftime("%Y%m%d %H%M%S %f")
                             price_str = df["price"].apply(lambda p: f"{p:.{inst['digits']}f}")
@@ -136,18 +146,36 @@ def main():
                             lines = ts_str + ";" + price_str + ";" + vol_str + "\n"
                             f_out.writelines(lines)
                             f_out.flush()
-                            print(f" OK: {len(df):,} ticks", flush=True)
+                            print(f" OK: {total_ticks:,} ticks", flush=True)
                         else:
                             print(" (sem trades)", flush=True)
+                        del data, df
+                        gc.collect()
                         success = True
-                        # Pausa de 3 segundos entre fatias para liquidação de créditos na Databento
-                        time.sleep(3)
+                        # Pausa de 5 segundos para liquidação contínua do billing na Databento
+                        time.sleep(5)
                         break
                     except Exception as ex:
-                        wait_sec = attempt * 6
-                        print(f" [tentativa {attempt} erro: {str(ex)[:120]} - aguardando {wait_sec}s]", end="", flush=True)
+                        err_str = str(ex)
+                        if "422" in err_str and "unavailable_range" in err_str:
+                            print(f" [Aviso: Dados D-0 ao vivo exigem subscrição em tempo real. Histórico finalizado com sucesso até {cur.strftime('%Y-%m-%d %H:%M')} UTC]", flush=True)
+                            success = True
+                            end_reached = True
+                            break
+                        
+                        # Se for 402 temporário de billing lock, aguarda liberação
+                        if "402" in err_str:
+                            wait_sec = 15 + attempt * 10
+                        else:
+                            wait_sec = attempt * 8
+                            
+                        print(f" [tentativa {attempt} erro: {err_str[:90]} - aguardando {wait_sec}s]", end="", flush=True)
+                        gc.collect()
                         time.sleep(wait_sec)
                 
+                if end_reached:
+                    break
+
                 if not success:
                     print(f"\n   [Falha definitiva na fatia {cur} a {nxt}. Interrompendo este ativo para preservação de dados.]", flush=True)
                     break

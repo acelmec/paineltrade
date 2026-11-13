@@ -26,7 +26,7 @@ import {
 } from '../utils/widgetRegistry';
 import type { DrawingItem, DrawingToolType } from '../types/chartDrawings';
 import { DrawingSettingsModal } from './DrawingSettingsModal';
-import { getAccountManualStrategyId, fetchChartDrawingsSupabase, saveChartDrawingsSupabase, fetchAccountChartStateSupabase, saveAccountChartStateSupabase } from '../services/db';
+import { getAccountManualStrategyId, fetchChartDrawingsSupabase, saveChartDrawingsSupabase, fetchAccountChartStateSupabase, saveAccountChartStateSupabase, resolvePanelPointValue } from '../services/db';
 import { evaluateDrawingTrigger } from '../utils/drawingEngine';
 import { calculateTradeManagement } from '../utils/levelPriceResolver';
 import { useIsMobile } from '../utils/platform';
@@ -1309,16 +1309,23 @@ export const TradeWorkstation: React.FC = () => {
 
   const pnlFormatted = useMemo(() => {
     if (!activePositionForSymbol) return '';
-    const pnl = activePositionForSymbol.pnl_pontos;
-    if (typeof pnl === 'number') {
-      const sign = pnl >= 0 ? '+' : '';
-      return `${sign}${pnl.toFixed(1)} pts`;
+    const contracts = activePositionForSymbol.contracts || activePositionForSymbol.contratos || 1;
+    const pointVal = resolvePanelPointValue(activePanel, settings) || 2;
+
+    // Valor financeiro estritamente em moeda ($ USD) sem texto de pontos
+    let valMoeda = 0;
+    if (activePositionForSymbol.unrealized_pnl !== undefined && !isNaN(Number(activePositionForSymbol.unrealized_pnl))) {
+      valMoeda = Number(activePositionForSymbol.unrealized_pnl);
+    } else if (typeof activePositionForSymbol.pnl_pontos === 'number') {
+      valMoeda = activePositionForSymbol.pnl_pontos * contracts * pointVal;
     }
-    return '';
-  }, [activePositionForSymbol]);
+
+    const sign = valMoeda >= 0 ? '+' : '-';
+    return `${sign}$${Math.abs(valMoeda).toFixed(2)}`;
+  }, [activePositionForSymbol, activePanel, settings]);
 
   return (
-    <div className={`w-full ${isMobile ? 'h-[calc(100vh-70px)]' : 'h-[calc(100vh-20px)]'} ${wsRootBg} flex flex-col font-sans overflow-hidden transition-colors duration-200`}>
+    <div className={`w-full ${isMobile ? 'h-full pb-[60px]' : 'h-[calc(100vh-20px)]'} ${wsRootBg} flex flex-col font-sans overflow-hidden transition-colors duration-200`}>
       {/* Top Workstation Header Toolbar - Apenas Desktop (No Mobile é substituído pelo botão discreto no gráfico e drawer) */}
       {!isMobile && (
         <div className={`${wsHeaderBg} border-b px-3 py-1.5 h-11 flex items-center justify-between gap-2.5 select-none shrink-0 relative z-50 transition-colors duration-200`}>
@@ -1802,7 +1809,8 @@ export const TradeWorkstation: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsMobileLeftDrawerOpen(true)}
-                className="absolute top-4 left-3 z-30 bg-[#0c101d]/90 hover:bg-[#121828] border border-slate-700/80 hover:border-cyan-500/80 text-slate-100 px-3 py-1.5 rounded-full shadow-2xl flex items-center gap-1.5 backdrop-blur-md active:scale-95 transition-all text-xs font-black cursor-pointer select-none"
+                style={{ top: 'max(env(safe-area-inset-top, 0px) + 8px, 18px)' }}
+                className="absolute left-3 z-30 bg-[#0c101d]/90 hover:bg-[#121828] border border-slate-700/80 hover:border-cyan-500/80 text-slate-100 px-3 py-1.5 rounded-full shadow-2xl flex items-center gap-1.5 backdrop-blur-md active:scale-95 transition-all text-xs font-black cursor-pointer select-none"
                 title="Abrir Menu de Ferramentas e Ativos [Deslize da esquerda para a direita]"
               >
                 <span className="text-cyan-400 text-sm">☰</span>
@@ -2031,6 +2039,147 @@ export const TradeWorkstation: React.FC = () => {
 
             {/* Drawer Scrollable Body */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+              {/* Quick NinjaTrader Controls Strip [IA, I, S, O, H, F, C, R] */}
+              <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 shadow-lg">
+                <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-2 flex items-center justify-between">
+                  <span>⚡ Atalhos NinjaTrader</span>
+                  <span className="text-[9px] text-cyan-400 font-mono">1-TOQUE</span>
+                </div>
+                <div className="grid grid-cols-4 gap-1.5 font-mono font-black text-xs">
+                  {/* IA */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !settings?.chart_manual_ia_validate;
+                      saveSettings({ chart_manual_ia_validate: next });
+                    }}
+                    className={`py-2 rounded-xl border flex flex-col items-center justify-center transition active:scale-95 cursor-pointer ${
+                      settings?.chart_manual_ia_validate
+                        ? 'bg-emerald-600 border-emerald-400 text-white shadow-[0_0_8px_rgba(16,185,129,0.5)]'
+                        : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-white'
+                    }`}
+                    title="Validação Inteligente IA"
+                  >
+                    <span>IA</span>
+                    <span className="text-[8px] font-sans opacity-80">{settings?.chart_manual_ia_validate ? 'ON' : 'OFF'}</span>
+                  </button>
+
+                  {/* I */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, showIndicatorsLegend: !s.showIndicatorsLegend }));
+                    }}
+                    className={`py-2 rounded-xl border flex flex-col items-center justify-center transition active:scale-95 cursor-pointer ${
+                      focusedSlot.showIndicatorsLegend
+                        ? 'bg-indigo-600 border-indigo-400 text-white shadow-[0_0_8px_rgba(99,102,241,0.5)]'
+                        : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-white'
+                    }`}
+                    title="Legenda de Indicadores"
+                  >
+                    <span>I</span>
+                    <span className="text-[8px] font-sans opacity-80">{focusedSlot.showIndicatorsLegend ? 'ON' : 'OFF'}</span>
+                  </button>
+
+                  {/* S */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, showTradeMarkers: !s.showTradeMarkers }));
+                    }}
+                    className={`py-2 rounded-xl border flex flex-col items-center justify-center transition active:scale-95 cursor-pointer ${
+                      focusedSlot.showTradeMarkers
+                        ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_8px_rgba(59,130,246,0.5)]'
+                        : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-white'
+                    }`}
+                    title="Marcadores de Trades"
+                  >
+                    <span>S</span>
+                    <span className="text-[8px] font-sans opacity-80">{focusedSlot.showTradeMarkers ? 'ON' : 'OFF'}</span>
+                  </button>
+
+                  {/* O */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, showOrderLines: s.showOrderLines === false ? true : false }));
+                    }}
+                    className={`py-2 rounded-xl border flex flex-col items-center justify-center transition active:scale-95 cursor-pointer ${
+                      focusedSlot.showOrderLines !== false
+                        ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_8px_rgba(59,130,246,0.5)]'
+                        : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-white'
+                    }`}
+                    title="Linhas de Ordens"
+                  >
+                    <span>O</span>
+                    <span className="text-[8px] font-sans opacity-80">{focusedSlot.showOrderLines !== false ? 'ON' : 'OFF'}</span>
+                  </button>
+
+                  {/* H */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowBottomDock(prev => !prev);
+                      setIsMobileLeftDrawerOpen(false);
+                    }}
+                    className={`py-2 rounded-xl border flex flex-col items-center justify-center transition active:scale-95 cursor-pointer ${
+                      showBottomDock
+                        ? 'bg-cyan-600 border-cyan-400 text-white shadow-[0_0_8px_rgba(6,182,212,0.5)]'
+                        : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-white'
+                    }`}
+                    title="Painel de Histórico e Ordens"
+                  >
+                    <span>H</span>
+                    <span className="text-[8px] font-sans opacity-80">DOCK</span>
+                  </button>
+
+                  {/* F */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFitChartTrigger(prev => prev + 1);
+                      setIsMobileLeftDrawerOpen(false);
+                    }}
+                    className="py-2 rounded-xl border border-amber-500/50 bg-amber-950/40 text-amber-300 flex flex-col items-center justify-center transition active:scale-95 cursor-pointer hover:bg-amber-900/60"
+                    title="Alinhar Escala (Fit Scale)"
+                  >
+                    <span>F</span>
+                    <span className="text-[8px] font-sans opacity-80">FIT</span>
+                  </button>
+
+                  {/* C */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, autoCenter: !s.autoCenter }));
+                    }}
+                    className={`py-2 rounded-xl border flex flex-col items-center justify-center transition active:scale-95 cursor-pointer ${
+                      focusedSlot.autoCenter
+                        ? 'bg-yellow-600 border-yellow-400 text-white shadow-[0_0_8px_rgba(202,138,4,0.5)]'
+                        : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-white'
+                    }`}
+                    title="Auto-Center Preço"
+                  >
+                    <span>C</span>
+                    <span className="text-[8px] font-sans opacity-80">{focusedSlot.autoCenter ? 'ON' : 'OFF'}</span>
+                  </button>
+
+                  {/* R */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetViewTrigger(prev => prev + 1);
+                      setIsMobileLeftDrawerOpen(false);
+                    }}
+                    className="py-2 rounded-xl border border-slate-700 bg-slate-800/80 text-slate-300 flex flex-col items-center justify-center transition active:scale-95 cursor-pointer hover:bg-slate-700"
+                    title="Reenquadrar Vista (Reset View)"
+                  >
+                    <span>R</span>
+                    <span className="text-[8px] font-sans opacity-80">RESET</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Section 1: Seletor de Ativo / Painel */}
               <div>
                 <div className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider mb-2 flex items-center justify-between">
@@ -2099,6 +2248,91 @@ export const TradeWorkstation: React.FC = () => {
                   🛠️ Ferramentas & Gráfico
                 </div>
                 <div className="space-y-1.5">
+                  {/* Validação Inteligente IA [IA] */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !settings?.chart_manual_ia_validate;
+                      saveSettings({ chart_manual_ia_validate: next });
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="font-mono font-black bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded text-[11px] border border-emerald-500/30">IA</span>
+                      <span>Validação de Entradas com IA</span>
+                    </span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${settings?.chart_manual_ia_validate ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-500'}`}>
+                      {settings?.chart_manual_ia_validate ? 'ATIVO' : 'DESL'}
+                    </span>
+                  </button>
+
+                  {/* Legenda de Indicadores [I] */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, showIndicatorsLegend: !s.showIndicatorsLegend }));
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="font-mono font-black bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded text-[11px] border border-indigo-500/30">I</span>
+                      <span>Legenda de Indicadores</span>
+                    </span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${focusedSlot.showIndicatorsLegend ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-500'}`}>
+                      {focusedSlot.showIndicatorsLegend ? 'ATIVO' : 'DESL'}
+                    </span>
+                  </button>
+
+                  {/* Marcadores de Trades [S] */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, showTradeMarkers: !s.showTradeMarkers }));
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="font-mono font-black bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded text-[11px] border border-blue-500/30">S</span>
+                      <span>Marcadores & Sinais de Trades</span>
+                    </span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${focusedSlot.showTradeMarkers ? 'bg-blue-500/20 text-blue-300' : 'text-slate-500'}`}>
+                      {focusedSlot.showTradeMarkers ? 'ATIVO' : 'DESL'}
+                    </span>
+                  </button>
+
+                  {/* Linhas de Ordens [O] */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, showOrderLines: s.showOrderLines === false ? true : false }));
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="font-mono font-black bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded text-[11px] border border-blue-500/30">O</span>
+                      <span>Linhas de Ordens Abertas</span>
+                    </span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${focusedSlot.showOrderLines !== false ? 'bg-blue-500/20 text-blue-300' : 'text-slate-500'}`}>
+                      {focusedSlot.showOrderLines !== false ? 'ATIVO' : 'DESL'}
+                    </span>
+                  </button>
+
+                  {/* Painel Inferior de Ordens & Histórico [H] */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowBottomDock(true);
+                      setIsMobileLeftDrawerOpen(false);
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-cyan-950/30 hover:bg-cyan-950/50 border border-cyan-500/40 text-cyan-300 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="font-mono font-black bg-cyan-500/20 px-1.5 py-0.5 rounded text-[11px] border border-cyan-500/30">H</span>
+                      <span>Histórico & Ordens (Dock)</span>
+                    </span>
+                    <span className="text-slate-500 text-xs">›</span>
+                  </button>
+
                   {/* Fit Scale [F] */}
                   <button
                     type="button"
@@ -2111,40 +2345,6 @@ export const TradeWorkstation: React.FC = () => {
                     <span className="flex items-center gap-2">
                       <span className="font-mono font-black bg-amber-500/20 px-1.5 py-0.5 rounded text-[11px] border border-amber-500/30">F</span>
                       <span>Alinhar Escala (NinjaTrader Fit)</span>
-                    </span>
-                    <span className="text-slate-500 text-xs">›</span>
-                  </button>
-
-                  {/* Indicadores & Templates */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsIndicatorsModalOpen(true);
-                      setIsMobileLeftDrawerOpen(false);
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span>📊</span>
-                      <span>Indicadores Técnicos</span>
-                    </span>
-                    <span className="text-[10px] bg-blue-900/80 text-blue-300 px-2 py-0.5 rounded-full font-bold">
-                      {focusedVisibleIndicators.length}
-                    </span>
-                  </button>
-
-                  {/* Widgets Flutuantes */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsWidgetsModalOpen(true);
-                      setIsMobileLeftDrawerOpen(false);
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span>🧩</span>
-                      <span>Widgets e Cards no Gráfico</span>
                     </span>
                     <span className="text-slate-500 text-xs">›</span>
                   </button>
@@ -2179,6 +2379,40 @@ export const TradeWorkstation: React.FC = () => {
                     <span className="flex items-center gap-2">
                       <span className="font-mono font-black bg-slate-800 px-1.5 py-0.5 rounded text-[11px]">R</span>
                       <span>Reenquadrar Vista (Reset View)</span>
+                    </span>
+                    <span className="text-slate-500 text-xs">›</span>
+                  </button>
+
+                  {/* Indicadores & Templates */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsIndicatorsModalOpen(true);
+                      setIsMobileLeftDrawerOpen(false);
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span>📊</span>
+                      <span>Indicadores Técnicos</span>
+                    </span>
+                    <span className="text-[10px] bg-blue-900/80 text-blue-300 px-2 py-0.5 rounded-full font-bold">
+                      {focusedVisibleIndicators.length}
+                    </span>
+                  </button>
+
+                  {/* Widgets Flutuantes */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsWidgetsModalOpen(true);
+                      setIsMobileLeftDrawerOpen(false);
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span>🧩</span>
+                      <span>Widgets e Cards no Gráfico</span>
                     </span>
                     <span className="text-slate-500 text-xs">›</span>
                   </button>
@@ -2238,6 +2472,38 @@ export const TradeWorkstation: React.FC = () => {
                 isFloating={false}
                 onClose={() => setIsMobileBoletaOpen(false)}
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile TradeDock Slide-Up Sheet quando [H] estiver ativo no mobile */}
+      {isMobile && showBottomDock && (
+        <div className="fixed inset-0 z-[9996] flex flex-col justify-end bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+          <div
+            className="absolute inset-0"
+            onClick={() => setShowBottomDock(false)}
+          />
+          <div className="relative w-full h-[76vh] max-h-[85vh] bg-[#0c101d] border-t border-slate-700 rounded-t-2xl shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-250 z-10">
+            {/* Grab Bar Header */}
+            <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="text-cyan-400 font-black text-sm">📋</span>
+                <span className="text-xs font-black text-slate-100 uppercase tracking-wider">
+                  Ordens & Histórico [H]
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBottomDock(false)}
+                className="w-7 h-7 rounded-lg bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-sm font-bold active:scale-95 transition cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            {/* Dock Body */}
+            <div className="flex-1 overflow-hidden">
+              <TradeDock />
             </div>
           </div>
         </div>

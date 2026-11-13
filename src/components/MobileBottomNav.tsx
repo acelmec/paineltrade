@@ -31,35 +31,57 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollRight, setCanScrollRight] = useState(true);
 
-  // Controle de arrasto com mouse ou touch para rolagem fluida
-  const isDraggingRef = useRef(false);
-  const startXRef = useRef(0);
-  const scrollLeftStartRef = useRef(0);
+  // Controle de arrasto com mouse (Desktop) e Touch Nativo (Mobile)
+  const isMouseDownRef = useRef(false);
+  const mouseStartXRef = useRef(0);
+  const mouseScrollLeftRef = useRef(0);
+
+  const touchStartXRef = useRef(0);
   const hasMovedRef = useRef(false);
 
-  const handlePointerDown = (e: React.PointerEvent) => {
+  // Mouse Dragging (Desktop)
+  const handleMouseDown = (e: React.MouseEvent) => {
     if (!scrollRef.current) return;
-    isDraggingRef.current = true;
+    isMouseDownRef.current = true;
     hasMovedRef.current = false;
-    startXRef.current = e.clientX;
-    scrollLeftStartRef.current = scrollRef.current.scrollLeft;
+    mouseStartXRef.current = e.clientX;
+    mouseScrollLeftRef.current = scrollRef.current.scrollLeft;
   };
 
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDraggingRef.current || !scrollRef.current) return;
-    const dx = e.clientX - startXRef.current;
-    if (Math.abs(dx) > 3) {
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isMouseDownRef.current || !scrollRef.current) return;
+    const dx = e.clientX - mouseStartXRef.current;
+    if (Math.abs(dx) > 4) {
       hasMovedRef.current = true;
     }
-    scrollRef.current.scrollLeft = scrollLeftStartRef.current - dx;
+    scrollRef.current.scrollLeft = mouseScrollLeftRef.current - dx;
     checkScroll();
   };
 
-  const handlePointerUp = () => {
-    isDraggingRef.current = false;
+  const handleMouseUp = () => {
+    isMouseDownRef.current = false;
     setTimeout(() => {
       hasMovedRef.current = false;
-    }, 60);
+    }, 80);
+  };
+
+  // Touch Nativo Mobile (Fluidez máxima 120fps sem travar momentum do navegador)
+  const handleTouchStart = (e: React.TouchEvent) => {
+    hasMovedRef.current = false;
+    touchStartXRef.current = e.touches[0].clientX;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const dx = e.touches[0].clientX - touchStartXRef.current;
+    if (Math.abs(dx) > 8) {
+      hasMovedRef.current = true;
+    }
+  };
+
+  const handleTouchEnd = () => {
+    setTimeout(() => {
+      hasMovedRef.current = false;
+    }, 80);
   };
 
   const isCopyOnly = planDetails?.isCopyTraderOnly === true;
@@ -218,11 +240,14 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         {/* Container horizontal com scroll suave touch e arraste fluido */}
         <div
           ref={scrollRef}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerUp}
-          className="flex items-center gap-1.5 px-2 py-1.5 overflow-x-auto no-scrollbar scroll-smooth w-full cursor-grab active:cursor-grabbing select-none"
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          className="flex items-center gap-1.5 px-2 py-1.5 overflow-x-auto no-scrollbar w-full cursor-grab active:cursor-grabbing select-none"
           style={{
             WebkitOverflowScrolling: 'touch',
             touchAction: 'pan-x',

@@ -157,8 +157,10 @@ export const AppContent: React.FC = () => {
     return <Login />;
   }
 
+  const isWorkstationActive = !isCopyOnly && currentPage === 'dashboard' && (canUseMode2 && panelMode === 'mode2');
+
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#0a0e1a] text-[#e2e8f0] font-sans">
+    <div className={`w-full max-w-full ${isMobile && isWorkstationActive ? 'fixed inset-0 h-[100dvh] overflow-hidden' : 'min-h-screen overflow-x-hidden'} bg-[#0a0e1a] text-[#e2e8f0] font-sans`}>
       {/* Botão flutuante para abrir o menu caso necessário */}
       {!isMobile && (
         <button 
@@ -181,25 +183,29 @@ export const AppContent: React.FC = () => {
       />
 
       {/* Main Content Area */}
-      <div className={`w-full max-w-full overflow-x-hidden p-[6px] md:p-2 transition-all duration-300 ${isMobile ? 'pl-0 pb-20' : (collapsed ? 'pl-[6px] md:pl-[70px]' : 'pl-[6px] md:pl-[230px]')}`}>
+      <div className={`w-full max-w-full overflow-x-hidden transition-all duration-300 ${
+        isMobile 
+          ? (isWorkstationActive ? 'p-0 pl-0 pb-0 h-full overflow-hidden' : 'p-[6px] pl-0 pb-20 min-h-screen') 
+          : (collapsed ? 'p-[6px] md:p-2 pl-[6px] md:pl-[70px]' : 'p-[6px] md:p-2 pl-[6px] md:pl-[230px]')
+      }`}>
         <ErrorBoundary fallbackTitle="Erro na Interface do Painel">
-          {!isCopyOnly && currentPage === 'dashboard' && (
-            (canUseMode2 && panelMode === 'mode2') ? <TradeWorkstation /> : <Dashboard />
-          )}
-          {canAccessCopyTrading && currentPage === 'copytrade' && <CopyTradingDashboard />}
-          {currentPage === 'contas' && <AccountsDashboard />}
-          {!isRestrictedSession && !isCopyOnly && currentPage === 'configuracoes' && <Settings initialTab="geral" />}
-          {!isRestrictedSession && !isCopyOnly && currentPage === 'remodelagem-ml' && isSystemAdmin && <Settings initialTab="remodelagem_ml" />}
-          {!isRestrictedSession && !isCopyOnly && canAccessCopilotAI && currentPage === 'prompts' && <PromptManager />}
-          {!isRestrictedSession && !isCopyOnly && currentPage === 'noticias' && <Settings initialTab="noticias" />}
-          {!isRestrictedSession && !isCopyOnly && currentPage === 'alertas' && <AlertSettings />}
-          {!isRestrictedSession && !isCopyOnly && canAccessAlgorithmCreator && currentPage === 'algoritmos' && <AlgorithmBuilder />}
-          {!isRestrictedSession && !isCopyOnly && canAccessReplay && currentPage === 'replay' && <ReplayWorkstation />}
-          {currentPage === 'relatorios' && <StrategyReportComponent />}
-          {currentPage === 'manual' && <Manual />}
-          {currentPage === 'usuarios' && isSystemAdmin && <UsersDashboard />}
-          {currentPage === 'diagnostico-tw' && isSystemAdmin && <ChartDiagnosticsViewer />}
-        </ErrorBoundary>
+              {!isCopyOnly && currentPage === 'dashboard' && (
+                (canUseMode2 && panelMode === 'mode2') ? <TradeWorkstation /> : <Dashboard />
+              )}
+              {canAccessCopyTrading && currentPage === 'copytrade' && <CopyTradingDashboard />}
+              {currentPage === 'contas' && <AccountsDashboard />}
+              {!isRestrictedSession && !isCopyOnly && currentPage === 'configuracoes' && <Settings initialTab="geral" />}
+              {!isRestrictedSession && !isCopyOnly && currentPage === 'remodelagem-ml' && isSystemAdmin && <Settings initialTab="remodelagem_ml" />}
+              {!isRestrictedSession && !isCopyOnly && canAccessCopilotAI && currentPage === 'prompts' && <PromptManager />}
+              {!isRestrictedSession && !isCopyOnly && currentPage === 'noticias' && <Settings initialTab="noticias" />}
+              {!isRestrictedSession && !isCopyOnly && currentPage === 'alertas' && <AlertSettings />}
+              {!isRestrictedSession && !isCopyOnly && canAccessAlgorithmCreator && currentPage === 'algoritmos' && <AlgorithmBuilder />}
+              {!isRestrictedSession && !isCopyOnly && canAccessReplay && currentPage === 'replay' && <ReplayWorkstation />}
+              {currentPage === 'relatorios' && <StrategyReportComponent />}
+              {currentPage === 'manual' && <Manual />}
+              {currentPage === 'usuarios' && isSystemAdmin && <UsersDashboard />}
+              {currentPage === 'diagnostico-tw' && isSystemAdmin && <ChartDiagnosticsViewer />}
+            </ErrorBoundary>
       </div>
 
       {activeAlert && (

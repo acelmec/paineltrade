@@ -21,10 +21,8 @@
     color: #e2e8f0;
     font-family: 'Segoe UI', sans-serif;
     font-size: 110%; /* Aumenta a escala base de fontes do painel */
-    padding-top: env(safe-area-inset-top, 0);
-    padding-bottom: env(safe-area-inset-bottom, 0);
-    padding-left: env(safe-area-inset-left, 0);
-    padding-right: env(safe-area-inset-right, 0);
+    margin: 0;
+    padding: 0;
   }
 }
 

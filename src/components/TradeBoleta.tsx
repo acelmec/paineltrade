@@ -5,6 +5,7 @@ import { ATMStrategyModal } from './ATMStrategyModal';
 import { getAccountManualStrategyId, updateStrategyReportLevelsSupabase, updateStrategyReportStatusSupabase, isNinjaExecutionAccount, mirrorToLocalServer, resolveAccountExecutionSymbol, resolvePanelTickSize, resolvePanelPointValue, isSameAsset, roundToTick, fetchAtmStrategiesSupabase } from '../services/db';
 import { resolveLevelPrice, calculateRangeHlLevels } from '../utils/levelPriceResolver';
 import { checkNinjaStatus, fetchNinjaPositionsAndOrders } from '../services/ninjaGateway';
+import { useIsMobile } from '../utils/platform';
 
 interface TradeBoletaProps {
   selectedAsset: string;
@@ -47,6 +48,8 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
     checkOperationalLimits,
     getPanelPrice
   } = useApp() as any;
+
+  const isMobile = useIsMobile();
 
   const activeChartCandles = typeof window !== 'undefined' && Array.isArray((window as any).__vortex_active_chart_candles) && (window as any).__vortex_active_chart_candles.length > 0
     ? (window as any).__vortex_active_chart_candles
@@ -1511,9 +1514,11 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                   }`}>
                     {ninjaOffline ? '--' : (displayPnl !== null ? `${displayPnl >= 0 ? '+' : ''}$${displayPnl.toFixed(2)}` : '$ 0.00')}
                   </span>
-                  <span className={`text-[9px] ${isLightTheme ? 'text-slate-500' : 'text-slate-400'} font-bold block font-mono`}>
-                    {ninjaOffline ? '-- pts' : (displayPts !== null ? `${displayPts >= 0 ? '+' : ''}${displayPts.toFixed(2)} pts` : '0.00 pts')}
-                  </span>
+                  {!isMobile && (
+                    <span className={`text-[9px] ${isLightTheme ? 'text-slate-500' : 'text-slate-400'} font-bold block font-mono`}>
+                      {ninjaOffline ? '-- pts' : (displayPts !== null ? `${displayPts >= 0 ? '+' : ''}${displayPts.toFixed(2)} pts` : '0.00 pts')}
+                    </span>
+                  )}
                 </div>
 
                 {/* CONTRATOS */}
