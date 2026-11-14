@@ -91,6 +91,44 @@ export const TradeWorkstation: React.FC = () => {
     return () => window.removeEventListener('vortex_bottom_nav_collapsed', handleBottomNavEvent);
   }, []);
 
+  // Detecção global de duplo toque rápido na tela para alternar o menu de rodapé no mobile
+  useEffect(() => {
+    if (!isMobile) return;
+
+    let lastTapTime = 0;
+    let lastTapX = 0;
+    let lastTapY = 0;
+
+    const handleWindowTouchEnd = (e: TouchEvent) => {
+      const touch = e.changedTouches?.[0];
+      if (!touch) return;
+
+      const target = e.target as HTMLElement | null;
+      // Não disparar quando o toque for em botões, selects, inputs, links, drawer ou modais
+      if (target && target.closest('button, select, input, textarea, a, .side-menu, nav, [role="button"], .custom-scrollbar')) {
+        return;
+      }
+
+      const now = Date.now();
+      const dx = Math.abs(touch.clientX - lastTapX);
+      const dy = Math.abs(touch.clientY - lastTapY);
+
+      if (now - lastTapTime < 380 && dx < 35 && dy < 35) {
+        window.dispatchEvent(new CustomEvent('vortex_toggle_bottom_nav'));
+        lastTapTime = 0;
+        return;
+      }
+
+      lastTapTime = now;
+      lastTapX = touch.clientX;
+      lastTapY = touch.clientY;
+    };
+
+    window.addEventListener('touchend', handleWindowTouchEnd, { passive: true });
+    return () => window.removeEventListener('touchend', handleWindowTouchEnd);
+  }, [isMobile]);
+
+
   useEffect(() => {
     const handleOpenBoleta = () => setIsMobileBoletaOpen(true);
     window.addEventListener('vortex_open_mobile_boleta', handleOpenBoleta);
@@ -299,13 +337,14 @@ export const TradeWorkstation: React.FC = () => {
 
   const [showBottomDock, setShowBottomDock] = useState<boolean>(() => {
     try {
+      if (isMobile) return false;
       const savedKey = localStorage.getItem(`vortex_workstation_show_dock_${pKey}`);
       if (savedKey !== null) return savedKey !== 'false';
       const saved = localStorage.getItem('vortex_workstation_show_dock');
       if (saved !== null) return saved !== 'false';
-      return true;
+      return false;
     } catch {
-      return true;
+      return false;
     }
   });
 
@@ -436,9 +475,9 @@ export const TradeWorkstation: React.FC = () => {
       if (savedKey !== null) return savedKey !== 'false';
       const saved = localStorage.getItem('vortex_ws_show_indicators_legend');
       if (saved !== null) return saved !== 'false';
-      return true;
+      return isMobile ? false : true;
     } catch {
-      return true;
+      return isMobile ? false : true;
     }
   });
 
@@ -853,10 +892,26 @@ export const TradeWorkstation: React.FC = () => {
         } catch {}
       }
       if (next0.autoCenter !== current0.autoCenter) setAutoCenter(next0.autoCenter);
-      if (next0.showTradeMarkers !== current0.showTradeMarkers) setShowTradeMarkers(next0.showTradeMarkers);
-      if (next0.showOrderLines !== current0.showOrderLines) setShowOrderLines(next0.showOrderLines !== false);
+      if (next0.showTradeMarkers !== current0.showTradeMarkers) {
+        setShowTradeMarkers(next0.showTradeMarkers);
+        try {
+          localStorage.setItem('vortex_ws_show_trade_markers', String(next0.showTradeMarkers));
+          localStorage.setItem(`vortex_ws_show_trade_markers_${pKey}`, String(next0.showTradeMarkers));
+        } catch {}
+      }
+      if (next0.showOrderLines !== current0.showOrderLines) {
+        setShowOrderLines(next0.showOrderLines !== false);
+        try {
+          localStorage.setItem('vortex_ws_show_order_lines', String(next0.showOrderLines !== false));
+          localStorage.setItem(`vortex_ws_show_order_lines_${pKey}`, String(next0.showOrderLines !== false));
+        } catch {}
+      }
       if (next0.showIndicatorsLegend !== current0.showIndicatorsLegend) {
         setShowIndicatorsLegend(next0.showIndicatorsLegend);
+        try {
+          localStorage.setItem('vortex_ws_show_indicators_legend', String(next0.showIndicatorsLegend));
+          localStorage.setItem(`vortex_show_ind_legend_${pKey}`, String(next0.showIndicatorsLegend));
+        } catch {}
       }
       if (next0.showRobots !== current0.showRobots) setShowRobots(next0.showRobots);
       setMultiSlots(prev => prev.map((s, i) => (i === 0 ? next0 : s)));
@@ -1559,10 +1614,10 @@ export const TradeWorkstation: React.FC = () => {
   return (
     <div
       style={isMobile ? {
-        paddingTop: 'max(env(safe-area-inset-top, 0px), 36px)',
+        paddingTop: 'max(env(safe-area-inset-top, 0px), 48px)',
         paddingBottom: isBottomNavCollapsed
-          ? 'max(env(safe-area-inset-bottom, 0px), 0px)'
-          : 'calc(max(env(safe-area-inset-bottom, 0px), 0px) + 64px)'
+          ? 'max(env(safe-area-inset-bottom, 0px), 8px)'
+          : 'calc(max(env(safe-area-inset-bottom, 0px), 24px) + 68px)'
       } : undefined}
       className={`w-full ${isMobile ? 'h-full' : 'h-[calc(100vh-20px)]'} ${wsRootBg} flex flex-col font-sans overflow-hidden transition-all duration-200`}
     >
@@ -2424,6 +2479,40 @@ export const TradeWorkstation: React.FC = () => {
                     <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${!isBottomNavCollapsed ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-500'}`}>
                       {!isBottomNavCollapsed ? 'VISÍVEL' : 'OCULTO'}
                     </span>
+                  </button>
+
+                  {/* Alternar Menu Rodapé (Mobile) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      window.dispatchEvent(new CustomEvent('vortex_toggle_bottom_nav'));
+                      setIsMobileLeftDrawerOpen(false);
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="text-sm">📱</span>
+                      <span>Menu Rodapé (ou 2 Toques na Tela)</span>
+                    </span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isBottomNavCollapsed ? 'text-slate-500' : 'bg-cyan-500/20 text-cyan-300'}`}>
+                      {isBottomNavCollapsed ? 'OCULTO' : 'VISÍVEL'}
+                    </span>
+                  </button>
+
+                  {/* Abrir Boleta Completa (ATM & Estratégias) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMobileBoletaOpen(true);
+                      setIsMobileLeftDrawerOpen(false);
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-blue-950/40 hover:bg-blue-900/50 border border-blue-500/40 text-blue-300 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="text-sm">📋</span>
+                      <span>Boleta Completa & ATM [B]</span>
+                    </span>
+                    <span className="text-slate-500 text-xs">›</span>
                   </button>
 
                   {/* Indicadores & Templates */}

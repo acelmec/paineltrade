@@ -269,7 +269,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   return (
     <nav
       className="md:hidden fixed bottom-0 left-0 right-0 z-[9990] bg-[#0c101d]/95 backdrop-blur-xl border-t border-slate-800/90 shadow-[0_-6px_25px_rgba(0,0,0,0.6)] select-none animate-in slide-in-from-bottom duration-200"
-      style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 20px)' }}
+      style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 24px)' }}
       aria-label="Navegação Mobile"
     >
       <div className="relative w-full">
