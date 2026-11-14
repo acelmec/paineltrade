@@ -504,7 +504,7 @@ export async function fetchForceSupabase(instanceId: string): Promise<NasdaqForc
 /**
  * Converte registro cru do Supabase nasdaq_force para objeto formatado com array de forças
  */
-function parseNasdaqForceRow(data: any): NasdaqForce {
+export function parseNasdaqForceRow(data: any): NasdaqForce {
   let forces: { symbol: string; buy: number; sell: number }[] = [];
   if (data.force_data) {
     forces = typeof data.force_data === 'string' ? JSON.parse(data.force_data) : data.force_data;
@@ -698,6 +698,142 @@ export async function fetchNasdaqForceRange(
     return [];
   } catch (err) {
     console.error('[DB] Exceção em fetchNasdaqForceRange:', err);
+    return [];
+  }
+}
+
+export interface ReplayForceItem {
+  timestamp: string;
+  timeMs: number;
+  forces: Array<{ symbol: string; buy: number; sell: number }>;
+}
+
+/**
+ * Busca histórico paginado de forças (nasdaq_force) para o período do Replay de Mercado.
+ * Respeita o teto de 1000 linhas por bloco do PostgREST e ordena por timestamp.
+ */
+export async function fetchForcesForRangeSupabase(
+  instanceId: string,
+  startTime: string | Date | number,
+  endTime: string | Date | number
+): Promise<ReplayForceItem[]> {
+  try {
+    const candidateIds = Array.from(new Set(['painel_principal_web', instanceId, 'painel_principal'])).filter(Boolean) as string[];
+    const startIso = new Date(startTime).toISOString();
+    const endIso = new Date(endTime).toISOString();
+    const client = supabaseAdmin || supabase;
+    const CHUNK_SIZE = 1000;
+
+    for (const targetId of candidateIds) {
+      let from = 0;
+      let hasMore = true;
+      const allRows: any[] = [];
+
+      while (hasMore) {
+        const { data, error } = await client
+          .from('nasdaq_force')
+          .select('*')
+          .eq('instance_id', targetId)
+          .gte('timestamp', startIso)
+          .lte('timestamp', endIso)
+          .order('timestamp', { ascending: true })
+          .range(from, from + CHUNK_SIZE - 1);
+
+        if (error) {
+          console.warn(`[DB] Aviso ao buscar nasdaq_force paginada para ${targetId}:`, error.message);
+          break;
+        }
+
+        if (data && data.length > 0) {
+          allRows.push(...data);
+          if (data.length < CHUNK_SIZE) {
+            hasMore = false;
+          } else {
+            from += CHUNK_SIZE;
+          }
+        } else {
+          hasMore = false;
+        }
+      }
+
+      if (allRows.length > 0) {
+        return allRows.map((r: any) => {
+          const rawTime = r.timestamp || r.updated_at || r.created_at || startIso;
+          const timeMs = new Date(rawTime).getTime();
+          return {
+            timestamp: rawTime,
+            timeMs: isNaN(timeMs) ? 0 : timeMs,
+            forces: parseNasdaqForceRow(r).forces
+          };
+        }).sort((a, b) => a.timeMs - b.timeMs);
+      }
+    }
+
+    // Fallback: busca global em nasdaq_force sem filtro de instance_id
+    let from = 0;
+    let hasMore = true;
+    const globalRows: any[] = [];
+
+    while (hasMore) {
+      const { data, error } = await client
+        .from('nasdaq_force')
+        .select('*')
+        .gte('timestamp', startIso)
+        .lte('timestamp', endIso)
+        .order('timestamp', { ascending: true })
+        .range(from, from + CHUNK_SIZE - 1);
+
+      if (error || !data || data.length === 0) {
+        break;
+      }
+
+      globalRows.push(...data);
+      if (data.length < CHUNK_SIZE) {
+        hasMore = false;
+      } else {
+        from += CHUNK_SIZE;
+      }
+    }
+
+    if (globalRows.length > 0) {
+      return globalRows.map((r: any) => {
+        const rawTime = r.timestamp || r.updated_at || r.created_at || startIso;
+        const timeMs = new Date(rawTime).getTime();
+        return {
+          timestamp: rawTime,
+          timeMs: isNaN(timeMs) ? 0 : timeMs,
+          forces: parseNasdaqForceRow(r).forces
+        };
+      }).sort((a, b) => a.timeMs - b.timeMs);
+    }
+
+    // Fallback secundário: painelvm_forces_1m legado
+    for (const targetId of candidateIds) {
+      const { data: legacyData } = await client
+        .from('painelvm_forces_1m')
+        .select('*')
+        .eq('instance_id', targetId)
+        .gte('timestamp', startIso)
+        .lte('timestamp', endIso)
+        .order('timestamp', { ascending: true })
+        .limit(3000);
+
+      if (legacyData && legacyData.length > 0) {
+        return legacyData.map((r: any) => {
+          const rawTime = r.timestamp || r.updated_at || startIso;
+          const timeMs = new Date(rawTime).getTime();
+          return {
+            timestamp: rawTime,
+            timeMs: isNaN(timeMs) ? 0 : timeMs,
+            forces: parseNasdaqForceRow(r).forces
+          };
+        }).sort((a, b) => a.timeMs - b.timeMs);
+      }
+    }
+
+    return [];
+  } catch (err) {
+    console.error('[DB] Exceção em fetchForcesForRangeSupabase:', err);
     return [];
   }
 }
@@ -3440,14 +3576,15 @@ export async function fetchCandlesSupabase(
   limit: number = 10000,
   targetPanelObj?: any,
   panelSettings?: any,
-  onProgress?: (percent: number, loaded: number, total: number) => void
+  onProgress?: (percent: number, loaded: number, total: number) => void,
+  since?: string
 ): Promise<Candle[]> {
   const queryId = panelInstanceId || panelId;
   const localCache = getLocalCandles(queryId);
 
   onProgress?.(15, 0, limit);
 
-  // 1. Tentar coletar dados do streamer local NinjaTrader (:8002) se disponível
+  // 1. Tentar coletar dados do streamer local NinjaTrader (:8002) com suporte a Delta Sync
   // Timeout curto (1800ms) e retorno em 0ms se :8002 estiver em cooldown offline
   let localCandles: Candle[] | null = null;
   try {
@@ -3455,7 +3592,7 @@ export async function fetchCandlesSupabase(
     localCandles = await withDbTimeout(
       (async () => {
         const hasLocal = await hasLocalStreamForPanel(contextTarget, panelSettings);
-        return hasLocal ? await fetchStreamerCandles(contextTarget, panelSettings, false, limit) : null;
+        return hasLocal ? await fetchStreamerCandles(contextTarget, panelSettings, false, limit, since) : null;
       })(),
       1800
     ).catch(() => null);
@@ -3464,10 +3601,10 @@ export async function fetchCandlesSupabase(
   }
 
   const hasLocalData = Boolean(localCandles && localCandles.length > 0);
-  const localSlice = hasLocalData ? localCandles!.slice(-limit) : [];
+  const localSlice = hasLocalData ? (since ? localCandles! : localCandles!.slice(-limit)) : [];
   const localHasGap = hasLocalData ? detectInternalCandleGap(localSlice) : false;
-  const localCoversLimit = hasLocalData && (localCandles!.length >= limit || localCandles!.length >= 1000);
-  // Se o NinjaTrader local tiver dados sem lacunas internas anormais no período solicitado, usamos com prioridade local
+  const localCoversLimit = hasLocalData && (Boolean(since) || localCandles!.length >= limit || localCandles!.length >= 1000);
+  // Se o NinjaTrader local tiver dados sem lacunas internas anormais no período solicitado (ou for delta sync com sucesso), usamos com prioridade local
   if (hasLocalData && localCoversLimit && !localHasGap) {
     onProgress?.(100, localCandles!.length, limit);
     saveLocalCandles(queryId, localCandles!);
@@ -3525,42 +3662,65 @@ export async function fetchCandlesSupabase(
 
     onProgress?.(22, 0, limit);
 
-    const selectColumns = 'timestamp, open, high, low, close, volume';
+    // Tentativa Aceleração 1-Shot: RPC get_candles_fast (execução C/SQL nativa no Postgres sem limite de 1000 rows do PostgREST)
+    try {
+      const rpcController = new AbortController();
+      const rpcTimer = setTimeout(() => rpcController.abort(), 4000);
+      const rpcRes = await supabaseAdmin
+        .rpc('get_candles_fast', {
+          p_instance: resolvedTargetId,
+          p_limit: limit,
+          p_since: since || null
+        })
+        .abortSignal(rpcController.signal);
+      clearTimeout(rpcTimer);
 
-    // Paginação PARALELA controlada respeitando o teto do PostgREST (db_max_rows = 1000).
-    // CONCURRENCY = 3 impede o esgotamento do pool de conexões HTTP do navegador (máx 6 por domínio).
-    const CHUNK_SIZE = 1000;
-    const CONCURRENCY = 3;
-    const totalChunks = Math.ceil(limit / CHUNK_SIZE);
-    let reachedEnd = false;
-    let completedRows = 0;
+      if (!rpcRes.error && Array.isArray(rpcRes.data) && rpcRes.data.length > 0) {
+        allRows = rpcRes.data;
+      }
+    } catch {
+      // Fallback transparente e silencioso para a paginação em ondas clássica caso a RPC não esteja criada no banco
+    }
 
-    for (let waveStart = 0; waveStart < totalChunks && !reachedEnd; waveStart += CONCURRENCY) {
-      const waveIndexes: number[] = [];
-      for (let k = waveStart; k < Math.min(waveStart + CONCURRENCY, totalChunks); k++) waveIndexes.push(k);
+    // Se a RPC não estiver disponível ou retornou vazia, executa a Paginação em Ondas do PostgREST
+    if (allRows.length === 0) {
+      const selectColumns = 'timestamp, open, high, low, close, volume';
 
-      const waveResults = await Promise.all(waveIndexes.map(async (chunkIdx) => {
-        const from = chunkIdx * CHUNK_SIZE;
-        const to = Math.min(from + CHUNK_SIZE - 1, limit - 1);
+      // Paginação PARALELA controlada respeitando o teto do PostgREST (db_max_rows = 1000).
+      // CONCURRENCY = 3 impede o esgotamento do pool de conexões HTTP do navegador (máx 6 por domínio).
+      const CHUNK_SIZE = 1000;
+      const CONCURRENCY = 3;
+      const totalChunks = Math.ceil(limit / CHUNK_SIZE);
+      let reachedEnd = false;
+      let completedRows = 0;
 
-        let res = await queryCandleChunkWithAbort(resolvedTargetId, selectColumns, from, to, false, 5000);
-        if (res.error || !res.data) {
-          res = await queryCandleChunkWithAbort(resolvedTargetId, selectColumns, from, to, false, 6000);
-        }
+      for (let waveStart = 0; waveStart < totalChunks && !reachedEnd; waveStart += CONCURRENCY) {
+        const waveIndexes: number[] = [];
+        for (let k = waveStart; k < Math.min(waveStart + CONCURRENCY, totalChunks); k++) waveIndexes.push(k);
 
-        const rows = (res && !res.error && Array.isArray(res.data)) ? res.data : [];
-        completedRows += rows.length;
-        const pct = Math.min(92, Math.max(22, Math.round(22 + (completedRows / Math.max(1, limit)) * 70)));
-        onProgress?.(pct, completedRows, limit);
-        return { chunkIdx, rows, expected: to - from + 1 };
-      }));
+        const waveResults = await Promise.all(waveIndexes.map(async (chunkIdx) => {
+          const from = chunkIdx * CHUNK_SIZE;
+          const to = Math.min(from + CHUNK_SIZE - 1, limit - 1);
 
-      waveResults.sort((a, b) => a.chunkIdx - b.chunkIdx);
-      for (const r of waveResults) {
-        if (r.rows.length > 0) allRows.push(...r.rows);
-        if (r.rows.length < r.expected) {
-          reachedEnd = true;
-          break;
+          let res = await queryCandleChunkWithAbort(resolvedTargetId, selectColumns, from, to, false, 5000);
+          if (res.error || !res.data) {
+            res = await queryCandleChunkWithAbort(resolvedTargetId, selectColumns, from, to, false, 6000);
+          }
+
+          const rows = (res && !res.error && Array.isArray(res.data)) ? res.data : [];
+          completedRows += rows.length;
+          const pct = Math.min(92, Math.max(22, Math.round(22 + (completedRows / Math.max(1, limit)) * 70)));
+          onProgress?.(pct, completedRows, limit);
+          return { chunkIdx, rows, expected: to - from + 1 };
+        }));
+
+        waveResults.sort((a, b) => a.chunkIdx - b.chunkIdx);
+        for (const r of waveResults) {
+          if (r.rows.length > 0) allRows.push(...r.rows);
+          if (r.rows.length < r.expected) {
+            reachedEnd = true;
+            break;
+          }
         }
       }
     }

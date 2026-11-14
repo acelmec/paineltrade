@@ -33,6 +33,12 @@ import { playPatternSound } from '../utils/soundEffects';
 import { recordChartError } from '../utils/chartErrorLogger';
 import { scanHistoricalIndicatorSignals, type HistoricalIndicatorSignal } from '../utils/replayEngine';
 import { getStreamerBlockTrades, fetchStreamerBlockTrades } from '../services/vortexStreamer';
+import {
+  fetchMarketMatrixData,
+  subscribeMarketMatrix,
+  convertQqqToNq,
+  type MarketMatrixData
+} from '../services/marketMatrixService';
 import { useIsMobile } from '../utils/platform';
 
 // Formatadores memoizados de alta performance para o fuso de Brasília (America/Sao_Paulo) no eixo do gráfico
@@ -1598,6 +1604,40 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   }, [activeIndicators]);
 
   const effectiveShowMomentumMatrix = Boolean(momentumMatrixIndConfig);
+
+  const strikeLevelsIndConfig = useMemo(() => {
+    return (activeIndicators || []).find(i => (i.type === 'STRIKE_LEVELS' || i.type === 'StrikeLevels') && i.visible);
+  }, [activeIndicators]);
+
+  const effectiveShowStrikeLevels = Boolean(strikeLevelsIndConfig);
+  const [_marketMatrixFeed, setMarketMatrixFeed] = useState<MarketMatrixData | null>(null);
+  const marketMatrixFeedRef = useRef<MarketMatrixData | null>(null);
+
+  useEffect(() => {
+    if (!effectiveShowStrikeLevels) return;
+
+    fetchMarketMatrixData().then(d => {
+      if (d) {
+        setMarketMatrixFeed(d);
+        marketMatrixFeedRef.current = d;
+        if (updateLevelLabelsRef.current) {
+          updateLevelLabelsRef.current(true);
+        }
+      }
+    });
+
+    const unsubscribe = subscribeMarketMatrix((d) => {
+      setMarketMatrixFeed(d);
+      marketMatrixFeedRef.current = d;
+      if (updateLevelLabelsRef.current) {
+        updateLevelLabelsRef.current(true);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [effectiveShowStrikeLevels]);
 
   const proposedTradeRef = useRef<any>(proposedTrade);
   useEffect(() => {
@@ -4971,6 +5011,122 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           });
         }
 
+        // E. Renderizar Linhas do Indicador STRIKE_LEVELS (Gamma & Opções do Feed Grix)
+        if (effectiveShowStrikeLevels && marketMatrixFeedRef.current) {
+          const f = marketMatrixFeedRef.current;
+          const params = strikeLevelsIndConfig?.params || {};
+          const currentPrice = (chartData && chartData.length > 0) ? chartData[chartData.length - 1].close : 0;
+          const manualFactor = Number(params.fatorManual) || 0;
+          const calibrate = params.calibrarPeloPreco !== false;
+
+          interface RawStrikeLvl {
+            name: string;
+            qqq: number;
+            color: string;
+            lineWidth: number;
+            lineStyle: 'solid' | 'dashed';
+          }
+
+          const rawList: RawStrikeLvl[] = [];
+
+          if (params.showCallWall !== false && f.cw > 0) {
+            rawList.push({ name: 'Call Wall', qqq: f.cw, color: '#32cd32', lineWidth: 1.5, lineStyle: 'dashed' });
+          }
+          if (params.showPoc !== false && f.poc > 0) {
+            rawList.push({ name: 'POC', qqq: f.poc, color: '#f59e0b', lineWidth: 1.5, lineStyle: 'dashed' });
+          }
+          if (params.showPutWall !== false && f.pw > 0) {
+            rawList.push({ name: 'Put Wall', qqq: f.pw, color: '#ef4444', lineWidth: 1.5, lineStyle: 'dashed' });
+          }
+          if (params.showGammaWallSup !== false && f.gw_sup > 0) {
+            rawList.push({ name: 'Gamma Wall', qqq: f.gw_sup, color: '#3cb371', lineWidth: 1.2, lineStyle: 'solid' });
+          }
+          if (params.showFlip !== false && f.flip > 0) {
+            rawList.push({ name: 'Flip Zone', qqq: f.flip, color: '#d1d5db', lineWidth: 1.2, lineStyle: 'solid' });
+          }
+          if (params.showGammaWallInf !== false && f.gw_inf > 0) {
+            rawList.push({ name: 'Gamma Wall inf.', qqq: f.gw_inf, color: '#dc2626', lineWidth: 1.2, lineStyle: 'solid' });
+          }
+          if (params.showSigma !== false) {
+            if (f.sigma_sup && f.sigma_sup > 0) rawList.push({ name: 'SIGMA ↑ venda', qqq: f.sigma_sup, color: '#ef4444', lineWidth: 1.8, lineStyle: 'solid' });
+            if (f.sigma_inf && f.sigma_inf > 0) rawList.push({ name: 'SIGMA ↓ compra', qqq: f.sigma_inf, color: '#22c55e', lineWidth: 1.8, lineStyle: 'solid' });
+          }
+          if (params.showHeatmap !== false) {
+            if (f.hm_oi_call && f.hm_oi_call > 0) rawList.push({ name: 'HM call (OI)', qqq: f.hm_oi_call, color: '#8fbc8f', lineWidth: 1.0, lineStyle: 'dashed' });
+            if (f.hm_oi_put && f.hm_oi_put > 0) rawList.push({ name: 'HM put (OI)', qqq: f.hm_oi_put, color: '#bc8f8f', lineWidth: 1.0, lineStyle: 'dashed' });
+            if (f.hm_oi_flip && f.hm_oi_flip > 0) rawList.push({ name: 'HM flip (OI)', qqq: f.hm_oi_flip, color: '#c0c0c0', lineWidth: 1.0, lineStyle: 'dashed' });
+            if (f.hm_vol_call && f.hm_vol_call > 0) rawList.push({ name: 'HM call (VOL)', qqq: f.hm_vol_call, color: '#7fffd4', lineWidth: 1.0, lineStyle: 'dashed' });
+            if (f.hm_vol_put && f.hm_vol_put > 0) rawList.push({ name: 'HM put (VOL)', qqq: f.hm_vol_put, color: '#fa8072', lineWidth: 1.0, lineStyle: 'dashed' });
+            if (f.hm_vol_flip && f.hm_vol_flip > 0) rawList.push({ name: 'HM flip (VOL)', qqq: f.hm_vol_flip, color: '#b0c4de', lineWidth: 1.0, lineStyle: 'dashed' });
+          }
+          if (params.showRange !== false) {
+            if (f.range_max && f.range_max > 0) rawList.push({ name: 'Range máx. (venda)', qqq: f.range_max, color: '#ee82ee', lineWidth: 1.6, lineStyle: 'dashed' });
+            if (f.range_min && f.range_min > 0) rawList.push({ name: 'Range mín. (compra)', qqq: f.range_min, color: '#ee82ee', lineWidth: 1.6, lineStyle: 'dashed' });
+          }
+
+          // Agrupamento de níveis no mesmo preço
+          const groupedLevels: RawStrikeLvl[] = [];
+          for (const item of rawList) {
+            const ex = groupedLevels.find(x => Math.abs(x.qqq - item.qqq) < 0.005);
+            if (!ex) {
+              groupedLevels.push({ ...item });
+            } else {
+              ex.name += ` · ${item.name}`;
+              if (item.lineWidth > ex.lineWidth) {
+                ex.lineWidth = item.lineWidth;
+                ex.color = item.color;
+              }
+            }
+          }
+
+          // Linhas sutis de todos os strikes a cada 1.00 de QQQ
+          if (params.showStrikes === true && series.coordinateToPrice) {
+            const pTopVal = series.coordinateToPrice(0);
+            const pBottomVal = series.coordinateToPrice(cHeight);
+            if (pTopVal && pBottomVal) {
+              const minPrice = Math.min(pTopVal, pBottomVal);
+              const maxPrice = Math.max(pTopVal, pBottomVal);
+              const factorVal = manualFactor > 0 ? manualFactor : (f.fator || 41.2375);
+              const k0 = Math.floor(minPrice / factorVal) - 1;
+              const k1 = Math.ceil(maxPrice / factorVal) + 1;
+              const maxK = Math.min(k1, k0 + 150);
+              for (let k = k0; k <= maxK; k++) {
+                const nqK = convertQqqToNq(k, f, currentPrice, manualFactor, 0, calibrate);
+                const yK = safePriceToY(nqK);
+                if (yK !== null && !isNaN(yK) && yK >= 0 && yK <= cHeight) {
+                  const isMainStrike = (k % 5 === 0);
+                  ctx.strokeStyle = isMainStrike ? 'rgba(148, 163, 184, 0.28)' : 'rgba(100, 116, 139, 0.15)';
+                  ctx.lineWidth = isMainStrike ? 1.0 : 0.6;
+                  ctx.setLineDash(isMainStrike ? [] : [3, 3]);
+                  ctx.beginPath();
+                  ctx.moveTo(0, yK);
+                  ctx.lineTo(chartAreaWidth, yK);
+                  ctx.stroke();
+                  ctx.setLineDash([]);
+                }
+              }
+            }
+          }
+
+          // Desenhar cada linha agrupada
+          for (const g of groupedLevels) {
+            const nqPrice = convertQqqToNq(g.qqq, f, currentPrice, manualFactor, 0, calibrate);
+            if (nqPrice > 0) {
+              const y = safePriceToY(nqPrice);
+              if (y !== null && !isNaN(y) && y >= 0 && y <= cHeight) {
+                ctx.strokeStyle = g.color;
+                ctx.lineWidth = g.lineWidth;
+                ctx.setLineDash(g.lineStyle === 'dashed' ? [6, 4] : []);
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(chartAreaWidth, y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+              }
+            }
+          }
+        }
+
         ctx.restore();
       }
 
@@ -5553,6 +5709,81 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
               }
             }
           });
+        }
+      }
+
+      // Renderizar Rótulos do Indicador STRIKE_LEVELS (Gamma & Opções do Feed Grix)
+      if (effectiveShowStrikeLevels && marketMatrixFeedRef.current && labelsContainer) {
+        const f = marketMatrixFeedRef.current;
+        const params = strikeLevelsIndConfig?.params || {};
+        const currentPrice = (chartData && chartData.length > 0) ? chartData[chartData.length - 1].close : 0;
+        const manualFactor = Number(params.fatorManual) || 0;
+        const calibrate = params.calibrarPeloPreco !== false;
+
+        interface RawStrikeLvl {
+          name: string;
+          qqq: number;
+          color: string;
+          lineWidth: number;
+        }
+
+        const rawList: RawStrikeLvl[] = [];
+        if (params.showCallWall !== false && f.cw > 0) rawList.push({ name: 'Call Wall', qqq: f.cw, color: '#32cd32', lineWidth: 1.5 });
+        if (params.showPoc !== false && f.poc > 0) rawList.push({ name: 'POC', qqq: f.poc, color: '#f59e0b', lineWidth: 1.5 });
+        if (params.showPutWall !== false && f.pw > 0) rawList.push({ name: 'Put Wall', qqq: f.pw, color: '#ef4444', lineWidth: 1.5 });
+        if (params.showGammaWallSup !== false && f.gw_sup > 0) rawList.push({ name: 'Gamma Wall', qqq: f.gw_sup, color: '#3cb371', lineWidth: 1.2 });
+        if (params.showFlip !== false && f.flip > 0) rawList.push({ name: 'Flip Zone', qqq: f.flip, color: '#d1d5db', lineWidth: 1.2 });
+        if (params.showGammaWallInf !== false && f.gw_inf > 0) rawList.push({ name: 'Gamma Wall inf.', qqq: f.gw_inf, color: '#dc2626', lineWidth: 1.2 });
+        if (params.showSigma !== false) {
+          if (f.sigma_sup && f.sigma_sup > 0) rawList.push({ name: 'SIGMA ↑ venda', qqq: f.sigma_sup, color: '#ef4444', lineWidth: 1.8 });
+          if (f.sigma_inf && f.sigma_inf > 0) rawList.push({ name: 'SIGMA ↓ compra', qqq: f.sigma_inf, color: '#22c55e', lineWidth: 1.8 });
+        }
+        if (params.showHeatmap !== false) {
+          if (f.hm_oi_call && f.hm_oi_call > 0) rawList.push({ name: 'HM call (OI)', qqq: f.hm_oi_call, color: '#8fbc8f', lineWidth: 1.0 });
+          if (f.hm_oi_put && f.hm_oi_put > 0) rawList.push({ name: 'HM put (OI)', qqq: f.hm_oi_put, color: '#bc8f8f', lineWidth: 1.0 });
+          if (f.hm_oi_flip && f.hm_oi_flip > 0) rawList.push({ name: 'HM flip (OI)', qqq: f.hm_oi_flip, color: '#c0c0c0', lineWidth: 1.0 });
+          if (f.hm_vol_call && f.hm_vol_call > 0) rawList.push({ name: 'HM call (VOL)', qqq: f.hm_vol_call, color: '#7fffd4', lineWidth: 1.0 });
+          if (f.hm_vol_put && f.hm_vol_put > 0) rawList.push({ name: 'HM put (VOL)', qqq: f.hm_vol_put, color: '#fa8072', lineWidth: 1.0 });
+          if (f.hm_vol_flip && f.hm_vol_flip > 0) rawList.push({ name: 'HM flip (VOL)', qqq: f.hm_vol_flip, color: '#b0c4de', lineWidth: 1.0 });
+        }
+        if (params.showRange !== false) {
+          if (f.range_max && f.range_max > 0) rawList.push({ name: 'Range máx. (venda)', qqq: f.range_max, color: '#ee82ee', lineWidth: 1.6 });
+          if (f.range_min && f.range_min > 0) rawList.push({ name: 'Range mín. (compra)', qqq: f.range_min, color: '#ee82ee', lineWidth: 1.6 });
+        }
+
+        const groupedLevels: RawStrikeLvl[] = [];
+        for (const item of rawList) {
+          const ex = groupedLevels.find(x => Math.abs(x.qqq - item.qqq) < 0.005);
+          if (!ex) {
+            groupedLevels.push({ ...item });
+          } else {
+            ex.name += ` · ${item.name}`;
+            if (item.lineWidth > ex.lineWidth) {
+              ex.lineWidth = item.lineWidth;
+              ex.color = item.color;
+            }
+          }
+        }
+
+        // Traça os rótulos agrupados no canto direito do gráfico (estilo NinjaTrader)
+        groupedLevels.forEach((g, idx) => {
+          const nqPrice = convertQqqToNq(g.qqq, f, currentPrice, manualFactor, 0, calibrate);
+          if (nqPrice > 0) {
+            const y = safePriceToY(nqPrice);
+            if (y !== null && !isNaN(y) && y >= 0 && y <= containerEl.clientHeight) {
+              const labelText = `${g.name} QQQ ${g.qqq.toFixed(2)} | NQ ${nqPrice.toFixed(2)}`;
+              const styleStr = `position: absolute; right: ${effectivePriceScaleWidth + 8}px; top: ${y - 10}px; color: ${g.color}; font-size: 11px; font-family: 'JetBrains Mono', monospace; font-weight: bold; background: #090d16f0; padding: 2px 6px; border-radius: 3px; border: 1px solid ${g.color}70; line-height: 1; white-space: nowrap; box-shadow: 0 2px 5px rgba(0,0,0,0.7); z-index: 52;`;
+              upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `strike_lvl_${idx}`, labelText, false, styleStr);
+            }
+          }
+        });
+
+        // Rodapé do Feed Grix no canto inferior direito
+        if (params.showFeedStatus !== false) {
+          const feedTime = f.hora_et ? `${f.hora_et} ET` : 'ativo';
+          const feedFooterStyle = `position: absolute; right: ${effectivePriceScaleWidth + 12}px; bottom: 8px; font-size: 10px; font-family: 'JetBrains Mono', monospace; color: #94a3b8; background: rgba(9, 13, 22, 0.85); padding: 2px 7px; border-radius: 3px; border: 1px solid #334155; line-height: 1.2; z-index: 45; pointer-events: none;`;
+          const feedFooterText = `Feed Grix: dados ${feedTime} · QQQ ${f.qqq.toFixed(2)} (fator ${f.fator.toFixed(4)})`;
+          upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, 'strike_feed_footer', feedFooterText, false, feedFooterStyle);
         }
       }
 

@@ -1,4 +1,5 @@
 import type { IndicatorConfig } from '../utils/indicatorRegistry';
+import type { WidgetConfig } from '../utils/widgetRegistry';
 
 export type ChartLayoutType =
   | 'single'
@@ -38,6 +39,7 @@ export interface ChartSlotConfig {
   timeframe: number;
   historyDays?: number;
   indicators: IndicatorConfig[];
+  widgets?: WidgetConfig[];
   autoCenter: boolean;
   showTradeMarkers: boolean;
   showOrderLines?: boolean;

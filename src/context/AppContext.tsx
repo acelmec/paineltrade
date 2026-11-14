@@ -103,7 +103,7 @@ import {
   flattenAllNinjaAccounts,
   reconnectCloudChannel
 } from '../services/ninjaGateway';
-import { fetchStreamerMarketData } from '../services/vortexStreamer';
+import { fetchStreamerMarketData, isStreamerWsConnected } from '../services/vortexStreamer';
 import { PRESET_ATM_STRATEGIES, resolveAlgorithmAtm, type ATMStrategy, type ATMBracket } from '../utils/atmRegistry';
 
 function extractPriceActionFromCandles(candles: Candle[]) {
@@ -8905,12 +8905,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } else if (mode === 'local') {
         mData = await fetchLocalSinal();
       } else {
-        // Modo Híbrido: se o NinjaTrader local estiver transmitindo (:8002), usa a cotação real do gráfico local
-        const localStreamQuote = await fetchStreamerMarketData(targetPanel, targetSettings);
-        if (localStreamQuote) {
-          mData = localStreamQuote;
+        // Modo Híbrido: se o WebSocket do NinjaTrader local (:8002) estiver conectado, os dados já chegam por push (<1ms)!
+        // Evita chamadas HTTP contínuas redundantes a cada ciclo de relógio
+        if (isStreamerWsConnected() && cache.marketData) {
+          mData = cache.marketData;
         } else {
-          mData = await fetchMarketDataSupabase(instanceMarket);
+          const localStreamQuote = await fetchStreamerMarketData(targetPanel, targetSettings);
+          if (localStreamQuote) {
+            mData = localStreamQuote;
+          } else {
+            mData = await fetchMarketDataSupabase(instanceMarket);
+          }
         }
       }
 
@@ -9088,6 +9093,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const isPanelDisplayed = isActivePanelNow || isVisibleMultiPanel;
         const isInitialForPanel = !initialLoadedPanelsRef.current.has(targetPanel.id);
         const effectiveMaxLimit = isPanelDisplayed ? maxCandleLimit : Math.min(maxCandleLimit, 500);
+        const lastCandle = hasExisting && cache.candles && cache.candles.length > 0 ? cache.candles[cache.candles.length - 1] : null;
+        const deltaSince = (!isForced && hasExisting && !hasGap && !isInitialForPanel && lastCandle?.timestamp) ? lastCandle.timestamp : undefined;
         const queryLimit = (isForced || !hasExisting || (isInitialForPanel && isPanelDisplayed) || hasGap) ? effectiveMaxLimit : 50;
         const shouldShowSlotGauge = isPanelDisplayed && (!hasExisting || isInitialForPanel || isMissingHistory || queryLimit > 500);
 
@@ -9133,7 +9140,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 bumpPanelCacheVersion();
               }
             }
-          }
+          },
+          deltaSince
         ), 30000).then(candlesData => {
           if (candlesData && candlesData.length > 0) {
             if (isPanelDisplayed || candlesData.length >= maxCandleLimit) {
@@ -14684,6 +14692,100 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       window.removeEventListener('online', handleVisibilityChange);
     };
   }, [fetchReportsList]);
+
+  // =========================================================================
+  // MOTOR EVENT-DRIVEN EM TEMPO REAL (< 1ms) VIA WEBSOCKET DO NINJATRADER 8 (:8002)
+  // Desacopla a cotação e a proteção de ordens do timer de relógio (250ms/500ms)
+  // =========================================================================
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    let rafId: number | null = null;
+    let pendingUiAction: (() => void) | null = null;
+
+    const handleStreamerTick = (e: any) => {
+      const detail = e.detail;
+      if (!detail || !detail.price || detail.price <= 0) return;
+
+      const sym = (detail.symbol || '').toUpperCase();
+      const pan = (detail.panel || '').toUpperCase();
+      const numPrice = Number(detail.price);
+
+      // 1. Identificar o painel correspondente no cache
+      const currentPanels = allPanelsRef.current || [];
+      const matchedPanel = currentPanels.find((p: any) => {
+        const pName = (p.name || p.id || '').toUpperCase();
+        return (pan && pName.includes(pan)) || isMarketDataCompatibleWithPanel(p.name || p.id, sym);
+      });
+
+      if (!matchedPanel) return;
+
+      const cache = panelDataCache.current[matchedPanel.id];
+      if (!cache) return;
+
+      // 2. Atualização imediata do cache de MarketData
+      const mData: MarketData = {
+        symbol: sym,
+        price: String(numPrice),
+        zScore: 0,
+        atrRatio: 1.0,
+        estado: 'ONLINE',
+        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        sentiment: 50,
+        originalSentiment: 50,
+        delta: 0,
+        deltaRatio: 1.0,
+        buyVolume: 0,
+        sellVolume: 0,
+        printsPerSecond: 0,
+        blockTrades: cache.marketData?.blockTrades || [],
+        updated_at: detail.updated_at || new Date().toISOString()
+      };
+      cache.marketData = mData;
+
+      // 3. Atualização imediata do candle em formação (<1ms)
+      if (cache.candles && cache.candles.length > 0) {
+        const { updatedCandles, hasChanged, isNewBar } = applyRealtimePriceToCandles(cache.candles, numPrice, detail.updated_at);
+        if (hasChanged) {
+          cache.candles = updatedCandles;
+          const isActive = activePanelRef.current?.id === matchedPanel.id;
+          if (isActive) {
+            pendingUiAction = () => {
+              setMarketData(mData);
+              if (isNewBar) setCandles([...updatedCandles]);
+            };
+            if (!rafId) {
+              rafId = requestAnimationFrame(() => {
+                if (pendingUiAction) {
+                  pendingUiAction();
+                  pendingUiAction = null;
+                }
+                rafId = null;
+              });
+            }
+          }
+        }
+      }
+
+      // 4. Execução IMEDIATA de proteção de ordens (Stop Loss, Take Profit, Trailing Stop) no exato milissegundo do tick!
+      const hasOpenOps = reportsRef.current.some(r => r.status === 'Em Andamento' && (
+        r.panel_id === matchedPanel.id ||
+        (!r.panel_id && r.instance_id && r.instance_id === matchedPanel.instance_id) ||
+        (!r.panel_id && !r.instance_id && matchedPanel.id === 'default')
+      ));
+
+      if (hasOpenOps) {
+        const pSettings = allSettingsRef.current[matchedPanel.id] || {};
+        runMarketLogicForPanel(matchedPanel, pSettings, cache, mData, cache.forces || [], cache.gammaLevels || null);
+      }
+    };
+
+    window.addEventListener('vortex_streamer_tick', handleStreamerTick);
+    return () => {
+      window.removeEventListener('vortex_streamer_tick', handleStreamerTick);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, []);
 
   const [panelMode, setPanelModeState] = useState<'mode1' | 'mode2'>(() => {
     const saved = localStorage.getItem('vortex_panel_mode');

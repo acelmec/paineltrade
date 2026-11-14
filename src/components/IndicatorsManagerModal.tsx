@@ -1770,6 +1770,158 @@ export const IndicatorsManagerModal: React.FC<IndicatorsManagerModalProps> = ({
                     </button>
                   </div>
                 </div>
+
+                {/* 8. Market Matrix & Market Structure (Destaque Principal Grix) */}
+                <div className="bg-gradient-to-br from-amber-950/40 via-slate-900/90 to-slate-900/80 border-2 border-amber-500/60 hover:border-amber-400 p-4 rounded-xl flex flex-col justify-between transition group md:col-span-2 shadow-xl shadow-amber-950/20">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl">🎯</span>
+                        <div>
+                          <h5 className="text-sm font-black text-white group-hover:text-amber-300 transition flex items-center gap-1.5">
+                            <span>Market Matrix &amp; Market Structure</span>
+                            <span className="text-[10px] text-amber-400 font-mono bg-amber-950/80 border border-amber-500/40 px-1.5 py-0.5 rounded">NOVO</span>
+                          </h5>
+                          <span className="text-[11px] text-slate-400 font-mono">Painel institucional completo (Grix / NinjaTrader)</span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm">
+                        Gamma + MS + Gregas + Fluxo
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Painel completo de Exposição Gamma, Gregas, Estrutura de Mercado (QQQ e SPY), Fluxo institucional e Setup de Abertura em tempo real via NinjaFeed/Supabase.
+                    </p>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-amber-900/40 flex items-center justify-between">
+                    <span className="text-[11px] text-amber-300/80 font-mono flex items-center gap-1">
+                      <span>⚡</span>
+                      <span>Atualização em tempo real &lt;3s</span>
+                    </span>
+                    <button
+                      onClick={() => onAddWidget && onAddWidget('market_matrix', {}, '🎯 Market Matrix')}
+                      className="bg-amber-600 hover:bg-amber-500 text-slate-950 font-black text-xs px-4 py-2 rounded-lg transition active:scale-95 flex items-center gap-1.5 shadow-lg shadow-amber-950/60 cursor-pointer"
+                    >
+                      <span>➕ Inserir no Gráfico</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 9. Core Analytics */}
+                <div className="bg-slate-900/60 border border-slate-800 hover:border-slate-700 p-4 rounded-xl flex flex-col justify-between transition group">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-xl">📊</span>
+                      <h5 className="text-sm font-bold text-white group-hover:text-emerald-400 transition">
+                        Core Analytics
+                      </h5>
+                    </div>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Barras LED segmentadas para Analytics QQQ, Estrutura de Mercado QQQ/SPY e status de IA com glow ativo.
+                    </p>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-slate-800/80 flex justify-end">
+                    <button
+                      onClick={() => onAddWidget && onAddWidget('grix_analytics', {}, '📊 Core Analytics')}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg transition active:scale-95 flex items-center gap-1 shadow"
+                    >
+                      <span>➕ Inserir no Gráfico</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 10. Anchors SPY & QQQ */}
+                <div className="bg-slate-900/60 border border-slate-800 hover:border-slate-700 p-4 rounded-xl flex flex-col justify-between transition group">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-xl">🧭</span>
+                      <h5 className="text-sm font-bold text-white group-hover:text-emerald-400 transition">
+                        Anchors — SPY &amp; QQQ
+                      </h5>
+                    </div>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Velocímetros com ARO dinâmico verde/vermelho de SPY e QQQ com percentuais e sinais COMPRA/VENDA.
+                    </p>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-slate-800/80 flex justify-end">
+                    <button
+                      onClick={() => onAddWidget && onAddWidget('grix_anchors', {}, '🧭 Anchors — SPY & QQQ')}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg transition active:scale-95 flex items-center gap-1 shadow"
+                    >
+                      <span>➕ Inserir no Gráfico</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 11. Flow and Exposure */}
+                <div className="bg-slate-900/60 border border-slate-800 hover:border-slate-700 p-4 rounded-xl flex flex-col justify-between transition group">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-xl">🌊</span>
+                      <h5 className="text-sm font-bold text-white group-hover:text-cyan-400 transition">
+                        Flow &amp; Exposure
+                      </h5>
+                    </div>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      5 barras LED: Rho Index, Tail Risk, Volatility Smile QQQ/SPY e Net Gamma.
+                    </p>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-slate-800/80 flex justify-end">
+                    <button
+                      onClick={() => onAddWidget && onAddWidget('grix_flow', {}, '🌊 Flow & Exposure')}
+                      className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg transition active:scale-95 flex items-center gap-1 shadow"
+                    >
+                      <span>➕ Inserir no Gráfico</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 12. Stock Replacement */}
+                <div className="bg-slate-900/60 border border-slate-800 hover:border-slate-700 p-4 rounded-xl flex flex-col justify-between transition group">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-xl">🔄</span>
+                      <h5 className="text-sm font-bold text-white group-hover:text-emerald-400 transition">
+                        Stock Replacement (QQQ)
+                      </h5>
+                    </div>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Velocímetros com ARO dinâmico para estratégias de CALL e PUT com percentuais e sinais COMPRA/VENDA.
+                    </p>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-slate-800/80 flex justify-end">
+                    <button
+                      onClick={() => onAddWidget && onAddWidget('grix_stock_replacement', {}, '🔄 Stock Replacement (QQQ)')}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg transition active:scale-95 flex items-center gap-1 shadow"
+                    >
+                      <span>➕ Inserir no Gráfico</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 13. Projeções de Mercado */}
+                <div className="bg-slate-900/60 border border-violet-900/60 hover:border-violet-700/60 p-4 rounded-xl flex flex-col justify-between transition group md:col-span-2">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-xl">🔭</span>
+                      <h5 className="text-sm font-bold text-white group-hover:text-violet-400 transition">
+                        Projeções de Mercado
+                      </h5>
+                      <span className="text-[9px] font-bold bg-violet-600/30 border border-violet-500/40 text-violet-300 px-1.5 py-0.5 rounded uppercase tracking-wide">Novo</span>
+                    </div>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Painel com 3 abas: Projeção técnica do NQ/QQQ, Resumo analítico completo e Viés de Mercado (Altista, Baixista, Neutro, Misto, Volátil).
+                    </p>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-slate-800/80 flex justify-end">
+                    <button
+                      onClick={() => onAddWidget && onAddWidget('projecao_mercado', {}, '🔭 Projeções de Mercado')}
+                      className="bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg transition active:scale-95 flex items-center gap-1 shadow"
+                    >
+                      <span>➕ Inserir no Gráfico</span>
+                    </button>
+                  </div>
+                </div>
               </div>
 
               {/* Active Widgets on Chart Section */}

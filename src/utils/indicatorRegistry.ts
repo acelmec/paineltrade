@@ -1177,6 +1177,29 @@ export const INDICATOR_DEFINITIONS: Record<string, IndicatorDefinition> = {
     ],
     defaultStyle: { color: '#06b6d4', lineWidth: 2, lineStyle: 'solid', secondaryColor: '#f97316' }
   },
+  STRIKE_LEVELS: {
+    type: 'STRIKE_LEVELS',
+    name: 'Strike Levels (Níveis Gamma & Opções)',
+    category: 'Níveis',
+    description: 'Traça no gráfico as referências institucionais de Opções/Gamma (Call Wall, Put Wall, POC, Flip, Gamma Walls, Heatmap OI/VOL e Sigma) convertidas de QQQ para pontos do NQ.',
+    overlay: true,
+    paramDefs: [
+      { key: 'showCallWall', label: 'Call Wall (Resistência Gamma Máxima)', type: 'boolean', default: true },
+      { key: 'showPutWall', label: 'Put Wall (Suporte Gamma Máximo)', type: 'boolean', default: true },
+      { key: 'showPoc', label: 'POC (Point of Control Gamma)', type: 'boolean', default: true },
+      { key: 'showFlip', label: 'Flip Zone (Transição de Volatilidade)', type: 'boolean', default: true },
+      { key: 'showGammaWallSup', label: 'Gamma Wall Superior', type: 'boolean', default: true },
+      { key: 'showGammaWallInf', label: 'Gamma Wall Inferior', type: 'boolean', default: true },
+      { key: 'showHeatmap', label: 'Níveis Heatmap (OI & Volume)', type: 'boolean', default: true },
+      { key: 'showSigma', label: 'Níveis Sigma (+1σ / -1σ)', type: 'boolean', default: true },
+      { key: 'showRange', label: 'Range Máx / Mín', type: 'boolean', default: true },
+      { key: 'showStrikes', label: 'Strikes cheios de QQQ (a cada $1)', type: 'boolean', default: false },
+      { key: 'showFeedStatus', label: 'Status do Feed no Rodapé do Gráfico', type: 'boolean', default: true },
+      { key: 'calibrarPeloPreco', label: 'Calibração Automática pelo Preço', type: 'boolean', default: true },
+      { key: 'fatorManual', label: 'Fator Manual QQQ -> NQ (0 = Automático)', type: 'number', default: 0, min: 0, max: 100, step: 0.01 }
+    ],
+    defaultStyle: { color: '#f59e0b', lineWidth: 1, lineStyle: 'dashed' }
+  },
   GammaLevels: {
     type: 'GammaLevels',
     name: 'Níveis Gamma Completos (Legado)',

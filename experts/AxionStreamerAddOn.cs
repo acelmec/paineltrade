@@ -407,6 +407,8 @@ namespace NinjaTrader.NinjaScript.AddOns
         {
             public WebSocket Socket { get; set; }
             public SemaphoreSlim SendLock { get; } = new SemaphoreSlim(1, 1);
+            public ConcurrentQueue<ArraySegment<byte>> PendingQueue { get; } = new ConcurrentQueue<ArraySegment<byte>>();
+            public int IsSending = 0;
         }
 
         private static readonly ConcurrentDictionary<string, WsClient> _wsClients =
@@ -423,6 +425,12 @@ namespace NinjaTrader.NinjaScript.AddOns
             public double low;
             public double close;
             public long volume;
+
+            public string Timestamp
+            {
+                get { return timestamp; }
+                set { timestamp = value; }
+            }
         }
 
         public class BlockTradeItem
@@ -642,6 +650,30 @@ namespace NinjaTrader.NinjaScript.AddOns
             }
         }
 
+        public static bool IsPlaybackActive()
+        {
+            try
+            {
+                if (Connection.PlaybackConnection != null && Connection.PlaybackConnection.Status == ConnectionStatus.Connected)
+                {
+                    return true;
+                }
+
+                foreach (var conn in Connection.Connections)
+                {
+                    if (conn != null && conn.Status == ConnectionStatus.Connected)
+                    {
+                        if (conn.Options != null && (conn.Options.Name == "Playback Connection" || conn.Options.Name.IndexOf("Playback", StringComparison.OrdinalIgnoreCase) >= 0))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
         public static void StartServer(int port)
         {
             lock (_serverLock)
@@ -801,29 +833,51 @@ namespace NinjaTrader.NinjaScript.AddOns
             foreach (var kvp in _wsClients)
             {
                 var client = kvp.Value;
-                if (client != null && client.Socket.State == WebSocketState.Open)
+                if (client != null && client.Socket != null && client.Socket.State == WebSocketState.Open)
                 {
-                    Task.Run(async () =>
+                    // Enfileiramento não-bloqueante (Mailbox Pattern): evita saturação de Tasks no ThreadPool
+                    client.PendingQueue.Enqueue(segment);
+                    while (client.PendingQueue.Count > 100 && client.PendingQueue.TryDequeue(out _)) { }
+
+                    if (Interlocked.CompareExchange(ref client.IsSending, 1, 0) == 0)
                     {
-                        try
+                        Task.Run(async () =>
                         {
-                            if (await client.SendLock.WaitAsync(50))
+                            try
                             {
-                                try
+                                while (client.Socket.State == WebSocketState.Open && client.PendingQueue.TryDequeue(out var seg))
                                 {
-                                    if (client.Socket.State == WebSocketState.Open)
-                                    {
-                                        await client.Socket.SendAsync(segment, WebSocketMessageType.Text, true, CancellationToken.None);
-                                    }
-                                }
-                                finally
-                                {
-                                    client.SendLock.Release();
+                                    await client.Socket.SendAsync(seg, WebSocketMessageType.Text, true, CancellationToken.None);
                                 }
                             }
-                        }
-                        catch { }
-                    });
+                            catch { }
+                            finally
+                            {
+                                Interlocked.Exchange(ref client.IsSending, 0);
+                                if (!client.PendingQueue.IsEmpty && client.Socket.State == WebSocketState.Open)
+                                {
+                                    if (Interlocked.CompareExchange(ref client.IsSending, 1, 0) == 0)
+                                    {
+                                        Task.Run(async () =>
+                                        {
+                                            try
+                                            {
+                                                while (client.Socket.State == WebSocketState.Open && client.PendingQueue.TryDequeue(out var seg))
+                                                {
+                                                    await client.Socket.SendAsync(seg, WebSocketMessageType.Text, true, CancellationToken.None);
+                                                }
+                                            }
+                                            catch { }
+                                            finally
+                                            {
+                                                Interlocked.Exchange(ref client.IsSending, 0);
+                                            }
+                                        });
+                                    }
+                                }
+                            }
+                        });
+                    }
                 }
             }
         }
@@ -865,6 +919,9 @@ namespace NinjaTrader.NinjaScript.AddOns
                     var sb = new StringBuilder();
                     sb.Append("{\"status\":\"online\",\"version\":\"2.0.0-addon\",\"service\":\"AxionStreamerAddOn\",");
                     sb.Append("\"license_status\":\"").Append(AxionStreamerLicenseManager.IsLicensed ? "active" : "inactive").Append("\",");
+                    bool isPlayback = IsPlaybackActive();
+                    sb.Append("\"is_playback\":").Append(isPlayback ? "true" : "false").Append(",");
+                    sb.Append("\"playback_status\":\"").Append(isPlayback ? "Connected" : "Disconnected").Append("\",");
                     sb.Append("\"active_streams\":[");
 
                     lock (_serverLock)
@@ -881,6 +938,17 @@ namespace NinjaTrader.NinjaScript.AddOns
 
                         foreach (var s in uniqueList)
                         {
+                            string firstCandleTime = "";
+                            string lastCandleTime = "";
+                            lock (s.DataLock)
+                            {
+                                if (s.Candles.Count > 0)
+                                {
+                                    firstCandleTime = s.Candles[0].timestamp;
+                                    lastCandleTime = s.Candles[s.Candles.Count - 1].timestamp;
+                                }
+                            }
+
                             if (idx > 0) sb.Append(",");
                             sb.Append("{\"symbol\":\"").Append(s.RootSymbol).Append("\",")
                               .Append("\"panel\":\"").Append(s.TargetPanel).Append("\",")
@@ -889,6 +957,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                               .Append("\"bars_count\":").Append(s.Candles.Count).Append(",")
                               .Append("\"block_trades_count\":").Append(s.BlockTrades.Count).Append(",")
                               .Append("\"last_price\":").Append(s.CurrentPrice.ToString("F2", CultureInfo.InvariantCulture)).Append(",")
+                              .Append("\"first_candle_time\":\"").Append(firstCandleTime).Append("\",")
+                              .Append("\"last_candle_time\":\"").Append(lastCandleTime).Append("\",")
                               .Append("\"updated_at\":\"").Append(s.LastUpdateUtc.ToString("o")).Append("\"}");
                             idx++;
                         }

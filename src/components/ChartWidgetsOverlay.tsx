@@ -15,37 +15,78 @@ import {
 } from './GrixCards';
 import { GammaQuantMapView } from './GammaQuantMapView';
 import { WyckoffStructuralRadarView } from './WyckoffStructuralRadarView';
+import { MarketMatrixWidget } from './MarketMatrixWidget';
+import {
+  subscribeMarketMatrix,
+  getCachedMarketMatrixData,
+  convertMarketMatrixToOptionsMarket,
+  type MarketMatrixData
+} from '../services/marketMatrixService';
 
 interface ChartWidgetsOverlayProps {
   widgets: WidgetConfig[];
   onUpdateWidget: (updated: WidgetConfig) => void;
   onRemoveWidget: (id: string) => void;
   containerRef: React.RefObject<HTMLDivElement | null>;
+  overrideMarketData?: any | null;
+  overrideForces?: any[] | null;
+  overrideGammaLevels?: any | null;
+  overrideAxionRadar?: any | null;
+  isReplayMode?: boolean;
 }
 
 export const ChartWidgetsOverlay: React.FC<ChartWidgetsOverlayProps> = ({
   widgets,
   onUpdateWidget,
   onRemoveWidget,
-  containerRef
+  containerRef,
+  overrideMarketData,
+  overrideForces,
+  overrideGammaLevels,
+  overrideAxionRadar,
+  isReplayMode = false
 }) => {
-  const {
-    marketData,
-    activePanel,
-    settings,
-    forces,
-    forcesConfig,
-    toggleForceConfig,
-    gammaLevels,
-    optionsMarket,
-    windowMinutes,
-    setWindowMinutes,
-    windowBaseline
-  } = useApp()!
+  const appContext = useApp();
+  const liveMarketData = appContext?.marketData;
+  const activePanel = appContext?.activePanel;
+  const settings = appContext?.settings;
+  const liveForces = appContext?.forces;
+  const forcesConfig = appContext?.forcesConfig;
+  const toggleForceConfig = appContext?.toggleForceConfig;
+  const liveGammaLevels = appContext?.gammaLevels;
+  const optionsMarket = appContext?.optionsMarket;
+  const windowMinutes = appContext?.windowMinutes;
+  const setWindowMinutes = appContext?.setWindowMinutes;
+  const windowBaseline = appContext?.windowBaseline;
+
+  // Integração com feed em tempo real do NinjaFeed / Grix (MarketMatrixService)
+  const [liveMatrixData, setLiveMatrixData] = useState<MarketMatrixData | null>(getCachedMarketMatrixData());
+
+  useEffect(() => {
+    const unsub = subscribeMarketMatrix((data) => {
+      setLiveMatrixData(data);
+    });
+    return () => unsub();
+  }, []);
+
+  // Se houver feed da Grix ativo, converte para OptionsMarketData automaticamente (fallback para banco se ausente)
+  const effectiveOptionsMarket = React.useMemo(() => {
+    if (liveMatrixData) {
+      return convertMarketMatrixToOptionsMarket(liveMatrixData);
+    }
+    return optionsMarket;
+  }, [liveMatrixData, optionsMarket]);
+
+  // Resolução dinâmica: se estiver em Replay, prioriza overrides dos dados históricos simulados
+  const marketData = overrideMarketData !== undefined ? overrideMarketData : liveMarketData;
+  const forces = overrideForces !== undefined ? overrideForces : liveForces;
+  const gammaLevels = overrideGammaLevels !== undefined ? overrideGammaLevels : liveGammaLevels;
 
   // Block Trades em tempo real alimentados ativamente do NinjaTrader 8 local (:8002)
   const [nt8BlockTrades, setNt8BlockTrades] = useState<BlockTrade[]>([]);
   useEffect(() => {
+    if (isReplayMode) return; // No modo Replay, não faz polling de trades em tempo real do NT8
+
     let isSubscribed = true;
 
     const pollLocalTrades = async () => {
@@ -77,7 +118,7 @@ export const ChartWidgetsOverlay: React.FC<ChartWidgetsOverlayProps> = ({
       clearInterval(interval);
       window.removeEventListener('vortex_local_block_trade', handleLocalTrade);
     };
-  }, [activePanel, settings]);
+  }, [activePanel, settings, isReplayMode]);
 
   // Active dragging state
   const [draggingWidgetId, setDraggingWidgetId] = useState<string | null>(null);
@@ -102,6 +143,8 @@ export const ChartWidgetsOverlay: React.FC<ChartWidgetsOverlayProps> = ({
   });
 
   useEffect(() => {
+    if (isReplayMode) return; // No modo Replay, usa overrideAxionRadar gerado pelos candles históricos
+
     const updateRadar = () => {
       const fromWindow = typeof window !== 'undefined' ? (window as any).__vortex_axion_ml_radar : null;
       if (fromWindow) {
@@ -124,7 +167,9 @@ export const ChartWidgetsOverlay: React.FC<ChartWidgetsOverlayProps> = ({
 
     const interval = setInterval(updateRadar, 300);
     return () => clearInterval(interval);
-  }, []);
+  }, [isReplayMode]);
+
+  const effectiveAxionRadar = overrideAxionRadar !== undefined ? overrideAxionRadar : liveAxionRadar;
 
   // Handle Dragging with Window Event Listeners for smooth & 100% reliable tracking
   const handlePointerDown = (e: React.PointerEvent, widget: WidgetConfig) => {
@@ -1004,35 +1049,35 @@ export const ChartWidgetsOverlay: React.FC<ChartWidgetsOverlayProps> = ({
                 {/* 8. GRIX CORE ANALYTICS */}
                 {widget.type === 'grix_analytics' && (
                   <div className="w-[230px]">
-                    <GrixCoreAnalyticsView data={optionsMarket} />
+                    <GrixCoreAnalyticsView data={effectiveOptionsMarket} />
                   </div>
                 )}
 
                 {/* 9. GRIX ANCHORS */}
                 {widget.type === 'grix_anchors' && (
                   <div className="w-[230px]">
-                    <GrixAnchorsView data={optionsMarket} />
+                    <GrixAnchorsView data={effectiveOptionsMarket} />
                   </div>
                 )}
 
                 {/* 10. GRIX FLOW AND EXPOSURE */}
                 {widget.type === 'grix_flow' && (
                   <div className="w-[230px]">
-                    <GrixFlowExposureView data={optionsMarket} />
+                    <GrixFlowExposureView data={effectiveOptionsMarket} />
                   </div>
                 )}
 
                 {/* 11. Stock Replacement (QQQ) */}
                 {widget.type === 'grix_stock_replacement' && (
                   <div className="w-[230px]">
-                    <GrixStockReplacementView data={optionsMarket} />
+                    <GrixStockReplacementView data={effectiveOptionsMarket} />
                   </div>
                 )}
 
                 {/* 12. Projeções de Mercado */}
                 {widget.type === 'projecao_mercado' && (
                   <div className="w-[260px] min-h-[180px]">
-                    <ProjecaoView data={optionsMarket} />
+                    <ProjecaoView data={effectiveOptionsMarket} />
                   </div>
                 )}
 
@@ -1040,7 +1085,7 @@ export const ChartWidgetsOverlay: React.FC<ChartWidgetsOverlayProps> = ({
                 {widget.type === 'axion_ml_radar' && (
                   <div className="w-[284px] max-w-[284px] box-border overflow-hidden font-mono text-slate-300">
                     {(() => {
-                      const radar = liveAxionRadar;
+                      const radar = effectiveAxionRadar;
                       if (!radar) {
                         return (
                           <div className="py-4 text-center text-xs text-slate-500 font-sans">
@@ -1205,6 +1250,14 @@ export const ChartWidgetsOverlay: React.FC<ChartWidgetsOverlayProps> = ({
                         params: { ...widget.params, selectedStudyId: id }
                       });
                     }}
+                  />
+                )}
+
+                {/* 16. MARKET MATRIX (GRIX PANEL) */}
+                {widget.type === 'market_matrix' && (
+                  <MarketMatrixWidget
+                    opacity={widget.opacity}
+                    params={widget.params}
                   />
                 )}
               </div>

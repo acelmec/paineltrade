@@ -22,12 +22,13 @@ import type { DrawingItem, DrawingToolType } from '../types/chartDrawings';
 import { evaluateDrawingTrigger } from '../utils/drawingEngine';
 import { calculateTradeManagement } from '../utils/levelPriceResolver';
 import { resolveAlgorithmAtm, type ATMStrategy, type ATMBracket } from '../utils/atmRegistry';
-import type { Candle, GammaLevels, FetchProgressInfo } from '../services/db';
+import type { Candle, GammaLevels, FetchProgressInfo, MarketData, ReplayForceItem } from '../services/db';
 import { getRawSystemTime } from '../utils/date';
 import {
   fetchAvailableCandleDateBoundsSupabase,
   fetchCandlesByDateRangeSupabase,
   fetchGammaLevelsForRangeSupabase,
+  fetchForcesForRangeSupabase,
   fetchNewsForRangeSupabase,
   parseGammaLevelRecord
 } from '../services/db';
@@ -44,7 +45,10 @@ import {
   checkReplayOperationalLimits,
   evaluateReplayRobot,
   resetReplaySequenceStates,
-  calculateIntraCandleSimulatedState
+  calculateIntraCandleSimulatedState,
+  getReplayForcesAtTime,
+  calculateReplayMarketData,
+  calculateReplayAxionRadar
 } from '../utils/replayEngine';
 
 function subtractDaysFromISO(dateISO: string, days: number): string {
@@ -156,6 +160,7 @@ export const ReplayWorkstation: React.FC = () => {
   });
   const [isStreamerOnline, setIsStreamerOnline] = useState<boolean>(false);
   const [streamerBarsCount, setStreamerBarsCount] = useState<number>(0);
+  const [isNinjaPlaybackActive, setIsNinjaPlaybackActive] = useState<boolean>(false);
 
   useEffect(() => {
     localStorage.setItem('vortex_replay_data_source', dataSource);
@@ -170,11 +175,13 @@ export const ReplayWorkstation: React.FC = () => {
         if (isMounted) {
           setIsStreamerOnline(info.isLocal);
           setStreamerBarsCount(info.stream?.bars_count || 0);
+          setIsNinjaPlaybackActive(info.isPlayback);
         }
       } catch {
         if (isMounted) {
           setIsStreamerOnline(false);
           setStreamerBarsCount(0);
+          setIsNinjaPlaybackActive(false);
         }
       }
     };
@@ -239,6 +246,12 @@ export const ReplayWorkstation: React.FC = () => {
   const [gammaLevels, setGammaLevels] = useState<GammaLevels | null>(null);
   const allGammaLevelsRef = useRef<any[]>([]);
   const [newsList, setNewsList] = useState<any[]>([]);
+
+  // Estados e refs de dados simulados para alimentar os Widgets flutuantes no Replay
+  const allReplayForcesRef = useRef<ReplayForceItem[]>([]);
+  const [replayForces, setReplayForces] = useState<any[] | null>(null);
+  const [replayMarketData, setReplayMarketData] = useState<MarketData | null>(null);
+  const [replayAxionRadar, setReplayAxionRadar] = useState<any | null>(null);
 
   // 4. Execução / Playback do Replay
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -667,8 +680,8 @@ export const ReplayWorkstation: React.FC = () => {
     resetPosition = true
   ) => {
     // Saneia caso o clique do botão passe um SyntheticEvent
-    const sDate = (typeof overrideStartDate === 'string' && overrideStartDate.trim() ? overrideStartDate.trim() : startDate);
-    const eDate = (typeof overrideEndDate === 'string' && overrideEndDate.trim() ? overrideEndDate.trim() : endDate);
+    let sDate = (typeof overrideStartDate === 'string' && overrideStartDate.trim() ? overrideStartDate.trim() : startDate);
+    let eDate = (typeof overrideEndDate === 'string' && overrideEndDate.trim() ? overrideEndDate.trim() : endDate);
     if (!sDate || !eDate) return;
 
     const reqId = ++loadRequestIdRef.current;
@@ -693,30 +706,33 @@ export const ReplayWorkstation: React.FC = () => {
       let effectiveSource: 'local' | 'supabase' = dataSource;
 
       if (dataSource === 'local') {
+        // No modo Add-on Local, consulta primeiro o pool ativo do NinjaTrader para auto-detectar o dia do Replay
         setLoadingProgress({
-          percent: 25,
+          percent: 30,
           loadedRows: 0,
           totalRows: 0,
           message: 'Consultando Add-on Local NT8 (:8002)...'
         });
-        addReplayLog('SISTEMA', `🔍 Consultando Add-on Local NT8 (:8002) para ${activePanel?.name || 'NQ'} (${sDate} até ${eDate})...`);
-        fetchedCandles = await fetchStreamerHistoricalCandles(activePanel, startISO, endISO, settings, true);
+        addReplayLog('SISTEMA', `🔍 Consultando Add-on Local NT8 (:8002) para ${activePanel?.name || 'NQ'}...`);
+        
+        const allStreamCandles = await fetchStreamerHistoricalCandles(activePanel, undefined, undefined, settings, true);
         if (reqId !== loadRequestIdRef.current) return;
 
-        // Se não retornou filtrado por range, tenta pegar o pool completo de candles do streamer
-        if (!fetchedCandles || fetchedCandles.length === 0) {
-          setLoadingProgress({
-            percent: 45,
-            loadedRows: 0,
-            totalRows: 0,
-            message: 'Buscando pool de velas da memória do NT8...'
-          });
-          const allStreamCandles = await fetchStreamerHistoricalCandles(activePanel, undefined, undefined, settings, true);
+        if (allStreamCandles && allStreamCandles.length > 0) {
+          fetchedCandles = allStreamCandles;
+          const detectedStart = allStreamCandles[0].timestamp.split('T')[0];
+          const detectedEnd = allStreamCandles[allStreamCandles.length - 1].timestamp.split('T')[0];
+          setStartDate(detectedStart);
+          setEndDate(detectedEnd);
+          sDate = detectedStart;
+          eDate = detectedEnd;
+          localStorage.setItem('vortex_replay_start_date', detectedStart);
+          localStorage.setItem('vortex_replay_end_date', detectedEnd);
+          addReplayLog('SISTEMA', `🎮 Sincronizado com o NinjaTrader 8: ${allStreamCandles.length} velas do pregão de ${detectedStart}.`);
+        } else {
+          // Se não encontrou no pool direto, tenta buscar por range
+          fetchedCandles = await fetchStreamerHistoricalCandles(activePanel, startISO, endISO, settings, true);
           if (reqId !== loadRequestIdRef.current) return;
-          if (allStreamCandles && allStreamCandles.length > 0) {
-            fetchedCandles = allStreamCandles;
-            addReplayLog('SISTEMA', `ℹ️ Utilizando ${allStreamCandles.length} velas disponíveis na memória do NinjaTrader 8.`);
-          }
         }
 
         if (fetchedCandles && fetchedCandles.length > 0) {
@@ -795,6 +811,9 @@ export const ReplayWorkstation: React.FC = () => {
           }
         }
         finalIdx = Math.max(startIdx, Math.min(fetchedCandles.length - 1, closestIdx));
+      } else if (effectiveSource === 'local') {
+        // No modo Add-on Local, o replay se posiciona na barra mais recente que o NinjaTrader emitiu
+        finalIdx = fetchedCandles.length - 1;
       } else if (!resetPosition) {
         const savedCandleIdx = localStorage.getItem('vortex_replay_current_index');
         const restoredCandleIdx = savedCandleIdx !== null ? Number(savedCandleIdx) : startIdx;
@@ -823,7 +842,13 @@ export const ReplayWorkstation: React.FC = () => {
       setFitChartTrigger(prev => prev + 1);
       setIsLoadingData(false);
 
-      // Carregar Níveis Gamma e Notícias em segundo plano sem bloquear a liberação do gráfico de Replay
+      // Sincronização inicial imediata dos widgets com base nos candles carregados
+      if (initialCandle) {
+        const tMs = new Date(initialCandle.timestamp).getTime();
+        syncReplayWidgetData(finalIdx, Number(initialCandle.close), tMs, 0);
+      }
+
+      // Carregar Níveis Gamma, Forças Históricas (1m) e Notícias em segundo plano
       fetchGammaLevelsForRangeSupabase(targetInstance, startISO, endISO).then(gammas => {
         if (reqId !== loadRequestIdRef.current) return;
         allGammaLevelsRef.current = gammas || [];
@@ -831,6 +856,18 @@ export const ReplayWorkstation: React.FC = () => {
           setGammaLevels(parseGammaLevelRecord(gammas[0]));
         }
       }).catch(err => console.warn('Erro ao carregar níveis gamma no replay:', err));
+
+      fetchForcesForRangeSupabase(targetInstance, startISO, endISO).then(forcesData => {
+        if (reqId !== loadRequestIdRef.current) return;
+        allReplayForcesRef.current = forcesData || [];
+        if (forcesData && forcesData.length > 0) {
+          addReplayLog('SISTEMA', `💪 ${forcesData.length} registros de Força Momentum (1m) carregados para sincronização nos Widgets.`);
+        }
+        if (initialCandle) {
+          const tMs = new Date(initialCandle.timestamp).getTime();
+          syncReplayWidgetData(finalIdx, Number(initialCandle.close), tMs, 0);
+        }
+      }).catch(err => console.warn('Erro ao carregar histórico de forças no replay:', err));
 
       fetchNewsForRangeSupabase(startISO, endISO).then(newsData => {
         if (reqId !== loadRequestIdRef.current) return;
@@ -898,6 +935,23 @@ export const ReplayWorkstation: React.FC = () => {
     return aggregateReplayCandles(combinedSlice, timeframe);
   }, [rawCandles, currentCandleIndex, currentFormingCandle, timeframe]);
 
+  // Sincroniza em tempo real os dados históricos para os Widgets flutuantes (Força, Acelerômetro, Sentimento, Delta, ML Radar)
+  const syncReplayWidgetData = useCallback((idx: number, simPrice: number, simTimeMs: number, sec: number) => {
+    const candlesList = rawCandlesRef.current;
+    if (candlesList.length === 0 || idx < 0 || idx >= candlesList.length) return;
+
+    const slice = candlesList.slice(0, idx + 1);
+    const currentF = getReplayForcesAtTime(allReplayForcesRef.current, simTimeMs);
+    setReplayForces(currentF);
+
+    const sym = activePanelRef.current?.symbol || 'NQ';
+    const simMarketData = calculateReplayMarketData(slice, simPrice, currentF, sym, sec);
+    setReplayMarketData(simMarketData);
+
+    const simRadar = calculateReplayAxionRadar(slice, simPrice, gammaLevelsRef.current);
+    setReplayAxionRadar(simRadar);
+  }, []);
+
   // Avançar Segundo a Segundo (1x = 1s de mercado a cada 1s real com oscilação fractal e ruído orgânico)
   const advanceReplaySeconds = useCallback((deltaSeconds: number) => {
     const candlesList = rawCandlesRef.current;
@@ -940,8 +994,9 @@ export const ReplayWorkstation: React.FC = () => {
     const isFastSpeed = speedRef.current >= 50 || deltaSeconds >= 60;
     const finalFormingCandle = isFastSpeed ? { ...currentCandle } : formingCandle;
 
-    setCurrentPrice(isFastSpeed ? currentCandle.close : simulatedPrice);
-    currentPriceRef.current = isFastSpeed ? currentCandle.close : simulatedPrice;
+    const activePrice = isFastSpeed ? Number(currentCandle.close) : simulatedPrice;
+    setCurrentPrice(activePrice);
+    currentPriceRef.current = activePrice;
     setCurrentFormingCandle(finalFormingCandle);
 
     // Calcular Data/Hora exata com segundos
@@ -949,6 +1004,9 @@ export const ReplayWorkstation: React.FC = () => {
     const simulatedDate = new Date(baseTimeMs + sec * 1000);
     const formattedTime = simulatedDate.toLocaleString('pt-BR');
     setCurrentSimulatedTime(formattedTime);
+
+    // Sincronizar dados históricos dos Widgets flutuantes (Força de Momentum, Z-Score, ATR Ratio, Sentimento, Delta, ML Radar)
+    syncReplayWidgetData(idx, activePrice, simulatedDate.getTime(), sec);
 
     // 1. Checagem de Ordens Pendentes (Executar Limit / Stop ao toque)
     const currentOrders = [...ordersRef.current];
@@ -1373,8 +1431,120 @@ export const ReplayWorkstation: React.FC = () => {
     }
   }, [addReplayLog]);
 
+  // Sincronização em tempo real quando operando via NinjaTrader Playback Connection
+  useEffect(() => {
+    if (dataSource !== 'local' || !isNinjaPlaybackActive) return;
+
+    let isSubscribed = true;
+
+    const handleStreamerTick = (e: any) => {
+      if (!isSubscribed || !e.detail) return;
+      const tick = e.detail;
+      const sym = (tick.symbol || '').toUpperCase();
+      const currentSym = (activePanelRef.current?.symbol || 'NQ').toUpperCase();
+      if (sym && currentSym && !sym.includes(currentSym) && !currentSym.includes(sym)) return;
+
+      const price = Number(tick.price || 0);
+      if (price <= 0) return;
+
+      setCurrentPrice(price);
+      currentPriceRef.current = price;
+
+      const rawTime = tick.timestamp || new Date().toISOString();
+      const d = new Date(rawTime);
+      if (!isNaN(d.getTime())) {
+        setCurrentSimulatedTime(d.toLocaleString('pt-BR'));
+      }
+
+      // Atualiza a vela em formação viva
+      setCurrentFormingCandle(prev => {
+        if (!prev) {
+          return {
+            timestamp: rawTime,
+            open: Number(tick.open || price),
+            high: Math.max(Number(tick.high || price), price),
+            low: Math.min(Number(tick.low || price), price),
+            close: price,
+            volume: Number(tick.volume || 1)
+          };
+        }
+        return {
+          ...prev,
+          high: Math.max(prev.high, price),
+          low: Math.min(prev.low, price),
+          close: price,
+          volume: Number(tick.volume || prev.volume || 1)
+        };
+      });
+
+      // Se for uma barra fechada emitida pelo NinjaTrader
+      if (tick.isBar && rawCandlesRef.current.length > 0) {
+        const lastCandle = rawCandlesRef.current[rawCandlesRef.current.length - 1];
+        if (!lastCandle || lastCandle.timestamp !== tick.timestamp) {
+          const newBar: Candle = {
+            timestamp: tick.timestamp,
+            open: Number(tick.open || price),
+            high: Number(tick.high || price),
+            low: Number(tick.low || price),
+            close: Number(tick.close || price),
+            volume: Number(tick.volume || 0)
+          };
+          setRawCandles(prev => [...prev, newBar]);
+          rawCandlesRef.current = [...rawCandlesRef.current, newBar];
+          const newIdx = rawCandlesRef.current.length - 1;
+          setCurrentCandleIndex(newIdx);
+          currentCandleIndexRef.current = newIdx;
+        }
+      }
+
+      const curIdx = currentCandleIndexRef.current;
+      syncReplayWidgetData(curIdx, price, d.getTime(), isNaN(d.getSeconds()) ? 0 : d.getSeconds());
+    };
+
+    window.addEventListener('vortex_streamer_tick', handleStreamerTick);
+
+    // Polling de sincronização de barras consolidadas a cada 1.2s
+    const pollInterval = setInterval(async () => {
+      try {
+        const latestCandles = await fetchStreamerHistoricalCandles(activePanelRef.current, undefined, undefined, settingsRef.current, true);
+        if (isSubscribed && latestCandles && latestCandles.length > 0) {
+          const currentCount = rawCandlesRef.current.length;
+          if (latestCandles.length !== currentCount) {
+            setRawCandles(latestCandles);
+            rawCandlesRef.current = latestCandles;
+            const newIdx = latestCandles.length - 1;
+            setCurrentCandleIndex(newIdx);
+            currentCandleIndexRef.current = newIdx;
+            const lastC = latestCandles[newIdx];
+            setCurrentPrice(Number(lastC.close));
+            currentPriceRef.current = Number(lastC.close);
+            const dt = new Date(lastC.timestamp);
+            setCurrentSimulatedTime(dt.toLocaleString('pt-BR'));
+            syncReplayWidgetData(newIdx, Number(lastC.close), dt.getTime(), 0);
+          }
+        }
+      } catch {}
+    }, 1200);
+
+    return () => {
+      isSubscribed = false;
+      window.removeEventListener('vortex_streamer_tick', handleStreamerTick);
+      clearInterval(pollInterval);
+    };
+  }, [dataSource, isNinjaPlaybackActive, syncReplayWidgetData]);
+
   // Intervalo do Timer: Dispara a cada 100ms acumulando deltaSeconds = (speed * 0.1)
   useEffect(() => {
+    // Se o Replay estiver no modo Add-on Local com Playback do NinjaTrader ativo,
+    // o avanço temporal é 100% governado pelo próprio NinjaTrader!
+    if (dataSource === 'local' && isNinjaPlaybackActive) {
+      if (replayTimerRef.current) {
+        clearInterval(replayTimerRef.current);
+        replayTimerRef.current = null;
+      }
+      return;
+    }
+
     if (isPlaying) {
       replayTimerRef.current = setInterval(() => {
         const currentSpd = speedRef.current;
@@ -1441,9 +1611,11 @@ export const ReplayWorkstation: React.FC = () => {
       setCurrentPrice(candle.close);
       currentPriceRef.current = candle.close;
       setCurrentSimulatedTime(new Date(candle.timestamp).toLocaleString('pt-BR'));
+      const tMs = new Date(candle.timestamp).getTime();
+      syncReplayWidgetData(clampedIdx, Number(candle.close), tMs, 0);
     }
     setFitChartTrigger(prev => prev + 1);
-  }, [rawCandles]);
+  }, [rawCandles, syncReplayWidgetData]);
 
   // Avançar Intervalo de Tempo (+X minutos)
   const handleJumpTime = useCallback((minutes: number) => {
@@ -1459,9 +1631,11 @@ export const ReplayWorkstation: React.FC = () => {
       setCurrentPrice(candle.close);
       currentPriceRef.current = candle.close;
       setCurrentSimulatedTime(new Date(candle.timestamp).toLocaleString('pt-BR'));
+      const tMs = new Date(candle.timestamp).getTime();
+      syncReplayWidgetData(nextIdx, Number(candle.close), tMs, 0);
     }
     setFitChartTrigger(prev => prev + 1);
-  }, [rawCandles, currentCandleIndex]);
+  }, [rawCandles, currentCandleIndex, syncReplayWidgetData]);
 
   // Próximo Candle
   const handleNextCandle = useCallback(() => {
@@ -1588,11 +1762,13 @@ export const ReplayWorkstation: React.FC = () => {
       setCurrentPrice(candle.close);
       currentPriceRef.current = candle.close;
       setCurrentSimulatedTime(new Date(candle.timestamp).toLocaleString('pt-BR'));
+      const tMs = new Date(candle.timestamp).getTime();
+      syncReplayWidgetData(startIdx, Number(candle.close), tMs, 0);
     }
 
     addReplayLog('SISTEMA', '🔄 Replay reiniciado para o início do período selecionado.');
     setFitChartTrigger(prev => prev + 1);
-  }, [replayAccount, rawCandles, addReplayLog]);
+  }, [replayAccount, rawCandles, addReplayLog, syncReplayWidgetData]);
 
   // Ordem Manual enviada pela Boleta
   const handlePlaceManualOrder = useCallback((orderData: {
@@ -2156,6 +2332,7 @@ export const ReplayWorkstation: React.FC = () => {
               onSetDataSource={setDataSource}
               isStreamerOnline={isStreamerOnline}
               streamerBarsCount={streamerBarsCount}
+              isNinjaPlaybackActive={isNinjaPlaybackActive}
             />
 
             {/* TradingView Style On-Chart Indicator Legend (Top Left - Ultra Compact, Non-bold) */}
@@ -2213,6 +2390,11 @@ export const ReplayWorkstation: React.FC = () => {
               onUpdateWidget={(w) => setActiveWidgets(prev => prev.map(item => item.id === w.id ? w : item))}
               onRemoveWidget={(id) => setActiveWidgets(prev => prev.filter(item => item.id !== id))}
               containerRef={chartContainerRef}
+              overrideMarketData={replayMarketData}
+              overrideForces={replayForces}
+              overrideGammaLevels={gammaLevels}
+              overrideAxionRadar={replayAxionRadar}
+              isReplayMode={true}
             />
 
             {/* Gráfico de Candles (com histórico de 2 dias anteriores já visível) */}
@@ -2223,6 +2405,7 @@ export const ReplayWorkstation: React.FC = () => {
               activeIndicators={visibleIndicators}
               activeWidgets={activeWidgets}
               gammaLevels={gammaLevels}
+              marketData={replayMarketData}
               instanceId={activePanel?.instance_id || 'nasdaq'}
               fitChartTrigger={fitChartTrigger}
               resetViewTrigger={resetViewTrigger}

@@ -365,7 +365,43 @@ export const WidgetsManagerModal: React.FC<WidgetsManagerModalProps> = ({
                   </div>
                 </div>
 
-                {/* 8. Core Analytics */}
+                {/* 8. Market Matrix & Market Structure (Destaque Principal Grix) */}
+                <div className="bg-gradient-to-br from-amber-950/40 via-slate-900/90 to-slate-900/80 border-2 border-amber-500/60 hover:border-amber-400 p-4 rounded-xl flex flex-col justify-between transition group md:col-span-2 shadow-xl shadow-amber-950/20">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl">🎯</span>
+                        <div>
+                          <h4 className="text-sm font-black text-white group-hover:text-amber-300 transition flex items-center gap-1.5">
+                            <span>Market Matrix &amp; Market Structure</span>
+                            <span className="text-[10px] text-amber-400 font-mono bg-amber-950/80 border border-amber-500/40 px-1.5 py-0.5 rounded">NOVO</span>
+                          </h4>
+                          <span className="text-[11px] text-slate-400 font-mono">Painel institucional completo (Grix / NinjaTrader)</span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm">
+                        Gamma + MS + Gregas + Fluxo
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Painel completo de Exposição Gamma, Gregas, Estrutura de Mercado (QQQ e SPY), Fluxo institucional e Setup de Abertura em tempo real via NinjaFeed/Supabase.
+                    </p>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-amber-900/40 flex items-center justify-between">
+                    <span className="text-[11px] text-amber-300/80 font-mono flex items-center gap-1">
+                      <span>⚡</span>
+                      <span>Atualização em tempo real &lt;3s</span>
+                    </span>
+                    <button
+                      onClick={() => onAddWidget('market_matrix', {}, '🎯 Market Matrix')}
+                      className="bg-amber-600 hover:bg-amber-500 text-slate-950 font-black text-xs px-4 py-2 rounded-lg transition active:scale-95 flex items-center gap-1.5 shadow-lg shadow-amber-950/60 cursor-pointer"
+                    >
+                      <span>➕ Inserir no Gráfico</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 9. Core Analytics */}
                 <div className="bg-slate-900/60 border border-slate-800 hover:border-slate-700 p-4 rounded-xl flex flex-col justify-between transition group">
                   <div>
                     <div className="flex items-center gap-2 mb-2">

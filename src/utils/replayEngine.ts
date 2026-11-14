@@ -1,8 +1,8 @@
 import { normalizeStrategyStages } from '../services/db';
-import type { Candle, GammaLevels, CustomStrategy, BrokerAccount } from '../services/db';
+import type { Candle, GammaLevels, CustomStrategy, BrokerAccount, MarketData, BlockTrade, ReplayForceItem } from '../services/db';
 import { isTimeInSessions, getTradingSessionKey, getSaoPauloDate } from './date';
 import { LEGACY_INDICATOR_MAP } from './algorithmIndicators';
-import { calculateMACDDivergences, calculateVolumeProfileAnalysis, calculateAxionTrend } from './indicatorRegistry';
+import { calculateMACDDivergences, calculateVolumeProfileAnalysis, calculateAxionTrend, calculateIndicator } from './indicatorRegistry';
 
 export interface ReplayOrder {
   id: string;
@@ -2478,4 +2478,246 @@ export function scanHistoricalIndicatorSignals(
   }
 
   return signals;
+}
+
+/**
+ * Busca de alta velocidade (binária) para recuperar o registro de forças histórico
+ * imediatamente anterior ou igual ao tempo simulado do Replay.
+ */
+export function getReplayForcesAtTime(
+  forcesList: ReplayForceItem[],
+  targetTimeMs: number
+): Array<{ symbol: string; buy: number; sell: number }> | null {
+  if (!forcesList || forcesList.length === 0) return null;
+
+  let low = 0;
+  let high = forcesList.length - 1;
+  let bestIdx = -1;
+
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (forcesList[mid].timeMs <= targetTimeMs) {
+      bestIdx = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  if (bestIdx !== -1) {
+    return forcesList[bestIdx].forces;
+  }
+
+  return forcesList[0].forces;
+}
+
+/**
+ * Calcula os dados de mercado dinâmicos simulados (MarketData) para os widgets do Replay
+ * usando os candles históricos de 1m + volume e a força histórica de momentum.
+ */
+export function calculateReplayMarketData(
+  sliceOfCandles: Candle[],
+  currentPrice: number,
+  currentForces?: Array<{ symbol: string; buy: number; sell: number }> | null,
+  symbol: string = 'NQ',
+  _currentSecond: number = 0
+): MarketData {
+  const n = sliceOfCandles.length;
+  const currentCandle = n > 0 ? sliceOfCandles[n - 1] : null;
+
+  // 1. Z-Score (últimos 20 candles de fechamento)
+  const zPeriod = 20;
+  const lookbackCloses: number[] = [];
+  const startZ = Math.max(0, n - zPeriod);
+  for (let i = startZ; i < n - 1; i++) {
+    lookbackCloses.push(Number(sliceOfCandles[i].close || 0));
+  }
+  lookbackCloses.push(currentPrice);
+
+  let mean = 0;
+  for (const c of lookbackCloses) mean += c;
+  mean = lookbackCloses.length > 0 ? mean / lookbackCloses.length : currentPrice;
+
+  let variance = 0;
+  for (const c of lookbackCloses) variance += Math.pow(c - mean, 2);
+  const stdDev = lookbackCloses.length > 1 ? Math.sqrt(variance / (lookbackCloses.length - 1)) : 1;
+  const zScore = stdDev > 0 ? Number(((currentPrice - mean) / stdDev).toFixed(2)) : 0;
+
+  // 2. ATR Ratio (últimos 14 candles)
+  const atrPeriod = 14;
+  let trSum = 0;
+  let trCount = 0;
+  const startAtr = Math.max(1, n - atrPeriod - 1);
+  for (let i = startAtr; i < n - 1; i++) {
+    const high = Number(sliceOfCandles[i].high || 0);
+    const low = Number(sliceOfCandles[i].low || 0);
+    const prevC = Number(sliceOfCandles[i - 1].close || 0);
+    const tr = Math.max(high - low, Math.abs(high - prevC), Math.abs(low - prevC));
+    trSum += tr;
+    trCount++;
+  }
+  const avgTr = trCount > 0 ? trSum / trCount : 10;
+  const curHigh = currentCandle ? Math.max(currentCandle.high, currentPrice) : currentPrice;
+  const curLow = currentCandle ? Math.min(currentCandle.low, currentPrice) : currentPrice;
+  const prevClose = n > 1 ? Number(sliceOfCandles[n - 2].close || currentPrice) : currentPrice;
+  const curTr = Math.max(curHigh - curLow, Math.abs(curHigh - prevClose), Math.abs(curLow - prevClose));
+  const atrRatio = avgTr > 0 ? Number((curTr / avgTr).toFixed(2)) : 1.0;
+
+  // 3. Classificação de Estado
+  let estado = 'NORMAL';
+  if (atrRatio >= 1.8 && zScore >= 1.5) {
+    estado = 'EXPLOSAO COMPRA';
+  } else if (atrRatio >= 1.8 && zScore <= -1.5) {
+    estado = 'EXPLOSAO VENDA';
+  } else if (atrRatio >= 2.2 || Math.abs(zScore) >= 2.4) {
+    estado = 'EXAUSTAO';
+  } else if (atrRatio <= 0.65) {
+    estado = 'COMPRESSAO';
+  } else if (zScore >= 1.0) {
+    estado = 'ALTA';
+  } else if (zScore <= -1.0) {
+    estado = 'BAIXA';
+  }
+
+  // 4. Sentimento Macro e Micro
+  let macroSentiment = 50;
+  let microSentiment = 50;
+
+  if (currentForces && currentForces.length > 0) {
+    const finalForce = currentForces.find(f => f.symbol === 'FORÇA FINAL');
+    const assetForce = currentForces.find(f => f.symbol === 'NASDAQ' || f.symbol === 'S&P 500' || f.symbol === symbol);
+
+    if (finalForce) {
+      macroSentiment = Math.round(Number(finalForce.buy || 50));
+    } else {
+      const sum = currentForces.reduce((acc, curr) => acc + (Number(curr.buy) || 50), 0);
+      macroSentiment = Math.round(sum / currentForces.length);
+    }
+
+    if (assetForce) {
+      microSentiment = Math.round(Number(assetForce.buy || 50));
+    } else {
+      microSentiment = macroSentiment;
+    }
+  } else {
+    // Estimativa fractal se não houver dados de força
+    const priceChange = n > 1 ? currentPrice - Number(sliceOfCandles[Math.max(0, n - 10)].close || currentPrice) : 0;
+    const estimated = Math.max(10, Math.min(90, Math.round(50 + (zScore * 12) + (priceChange > 0 ? 5 : -5))));
+    macroSentiment = estimated;
+    microSentiment = estimated;
+  }
+
+  // 5. Delta e Volumes (estimados a partir do volume da barra atual e fractal)
+  const currentVol = currentCandle?.volume ? Number(currentCandle.volume) : 100;
+  const candleRange = curHigh - curLow || 1;
+  const posFactor = Math.max(0, Math.min(1, (currentPrice - curLow) / candleRange));
+  const buyVolume = Math.round(currentVol * posFactor);
+  const sellVolume = Math.max(0, currentVol - buyVolume);
+  const delta = buyVolume - sellVolume;
+  const deltaRatio = sellVolume > 0 ? Number((buyVolume / sellVolume).toFixed(2)) : (buyVolume > 0 ? 2.5 : 1.0);
+  const deltaPct = Math.max(0, Math.min(100, Math.round((buyVolume / (buyVolume + sellVolume || 1)) * 100)));
+
+  // Prints per second
+  const printsPerSecond = Number((Math.max(1.2, Math.min(65.0, (currentVol / 60) * 0.4))).toFixed(1));
+
+  // 6. Block Trades institucionais detectados nos candles recentes
+  const blockTrades: BlockTrade[] = [];
+  const lookbackTrades = Math.min(15, n);
+  for (let i = n - lookbackTrades; i < n; i++) {
+    const c = sliceOfCandles[i];
+    const v = Number(c.volume || 0);
+    if (v >= 120) {
+      const isUp = c.close >= c.open;
+      const t = new Date(c.timestamp || (c as any).time);
+      const timeStr = !isNaN(t.getTime())
+        ? t.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        : '12:00:00';
+      blockTrades.push({
+        time: timeStr,
+        price: Number(c.close),
+        volume: Math.min(999, Math.round(v * 0.45)),
+        side: isUp ? 'COMPRA' : 'VENDA'
+      });
+    }
+  }
+
+  const simTimeIso = currentCandle?.timestamp ? new Date(currentCandle.timestamp).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--:--:--';
+
+  return {
+    symbol: symbol,
+    price: currentPrice.toFixed(2),
+    zScore,
+    atrRatio,
+    estado,
+    timestamp: simTimeIso,
+    sentiment: macroSentiment,
+    marketSentiment: microSentiment,
+    originalSentiment: macroSentiment,
+    delta,
+    deltaRatio,
+    deltaPct,
+    delta_pct: deltaPct,
+    buyVolume,
+    sellVolume,
+    printsPerSecond,
+    blockTrades: blockTrades.slice(-10),
+    updated_at: currentCandle?.timestamp
+  };
+}
+
+/**
+ * Calcula o estado inferido do Axion ML Radar para o Replay usando candles simulados e Gamma Levels
+ */
+export function calculateReplayAxionRadar(
+  sliceOfCandles: Candle[],
+  currentPrice: number,
+  gammaLevels?: GammaLevels | null
+): any {
+  if (!sliceOfCandles || sliceOfCandles.length < 30) {
+    return {
+      status: 'Aguardando candles no Replay...',
+      direction: 'NEUTRO',
+      probability: 50,
+      probBuy: 50,
+      probSell: 50,
+      isArming: false,
+      isSignal: false,
+      distToCallRes: gammaLevels?.nearest_resistance ? Math.max(0, Math.round(Number(gammaLevels.nearest_resistance) - currentPrice)) : undefined,
+      distToPutSup: gammaLevels?.nearest_support ? Math.max(0, Math.round(currentPrice - Number(gammaLevels.nearest_support))) : undefined
+    };
+  }
+
+  try {
+    const res = calculateIndicator({
+      id: 'replay-axion-ml-radar',
+      type: 'AXION_ML_PREDICTOR',
+      name: '🧠 Axion ML Radar',
+      category: 'ALGORITMOS',
+      visible: true,
+      overlay: true,
+      params: { showFloatingHud: true, showTargets: false },
+      style: { color: '#06b6d4', lineWidth: 1, lineStyle: 'solid' }
+    }, sliceOfCandles, { gammaLevels: gammaLevels || undefined });
+
+    if (res && res.customData && res.customData.radar) {
+      const radar = res.customData.radar;
+      return {
+        ...radar,
+        distToCallRes: gammaLevels?.nearest_resistance ? Math.max(0, Math.round(Number(gammaLevels.nearest_resistance) - currentPrice)) : radar.distToCallRes,
+        distToPutSup: gammaLevels?.nearest_support ? Math.max(0, Math.round(currentPrice - Number(gammaLevels.nearest_support))) : radar.distToPutSup
+      };
+    }
+  } catch (err) {
+    console.warn('[ReplayEngine] Erro ao calcular Axion ML Radar simulado:', err);
+  }
+
+  return {
+    status: 'Sincronizado',
+    direction: 'NEUTRO',
+    probability: 50,
+    probBuy: 50,
+    probSell: 50,
+    isArming: false,
+    isSignal: false
+  };
 }

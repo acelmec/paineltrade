@@ -1,0 +1,1205 @@
+//  02/11/2026: feed lido do Supabase (view ninjafeed_kv, ~20 s de atraso) em vez da planilha publicada (5-10 min). Endereco e chave fixos no codigo (ocultos nas propriedades).
+#region Using declarations
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Xml.Serialization;
+using System.ComponentModel.DataAnnotations;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Text;
+using System.Threading;
+using System.Windows.Media;
+using NinjaTrader.Data;
+using NinjaTrader.Gui;
+using NinjaTrader.Gui.Chart;
+using NinjaTrader.Gui.Tools;
+using NinjaTrader.NinjaScript;
+#endregion
+
+// ============================================================================
+//  AXION - Grix Levels  (NinjaTrader 8)
+//
+//  Marca no grafico do NQ/MNQ os niveis de gamma lidos do Grix (convertidos de
+//  QQQ para NQ) e imprime na tela as entradas das simulacoes (entrada, stop,
+//  gain e resultado). Os dados vem de uma planilha (aba "NinjaFeed") ou de um
+//  arquivo local; o indicador consulta a fonte a cada poucos segundos e
+//  redesenha a cada tick, com a posicao do preco sempre ao vivo.
+//
+//  TRAVA MS (07/10/2026): le a chave ms_trava do feed e mostra no canto superior direito
+//  COMPRA PROIBIDA (Market Structure QQQ vermelho com raio) ou VENDA PROIBIDA (verde com raio).
+//
+//  Simulacao, nao e recomendacao. O indicador nao envia ordens.
+// ============================================================================
+namespace NinjaTrader.NinjaScript.Indicators
+{
+    public enum PosQuadro { EsquerdaCima, DireitaCima, DireitaBaixo, EsquerdaBaixo }
+
+    public class AxionGrixLevels : Indicator
+    {
+        #region Modelo de dados
+        private class Sim
+        {
+            public int Id;
+            public string Setup = "", Dir = "", Status = "";
+            public double Entry, Stop, Gain, Exit;
+            public DateTime EntryTime = DateTime.MinValue, ExitTime = DateTime.MinValue;
+            public bool IsOpen { get { return Status.StartsWith("Aberta", StringComparison.OrdinalIgnoreCase); } }
+            public bool IsGain { get { return Status.StartsWith("Gain", StringComparison.OrdinalIgnoreCase); } }
+            public bool IsStop { get { return Status.StartsWith("Stop", StringComparison.OrdinalIgnoreCase); } }
+            public bool IsBuy { get { return Dir.StartsWith("COMPRA", StringComparison.OrdinalIgnoreCase); } }
+        }
+
+        private class Feed
+        {
+            public double Qqq, Factor, Cw, Poc, Pw, GwSup, Flip, GwInf, SigSup, SigInf, RMin, RMax;
+            public double HmOiCall, HmOiPut, HmOiFlip, HmVolCall, HmVolPut, HmVolFlip;
+            // 08/11/2026: indicadores do Grix para o quadro (escala -100..+100; fluxo e PHC em 0..100)
+            public double An = double.NaN, Rho = double.NaN, Ms = double.NaN, Net = double.NaN, Anch = double.NaN, Hedge = double.NaN, SmartD = double.NaN, Tail = double.NaN, VolSm = double.NaN, Vap = double.NaN, SetupAb = double.NaN, SrCall = double.NaN, SrPut = double.NaN, FlowQ = double.NaN, FlowS = double.NaN, Phc = double.NaN;
+            public double SpyAn = double.NaN, SpyRho = double.NaN, SpyMs = double.NaN, SpyNet = double.NaN, SpySetupAb = double.NaN;
+            public int MsTrava;   // trava do Market Structure (raio): -1 compra proibida, 1 venda proibida, 0 livre
+            public string HoraEt = "";
+            public DateTime FatorEt = DateTime.MinValue; public bool FatorEtOk = false;
+            public DateTime EtTime = DateTime.MinValue;   // data + hora da leitura, em ET (sem deslocamento)
+            public List<Sim> Sims = new List<Sim>();
+            public DateTime Fetched = DateTime.MinValue;
+        }
+
+        private volatile Feed feed;
+        private float painelAltura = 0;
+        private string lastError = "";
+        private int failures;
+        private Timer timer;
+        private Timer relogio;
+        private int busy;
+        private double lastPrice;
+        // variacao desde a abertura (04/11/2026): abertura da sessao (18:00 ET) e do pregao a vista (09:30 ET)
+        private TimeZoneInfo etZone;
+        private DateTime sessKey = DateTime.MinValue;   // dia de negociacao (a partir das 18:00 ET conta para o dia seguinte)
+        private double openSessao = double.NaN, openRth = double.NaN;
+        private int maxOpenIdSeen = -1;
+        private bool firstFeedLoaded;
+
+        // alinhamento estavel QQQ -> NQ (nao muda a cada tick)
+        private Feed basisFeed;
+        private double basisValue = double.NaN;
+        private bool basisSuspect = false;
+        private double offsetNow;
+        private readonly List<float> labelYs = new List<float>();
+
+        public override string DisplayName { get { return "AXION Grix"; } }
+        #endregion
+
+        #region Estado
+        protected override void OnStateChange()
+        {
+            if (State == State.SetDefaults)
+            {
+                Description = "Niveis do Grix (QQQ convertidos para NQ) e entradas da simulacao. Nao envia ordens.";
+                Name = "AxionGrixLevels";
+                Calculate = Calculate.OnEachTick;
+                IsOverlay = true;
+                DisplayInDataBox = false;
+                PaintPriceMarkers = false;
+                IsSuspendedWhileInactive = true;
+                DrawOnPricePanel = true;
+
+                FeedUrl = AXION_FEED_URL; ChaveSupabase = AXION_FEED_KEY;
+                LocalFile = "";
+                PollSeconds = 3;
+                CalibrarPeloPreco = true;
+                FatorManual = 0;
+                MaxIdadeFatorMin = 360;
+                UsarTravaMS = true;
+                FusoAutomatico = true;
+                BaseManual = 0;
+                MaxBaseAbs = 80;
+                TracoEntradaSaida = false;
+                MostrarTempoVela = true;
+                MostrarPnlStopGain = true;
+                ContratosSim = 1;
+                OffsetHorasEtParaGrafico = 0;
+                MostrarNiveis = true;
+                MostrarSigma = true;
+                MostrarRange = true;
+                MostrarHeatmap = true;
+                MostrarSimulacoes = true;
+                MostrarPainel = true;
+                MostrarStrikes = true;
+                SomNovaEntrada = true;
+                MostrarVariacao = true;
+                MostrarHoraFeed = true;
+                MostrarQuadro = true; QuadroPosicao = PosQuadro.EsquerdaCima; QuadroFonte = 13;
+                QNet = true; QAnalytics = true; QRho = true; QMs = true; QAnchors = true; QHedge = true; QSmartDelta = true; QTailRisk = true; QVolSmile = true; QVap = true; QSrCall = true; QSrPut = true;
+                QFluxoQqq = true; QFluxoSpy = true; QPhc = true; QSpyNet = true; QSpyAnalytics = true; QSpyRho = true; QSpyMs = true; QSetupAbertura = true;
+            }
+            else if (State == State.DataLoaded)
+            {
+                try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
+                try { etZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time"); } catch { etZone = null; }
+                timer = new Timer(delegate { PollOnce(); }, null, 500, Math.Max(1, PollSeconds) * 1000);
+                relogio = new Timer(delegate { if (MostrarTempoVela) Redraw(); }, null, 1000, 1000);
+            }
+            else if (State == State.Terminated)
+            {
+                if (timer != null) { timer.Dispose(); timer = null; }
+                if (relogio != null) { relogio.Dispose(); relogio = null; }
+            }
+        }
+
+        private DateTime lastTickUtc = DateTime.MinValue;
+
+        protected override void OnBarUpdate()
+        {
+            if (CurrentBar < 0) return;
+            lastPrice = Close[0];
+            if (State == State.Realtime) lastTickUtc = DateTime.UtcNow;
+            AtualizarAberturas();
+        }
+
+        // Guarda o preco de abertura da sessao (18:00 ET) e do pregao a vista (09:30 ET).
+        // Time[0] = fim da barra no fuso do NinjaTrader; convertido para ET, entao funciona com o grafico em Brasilia ou em NY.
+        private void AtualizarAberturas()
+        {
+            if (etZone == null) return;
+            DateTime et;
+            try { et = TimeZoneInfo.ConvertTime(Time[0], NinjaTrader.Core.Globals.GeneralOptions.TimeZoneInfo, etZone); }
+            catch { return; }
+            double seg = et.TimeOfDay.TotalSeconds;
+            DateTime key = seg >= 18 * 3600 ? et.Date.AddDays(1) : et.Date;
+            if (key != sessKey)
+            {
+                sessKey = key;
+                openSessao = Open[0];     // primeira barra da sessao: abre no primeiro negocio das 18:00 ET
+                openRth = double.NaN;
+            }
+            // primeira barra que termina depois das 09:30:00 ET (e antes das 16:00) abre no primeiro negocio do pregao
+            if (double.IsNaN(openRth) && seg > 9 * 3600 + 30 * 60 && seg <= 16 * 3600)
+                openRth = Open[0];
+        }
+
+        private string TextoVariacao(double price, double abertura)
+        {
+            double pts = price - abertura;
+            double pct = abertura > 0 ? pts / abertura * 100.0 : 0;
+            return pts.ToString("+0.00;-0.00;0.00") + " pts (" + pct.ToString("+0.00;-0.00;0.00") + "%)";
+        }
+
+        // o grafico esta recebendo preco ao vivo? (se estiver parado, nao se pode calibrar por ele)
+        private bool ChartIsLive { get { return (DateTime.UtcNow - lastTickUtc).TotalSeconds < 60; } }
+        #endregion
+
+        #region Coleta de dados
+        private void PollOnce()
+        {
+            if (Interlocked.Exchange(ref busy, 1) == 1) return;
+            try
+            {
+                string text = null;
+                if (!string.IsNullOrWhiteSpace(FeedUrl))
+                {
+                    string baseUrl = FeedUrl.Trim();
+                    // Link "Publicar na Web" copiado como pagina (pubhtml) -> converte para CSV
+                    if (baseUrl.Contains("/pubhtml"))
+                        baseUrl = baseUrl.Replace("/pubhtml", "/pub");
+                    if (baseUrl.Contains("/pub") && !baseUrl.Contains("output="))
+                        baseUrl += (baseUrl.Contains("?") ? "&" : "?") + "output=csv";
+                    bool supa = baseUrl.Contains("/rest/v1/");
+                    string url = supa ? baseUrl : baseUrl + (baseUrl.Contains("?") ? "&" : "?") + "_t=" + DateTime.UtcNow.Ticks;
+                    using (WebClient wc = new WebClient())
+                    {
+                        wc.Encoding = Encoding.UTF8;
+                        wc.Headers[HttpRequestHeader.CacheControl] = "no-cache";
+                        if (supa) { wc.Headers["apikey"] = ChaveSupabase; wc.Headers["Authorization"] = "Bearer " + ChaveSupabase; wc.Headers[HttpRequestHeader.Accept] = "text/csv"; }
+                        text = wc.DownloadString(url);
+                    }
+                }
+                else if (!string.IsNullOrWhiteSpace(LocalFile) && File.Exists(LocalFile))
+                {
+                    using (FileStream fs = new FileStream(LocalFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    using (StreamReader sr = new StreamReader(fs, Encoding.UTF8))
+                        text = sr.ReadToEnd();
+                }
+                else
+                {
+                    throw new Exception("Defina FeedUrl ou LocalFile nas propriedades do indicador.");
+                }
+
+                Feed f = Parse(text);
+                f.Fetched = DateTime.Now;
+                CheckNewOpenSim(f);
+                feed = f;
+                failures = 0;
+                lastError = "";
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                lastError = ex.Message;
+            }
+            finally
+            {
+                Interlocked.Exchange(ref busy, 0);
+                Redraw();
+            }
+        }
+
+        private void Redraw()
+        {
+            try
+            {
+                if (ChartControl != null)
+                    ChartControl.Dispatcher.InvokeAsync(delegate { ChartControl.InvalidateVisual(); });
+            }
+            catch { }
+        }
+
+        private void CheckNewOpenSim(Feed f)
+        {
+            int maxOpen = -1;
+            foreach (Sim s in f.Sims) if (s.IsOpen && s.Id > maxOpen) maxOpen = s.Id;
+            if (!firstFeedLoaded)
+            {
+                firstFeedLoaded = true;
+                maxOpenIdSeen = maxOpen;
+                return;
+            }
+            if (maxOpen > maxOpenIdSeen)
+            {
+                maxOpenIdSeen = maxOpen;
+                Sim n = f.Sims.First(x => x.Id == maxOpen);
+                Print(string.Format("[AXION] Nova simulacao #{0} {1} {2} entrada QQQ {3:0.00} stop {4:0.00} gain {5:0.00}", n.Id, n.Setup, n.Dir, n.Entry, n.Stop, n.Gain));
+                if (SomNovaEntrada) { try { System.Media.SystemSounds.Exclamation.Play(); } catch { } }
+            }
+        }
+
+        private static List<string> SplitCsv(string line)
+        {
+            List<string> r = new List<string>();
+            StringBuilder sb = new StringBuilder();
+            bool q = false;
+            for (int i = 0; i < line.Length; i++)
+            {
+                char c = line[i];
+                if (q)
+                {
+                    if (c == '"')
+                    {
+                        if (i + 1 < line.Length && line[i + 1] == '"') { sb.Append('"'); i++; }
+                        else q = false;
+                    }
+                    else sb.Append(c);
+                }
+                else
+                {
+                    if (c == '"') q = true;
+                    else if (c == ',') { r.Add(sb.ToString()); sb.Clear(); }
+                    else sb.Append(c);
+                }
+            }
+            r.Add(sb.ToString());
+            return r;
+        }
+
+        private static double Num(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return double.NaN;
+            s = s.Trim().Replace("~", "").Replace(',', '.');
+            double v;
+            return double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out v) ? v : double.NaN;
+        }
+
+        private static bool TryDate(string s, out DateTime d)
+        {
+            // 04/11/2026: o feed manda dd/MM/aaaa. Antes tentava o formato americano primeiro e lia
+            // 04/11 como 11 de abril (errado do dia 1 ao 12 de cada mes). Agora: pt-BR primeiro (aceita ISO tambem).
+            if (DateTime.TryParse(s, new CultureInfo("pt-BR"), DateTimeStyles.None, out d)) return true;
+            return DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out d);
+        }
+
+        private static bool TryTime(string s, out TimeSpan t)
+        {
+            t = TimeSpan.Zero;
+            if (string.IsNullOrWhiteSpace(s)) return false;
+            s = s.Trim().TrimStart('~', '\'');
+            if (TimeSpan.TryParse(s, CultureInfo.InvariantCulture, out t)) return true;
+            return false;
+        }
+
+        private Feed Parse(string text)
+        {
+            Feed f = new Feed();
+            Dictionary<string, string> kv = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            List<List<string>> simRows = new List<List<string>>();
+            foreach (string raw in text.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string line = raw.TrimEnd('\r');
+                if (line.Length == 0) continue;
+                List<string> c = SplitCsv(line);
+                if (c.Count < 2) continue;
+                string k = c[0].Trim();
+                if (k.Equals("sim", StringComparison.OrdinalIgnoreCase)) simRows.Add(c);
+                else if (k.Length > 0 && !kv.ContainsKey(k)) kv[k] = c[1];
+            }
+
+            Func<string, double> g = delegate (string key) { string v; return kv.TryGetValue(key, out v) ? Num(v) : double.NaN; };
+            f.Qqq = g("qqq"); f.Factor = g("fator"); f.Cw = g("cw"); f.Poc = g("poc"); f.Pw = g("pw");
+            f.GwSup = g("gw_sup"); f.Flip = g("flip"); f.GwInf = g("gw_inf");
+            f.SigSup = g("sigma_sup"); f.SigInf = g("sigma_inf"); f.RMin = g("range_min"); f.RMax = g("range_max");
+            f.HmOiCall = g("hm_oi_call"); f.HmOiPut = g("hm_oi_put"); f.HmOiFlip = g("hm_oi_flip");
+            f.HmVolCall = g("hm_vol_call"); f.HmVolPut = g("hm_vol_put"); f.HmVolFlip = g("hm_vol_flip");
+            f.An = g("analytics"); f.Rho = g("rho"); f.Ms = g("ms_qqq"); f.Net = g("net_gamma"); f.Anch = g("anchors_qqq"); f.Hedge = g("hedge_qqq");
+            f.SmartD = g("smart_delta_qqq"); f.Tail = g("tail_risk_qqq"); f.VolSm = g("vol_smile_qqq"); f.Vap = g("vap_qqq"); f.SetupAb = g("setup_abertura_qqq");
+            f.SrCall = g("sr_call_qqq"); f.SrPut = g("sr_put_qqq"); f.FlowQ = g("flow_qqq"); f.FlowS = g("flow_spy"); f.Phc = g("phc_bull");
+            f.SpyAn = g("spy_analytics"); f.SpyRho = g("spy_rho"); f.SpyMs = g("ms_spy"); f.SpyNet = g("spy_net_gamma"); f.SpySetupAb = g("setup_abertura_spy");
+            { double mt = g("ms_trava"), us = g("usar_trava_ms"); bool usa = UsarTravaMS && (double.IsNaN(us) || us > 0.5); f.MsTrava = (!usa || double.IsNaN(mt)) ? 0 : (mt < -0.5 ? -1 : mt > 0.5 ? 1 : 0); }
+            { string fds, fhs; DateTime d2; TimeSpan t2;
+              if (kv.TryGetValue("fator_data", out fds) && kv.TryGetValue("fator_hora_et", out fhs) && TryDate(fds, out d2) && TryTime(fhs, out t2)) { f.FatorEt = d2.Date + t2; f.FatorEtOk = true; } }
+            string hora; f.HoraEt = kv.TryGetValue("hora_et", out hora) ? hora : "";
+            if (double.IsNaN(f.Qqq)) throw new Exception("Feed sem o campo qqq.");
+            {
+                string dstr; DateTime fd; TimeSpan ft;
+                if (kv.TryGetValue("data", out dstr) && TryDate(dstr, out fd) && TryTime(f.HoraEt, out ft))
+                    f.EtTime = fd.Date + ft;
+            }
+
+            foreach (List<string> c in simRows)
+            {
+                if (c.Count < 12) continue;
+                int id;
+                if (!int.TryParse(c[1].Trim(), out id)) continue;
+                Sim s = new Sim();
+                s.Id = id; s.Setup = c[2].Trim(); s.Dir = c[3].Trim();
+                s.Entry = Num(c[4]); s.Stop = Num(c[5]); s.Gain = Num(c[6]); s.Status = c[7].Trim(); s.Exit = Num(c[10]);
+                DateTime d; TimeSpan t;
+                if (TryDate(c[8], out d))
+                {
+                    if (TryTime(c[9], out t)) s.EntryTime = d.Date + t;    // ET; o deslocamento e aplicado ao desenhar
+                    if (TryTime(c[11], out t)) s.ExitTime = d.Date + t;
+                }
+                if (!double.IsNaN(s.Entry)) f.Sims.Add(s);
+            }
+            return f;
+        }
+        #endregion
+
+        #region Desenho
+        private double Factor(Feed f)
+        {
+            if (FatorManual > 0) return FatorManual;
+            if (double.IsNaN(f.Factor) || f.Factor <= 0) return 41.46;
+            if (f.FatorEtOk)
+            {
+                // fator da planilha velho demais (> MaxIdadeFatorMin): usa o padrao 41.46
+                DateTime etNow;
+                try { etNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time")); }
+                catch { return f.Factor; }
+                if ((etNow - f.FatorEt).TotalMinutes > MaxIdadeFatorMin) return 41.46;
+            }
+            return f.Factor;
+        }
+
+        private double ToNq(Feed f, double qqq, double basis)
+        {
+            return qqq * Factor(f) + basis;
+        }
+
+        // Alinhamento QQQ -> NQ calculado UMA vez por leitura do feed (preco do contrato na hora da leitura
+        // menos QQQ x fator). Assim as linhas ficam paradas e so se mexem quando chega uma leitura nova,
+        // e mesmo assim so se a diferenca passar de 2 pontos (histerese).
+        private double GetBasis(Feed f, double price)
+        {
+            if (!CalibrarPeloPreco) return BaseManual;
+            // grafico parado (sem ticks ao vivo): NAO recalibra, senao as linhas pulam a cada leitura nova
+            if (!ChartIsLive) return double.IsNaN(basisValue) ? BaseManual : basisValue;
+            if (basisFeed != f)
+            {
+                double refPrice = price;
+                try
+                {
+                    if (f.EtTime != DateTime.MinValue && Bars != null && Bars.Count > 0)
+                    {
+                        int idx = Bars.GetBar(f.EtTime.AddHours(offsetNow));
+                        if (idx >= 0 && idx < Bars.Count) refPrice = Bars.GetClose(idx);
+                    }
+                }
+                catch { }
+                if (refPrice > 0)
+                {
+                    double nb = refPrice - f.Qqq * Factor(f);
+                    if (Math.Abs(nb) > MaxBaseAbs)
+                    {
+                        // calibracao absurda (barra errada / fuso errado / preco velho): ignora e usa a base manual
+                        basisSuspect = true;
+                        basisValue = BaseManual;
+                    }
+                    else
+                    {
+                        basisSuspect = false;
+                        if (double.IsNaN(basisValue) || Math.Abs(nb - basisValue) > 2.0) basisValue = nb;
+                    }
+                    basisFeed = f;
+                }
+            }
+            return double.IsNaN(basisValue) ? 0 : basisValue;
+        }
+
+        // ---- P&L em dolares de um deslocamento em pontos de NQ (ou do instrumento do grafico)
+        private double PontoValor { get { try { return Instrument.MasterInstrument.PointValue; } catch { return 20; } } }
+        private string Dolar(double pts)
+        {
+            double usd = pts * PontoValor * Math.Max(1, ContratosSim);
+            return string.Format("{0}${1:0.00} ({2}{3:0.00} pts)", usd < 0 ? "-" : "+", Math.Abs(usd), pts < 0 ? "-" : "+", Math.Abs(pts));
+        }
+
+        // ---- tempo que falta para fechar a vela atual (so barras de tempo)
+        private void DrawTempoVela(ChartControl cc, ChartScale cs, double price)
+        {
+            try
+            {
+                if (Bars == null || Bars.Count == 0 || price <= 0) return;
+                BarsPeriodType t = BarsPeriod.BarsPeriodType;
+                if (t != BarsPeriodType.Minute && t != BarsPeriodType.Second) return;
+                DateTime agora = TimeZoneInfo.ConvertTime(DateTime.UtcNow, NinjaTrader.Core.Globals.GeneralOptions.TimeZoneInfo);
+                DateTime fim = Bars.GetTime(Bars.Count - 1);
+                TimeSpan resta = fim - agora;
+                string txt;
+                if (!ChartIsLive && resta.TotalSeconds < -5) return;                // mercado parado/sem preco
+                if (resta.TotalSeconds < 0) resta = TimeSpan.Zero;
+                if (resta.TotalHours >= 1) return;
+                txt = string.Format("⏱ {0:00}:{1:00}", (int)resta.TotalMinutes, resta.Seconds);
+                float y = cs.GetYByValue(price);
+                float x = cc.GetXByBarIndex(ChartBars, Bars.Count - 1) + 14;
+                System.Windows.Media.Brush b = resta.TotalSeconds <= 10 ? System.Windows.Media.Brushes.Tomato : System.Windows.Media.Brushes.Gold;
+                DrawLabelLeft(cc, txt, x, y + 6, b, 12, true);
+            }
+            catch { }
+        }
+
+        private class Lvl { public string Name; public double Qqq; public System.Windows.Media.Brush Color; public float W; public bool Dash; }
+
+        protected override void OnRender(ChartControl chartControl, ChartScale chartScale)
+        {
+            base.OnRender(chartControl, chartScale);
+            Feed f = feed;
+            if (RenderTarget == null || ChartPanel == null) return;
+            if (f == null)
+            {
+                DrawText(chartControl, failures > 0 ? "AXION: sem dados (" + lastError + ")" : "AXION: carregando dados...", 10, 10, System.Windows.Media.Brushes.Orange, 12, false);
+                return;
+            }
+
+            double price = lastPrice > 0 ? lastPrice : (Bars != null && Bars.Count > 0 ? Bars.GetClose(Bars.Count - 1) : 0);
+            // fuso: automatico (compara a hora da leitura em ET com a hora da ultima barra do grafico)
+            double off = OffsetHorasEtParaGrafico;
+            if (FusoAutomatico && f.EtTime != DateTime.MinValue && Bars != null && Bars.Count > 0)
+            {
+                try
+                {
+                    double h = Math.Round((Bars.GetTime(Bars.Count - 1) - f.EtTime).TotalHours);
+                    if (Math.Abs(h) <= 14) off = h;
+                }
+                catch { }
+            }
+            offsetNow = off;
+
+            double basis = GetBasis(f, price);
+            float panelW = ChartPanel.W, panelH = ChartPanel.H;
+            labelYs.Clear();
+
+            // ---------- todos os strikes do QQQ (1,00 em 1,00), em NQ
+            if (MostrarStrikes)
+            {
+                double fac = Factor(f);
+                double minNq = chartScale.MinValue, maxNq = chartScale.MaxValue;
+                if (fac > 0 && maxNq > minNq)
+                {
+                    int k0 = (int)Math.Floor((minNq - basis) / fac) - 1;
+                    int k1 = (int)Math.Ceiling((maxNq - basis) / fac) + 1;
+                    if (k1 - k0 > 300) k1 = k0 + 300;
+                    for (int k = k0; k <= k1; k++)
+                    {
+                        double nqK = k * fac + basis;
+                        float yK = chartScale.GetYByValue(nqK);
+                        if (yK < -5 || yK > panelH + 5) continue;
+                        bool principal = (k % 5 == 0);
+                        // linha continua e bem visivel em cada strike (a cada 5 mais grossa e clara)
+                        DrawHLine(chartControl, 0, panelW, yK, principal ? System.Windows.Media.Brushes.SlateGray : System.Windows.Media.Brushes.DarkSlateGray, principal ? 1.1f : 0.8f, false);
+                        DrawLabelLeft(chartControl, string.Format("{0}  ·  NQ {1:0}", k, nqK), 6, yK - 8, principal ? System.Windows.Media.Brushes.Gainsboro : System.Windows.Media.Brushes.DarkGray, 10, principal);
+                    }
+                }
+            }
+
+            // ---------- niveis
+            List<Lvl> lv = new List<Lvl>();
+            if (MostrarNiveis)
+            {
+                lv.Add(new Lvl { Name = "Call Wall", Qqq = f.Cw, Color = System.Windows.Media.Brushes.LimeGreen, W = 1.4f, Dash = true });
+                lv.Add(new Lvl { Name = "POC", Qqq = f.Poc, Color = System.Windows.Media.Brushes.Orange, W = 1.4f, Dash = true });
+                lv.Add(new Lvl { Name = "Put Wall", Qqq = f.Pw, Color = System.Windows.Media.Brushes.IndianRed, W = 1.4f, Dash = true });
+                lv.Add(new Lvl { Name = "Gamma Wall", Qqq = f.GwSup, Color = System.Windows.Media.Brushes.MediumSeaGreen, W = 1.2f, Dash = false });
+                lv.Add(new Lvl { Name = "Flip Zone", Qqq = f.Flip, Color = System.Windows.Media.Brushes.Gainsboro, W = 1.2f, Dash = false });
+                lv.Add(new Lvl { Name = "Gamma Wall inf.", Qqq = f.GwInf, Color = System.Windows.Media.Brushes.Crimson, W = 1.2f, Dash = false });
+            }
+            if (MostrarSigma)
+            {
+                lv.Add(new Lvl { Name = "SIGMA ↑ venda", Qqq = f.SigSup, Color = System.Windows.Media.Brushes.Red, W = 1.8f, Dash = false });
+                lv.Add(new Lvl { Name = "SIGMA ↓ compra", Qqq = f.SigInf, Color = System.Windows.Media.Brushes.Lime, W = 1.8f, Dash = false });
+            }
+            if (MostrarHeatmap)
+            {
+                lv.Add(new Lvl { Name = "HM call (OI)", Qqq = f.HmOiCall, Color = System.Windows.Media.Brushes.DarkSeaGreen, W = 1.0f, Dash = true });
+                lv.Add(new Lvl { Name = "HM put (OI)", Qqq = f.HmOiPut, Color = System.Windows.Media.Brushes.RosyBrown, W = 1.0f, Dash = true });
+                lv.Add(new Lvl { Name = "HM flip (OI)", Qqq = f.HmOiFlip, Color = System.Windows.Media.Brushes.Silver, W = 1.0f, Dash = true });
+                lv.Add(new Lvl { Name = "HM call (VOL)", Qqq = f.HmVolCall, Color = System.Windows.Media.Brushes.Aquamarine, W = 1.0f, Dash = true });
+                lv.Add(new Lvl { Name = "HM put (VOL)", Qqq = f.HmVolPut, Color = System.Windows.Media.Brushes.Salmon, W = 1.0f, Dash = true });
+                lv.Add(new Lvl { Name = "HM flip (VOL)", Qqq = f.HmVolFlip, Color = System.Windows.Media.Brushes.LightSteelBlue, W = 1.0f, Dash = true });
+            }
+            if (MostrarRange)
+            {
+                lv.Add(new Lvl { Name = "Range máx. (venda)", Qqq = f.RMax, Color = System.Windows.Media.Brushes.Violet, W = 1.6f, Dash = true });
+                lv.Add(new Lvl { Name = "Range mín. (compra)", Qqq = f.RMin, Color = System.Windows.Media.Brushes.Violet, W = 1.6f, Dash = true });
+            }
+
+            // agrupa niveis de mesmo preco
+            List<Lvl> groups = new List<Lvl>();
+            foreach (Lvl l in lv)
+            {
+                if (double.IsNaN(l.Qqq)) continue;
+                Lvl ex = groups.FirstOrDefault(x => Math.Abs(x.Qqq - l.Qqq) < 0.005);
+                if (ex == null) groups.Add(new Lvl { Name = l.Name, Qqq = l.Qqq, Color = l.Color, W = l.W, Dash = l.Dash });
+                else { ex.Name += " · " + l.Name; if (l.W > ex.W) { ex.W = l.W; ex.Color = l.Color; } }
+            }
+            foreach (Lvl g in groups)
+            {
+                double nq = ToNq(f, g.Qqq, basis);
+                float y = chartScale.GetYByValue(nq);
+                if (y < -20 || y > panelH + 20) continue;
+                DrawHLine(chartControl, 0, panelW, y, g.Color, g.W, g.Dash);
+                string label = string.Format("{0}  QQQ {1:0.00} | NQ {2:0.00}", g.Name, g.Qqq, nq);
+                DrawLabelRight(chartControl,label, panelW - 8, y - 15, g.Color, 11, true);
+            }
+
+            // ---------- simulacoes
+            if (MostrarSimulacoes)
+            {
+                foreach (Sim s in f.Sims)
+                {
+                    double eNq = ToNq(f, s.Entry, basis);
+                    float yE = chartScale.GetYByValue(eNq);
+                    float xE = XForTime(chartControl, s.EntryTime);
+                    bool visibleX = xE >= 0;
+                    System.Windows.Media.Brush col = s.IsBuy ? System.Windows.Media.Brushes.DeepSkyBlue : System.Windows.Media.Brushes.Orange;
+                    string tag = string.Format("#{0} {1} {2}", s.Id, s.Setup, s.IsBuy ? "▲ COMPRA" : "▼ VENDA");
+
+                    if (s.IsOpen)
+                    {
+                        float x0 = visibleX ? xE : 0;
+                        float yS = chartScale.GetYByValue(ToNq(f, s.Stop, basis));
+                        float yG = chartScale.GetYByValue(ToNq(f, s.Gain, basis));
+                        DrawHLine(chartControl, x0, panelW, yE, col, 1.6f, false);
+                        DrawHLine(chartControl, x0, panelW, yS, System.Windows.Media.Brushes.Red, 1.4f, true);
+                        DrawHLine(chartControl, x0, panelW, yG, System.Windows.Media.Brushes.Lime, 1.4f, true);
+                        DrawLabelRight(chartControl,string.Format("{0} ENTRADA {1:0.00}", tag, ToNq(f, s.Entry, basis)), panelW - 8, yE - 15, col, 11, true);
+                        double eN = ToNq(f, s.Entry, basis), sN = ToNq(f, s.Stop, basis), gN = ToNq(f, s.Gain, basis);
+                        double dirSg = s.IsBuy ? 1 : -1;
+                        string pS = MostrarPnlStopGain ? "  " + Dolar((sN - eN) * dirSg) : "";
+                        string pG = MostrarPnlStopGain ? "  " + Dolar((gN - eN) * dirSg) : "";
+                        DrawLabelRight(chartControl,string.Format("#{0} STOP {1:0.00}{2}", s.Id, sN, pS), panelW - 8, yS - 15, System.Windows.Media.Brushes.Red, 11, false);
+                        DrawLabelRight(chartControl,string.Format("#{0} GAIN {1:0.00}{2}", s.Id, gN, pG), panelW - 8, yG - 15, System.Windows.Media.Brushes.Lime, 11, false);
+                        if (visibleX) DrawDot(chartControl, xE, yE, 6, col);
+                    }
+                    else if (visibleX)
+                    {
+                        System.Windows.Media.Brush rc = s.IsGain ? System.Windows.Media.Brushes.Lime : s.IsStop ? System.Windows.Media.Brushes.Red : System.Windows.Media.Brushes.Gray;
+                        DrawDot(chartControl, xE, yE, 5, col);
+                        string res = s.IsGain ? "GAIN" : s.IsStop ? "STOP" : s.Status;
+                        string resPnl = "";
+                        if (MostrarPnlStopGain)
+                        {
+                            double xr = !double.IsNaN(s.Exit) ? s.Exit : (s.IsGain ? s.Gain : s.IsStop ? s.Stop : double.NaN);
+                            if (!double.IsNaN(xr)) resPnl = "  " + Dolar((ToNq(f, xr, basis) - eNq) * (s.IsBuy ? 1 : -1));
+                        }
+                        DrawText(chartControl, string.Format("#{0} {1} → {2}{3}", s.Id, s.IsBuy ? "▲" : "▼", res, resPnl), xE + 8, yE - 16, rc, 11, true);
+                        if (!double.IsNaN(s.Exit))
+                        {
+                            float xX = XForTime(chartControl, s.ExitTime);
+                            float yX = chartScale.GetYByValue(ToNq(f, s.Exit, basis));
+                            if (xX >= 0 && TracoEntradaSaida)
+                            {
+                                DrawLine(chartControl, xE, yE, xX, yX, rc, 1.2f, true);
+                                DrawDot(chartControl, xX, yX, 4, rc);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (MostrarTempoVela) DrawTempoVela(chartControl, chartScale, price);
+
+            // ---------- painel
+            if (MostrarPainel) DrawPanel(chartControl, f, basis, price);
+
+            // ---------- trava do Market Structure (raio): sempre visivel, canto superior direito
+            DrawTravaBadge(chartControl, f);
+
+            // ---------- ultima atualizacao do feed: canto inferior direito
+            if (MostrarHoraFeed) DrawFeedStatus(chartControl, f);
+
+            // ---------- quadro de indicadores do Grix (verde/vermelho)
+            if (MostrarQuadro) DrawQuadro(chartControl, f);
+        }
+
+        // Canto inferior direito: hora dos dados do Grix (ET) e quando o indicador recebeu a ultima leitura.
+        private void DrawFeedStatus(ChartControl cc, Feed f)
+        {
+            double recebidoSeg = (DateTime.Now - f.Fetched).TotalSeconds;
+            bool atrasado = recebidoSeg > Math.Max(30, PollSeconds * 6) || failures >= 3;
+            string idadeDados = "";
+            if (f.EtTime != DateTime.MinValue && etZone != null)
+            {
+                try
+                {
+                    double s = (TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, etZone) - f.EtTime).TotalSeconds;
+                    if (s > 120) atrasado = true;
+                    idadeDados = " (" + Idade(s) + ")";
+                }
+                catch { }
+            }
+            string txt = "Feed Grix: dados " + (f.HoraEt.Length > 0 ? f.HoraEt + " ET" : "sem hora") + idadeDados
+                       + "  ·  recebido " + f.Fetched.ToString("HH:mm:ss") + " (" + Idade(recebidoSeg) + ")"
+                       + (failures > 0 ? "  ·  " + failures + " falha(s)" : "");
+            float size = 11;
+            using (SharpDX.DirectWrite.TextFormat tf = new SharpDX.DirectWrite.TextFormat(NinjaTrader.Core.Globals.DirectWriteFactory, "Segoe UI",
+                atrasado ? SharpDX.DirectWrite.FontWeight.Bold : SharpDX.DirectWrite.FontWeight.Normal, SharpDX.DirectWrite.FontStyle.Normal, size))
+            using (SharpDX.DirectWrite.TextLayout tl = new SharpDX.DirectWrite.TextLayout(NinjaTrader.Core.Globals.DirectWriteFactory, txt, tf, 900, size * 2))
+            {
+                float w = tl.Metrics.Width, h = tl.Metrics.Height;
+                float xR = ChartPanel.X + ChartPanel.W - 70;   // folga para o eixo de precos
+                float x = xR - w - 12, y = ChartPanel.Y + ChartPanel.H - h - 12;
+                using (SharpDX.Direct2D1.Brush bg = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new SharpDX.Color4(0f, 0f, 0f, 0.62f)))
+                    RenderTarget.FillRectangle(new SharpDX.RectangleF(x - 8, y - 4, w + 16, h + 8), bg);
+                using (SharpDX.Direct2D1.Brush dx = (atrasado ? System.Windows.Media.Brushes.Orange : System.Windows.Media.Brushes.Gainsboro).ToDxBrush(RenderTarget))
+                    RenderTarget.DrawTextLayout(new SharpDX.Vector2(x, y), tl, dx);
+            }
+        }
+
+        private static string Idade(double s)
+        {
+            if (s < 0) s = 0;
+            if (s < 90) return "há " + s.ToString("0") + " s";
+            if (s < 5400) return "há " + (s / 60).ToString("0") + " min";
+            return "há " + (s / 3600).ToString("0.0") + " h";
+        }
+
+        // Regra fixa 07/10/2026: nunca operar contra o Market Structure QQQ com raio.
+        // 08/11/2026: quadro com os indicadores do Grix em barras verde/vermelho, no estilo do painel da Grix.
+        // Escala -100..+100 (positivo = verde, compra; negativo = vermelho, venda). Fluxo e PHC: 0..100% comprador,
+        // mostrados como barra dividida (verde = compradores, vermelho = vendedores). Cada linha liga/desliga nas propriedades (grupo 4).
+        private void DrawQuadro(ChartControl cc, Feed f)
+        {
+            List<object[]> rows = new List<object[]>();   // {rotulo, valor, tipo} tipo: 0 = -100..100, 1 = 0..100 split, 2 = titulo
+            List<object[]> q = new List<object[]>();
+            if (QNet) q.Add(new object[] { "Net Gamma", f.Net, 0 });
+            if (QAnalytics) q.Add(new object[] { "Analytics", f.An, 0 });
+            if (QRho) q.Add(new object[] { "Rho", f.Rho, 0 });
+            if (QMs) q.Add(new object[] { "Market Structure", f.Ms, 0 });
+            if (QAnchors) q.Add(new object[] { "Anchors", f.Anch, 0 });
+            if (QHedge) q.Add(new object[] { "Hedge", f.Hedge, 0 });
+            if (QSmartDelta) q.Add(new object[] { "Smart Delta", f.SmartD, 0 });
+            if (QTailRisk) q.Add(new object[] { "Tail Risk", f.Tail, 0 });
+            if (QVolSmile) q.Add(new object[] { "Vol Smile", f.VolSm, 0 });
+            if (QVap) q.Add(new object[] { "VAP", f.Vap, 0 });
+            if (QSrCall) q.Add(new object[] { "Stock Repl. call", f.SrCall, 0 });
+            if (QSrPut) q.Add(new object[] { "Stock Repl. put", f.SrPut, 0 });
+            if (QFluxoQqq) q.Add(new object[] { "Fluxo QQQ", f.FlowQ, 1 });
+            if (QFluxoSpy) q.Add(new object[] { "Fluxo SPY", f.FlowS, 1 });
+            if (QPhc) q.Add(new object[] { "PHC (compr.)", f.Phc, 1 });
+            if (q.Count > 0) { rows.Add(new object[] { "QQQ", double.NaN, 2 }); rows.AddRange(q); }
+            List<object[]> sp = new List<object[]>();
+            if (QSpyNet) sp.Add(new object[] { "Net Gamma", f.SpyNet, 0 });
+            if (QSpyAnalytics) sp.Add(new object[] { "Analytics", f.SpyAn, 0 });
+            if (QSpyRho) sp.Add(new object[] { "Rho", f.SpyRho, 0 });
+            if (QSpyMs) sp.Add(new object[] { "Market Structure", f.SpyMs, 0 });
+            if (sp.Count > 0) { rows.Add(new object[] { "SPY", double.NaN, 2 }); rows.AddRange(sp); }
+
+            List<object[]> setup = new List<object[]>();
+            if (QSetupAbertura)
+            {
+                setup.Add(new object[] { "SETUP ABERTURA", double.NaN, 2 });
+                setup.Add(new object[] { "QQQ", f.SetupAb, 0 });
+                setup.Add(new object[] { "SPY", f.SpySetupAb, 0 });
+            }
+            if (rows.Count == 0 && setup.Count == 0) return;
+
+            float fs = Math.Max(9, QuadroFonte);
+            float lh = fs * 1.75f, labW = fs * 9.2f, barW = fs * 9f, valW = fs * 4.4f, pad = fs * 0.7f;
+            float w = labW + barW + valW + pad * 3;
+            float h1 = rows.Count > 0 ? rows.Count * lh + pad * 2 : 0, h2 = setup.Count > 0 ? setup.Count * lh + pad * 2 : 0;
+            float gap = (h1 > 0 && h2 > 0) ? 8 : 0, hTot = h1 + gap + h2;
+            float xR = ChartPanel.X + ChartPanel.W - 70, x, y;
+            if (QuadroPosicao == PosQuadro.EsquerdaCima) { x = ChartPanel.X + 10; y = ChartPanel.Y + 24 + (MostrarPainel ? painelAltura + 10 : 0); }   // abaixo do painel de texto
+            else if (QuadroPosicao == PosQuadro.DireitaCima) { x = xR - w; y = ChartPanel.Y + 44; }
+            else if (QuadroPosicao == PosQuadro.DireitaBaixo) { x = xR - w; y = ChartPanel.Y + ChartPanel.H - hTot - 34; }
+            else { x = ChartPanel.X + 10; y = ChartPanel.Y + ChartPanel.H - hTot - 34; }
+
+            if (rows.Count > 0) DrawQuadroCaixa(rows, x, y, w, h1, fs, lh, labW, barW, valW, pad);
+            if (setup.Count > 0) DrawQuadroCaixa(setup, x, y + h1 + gap, w, h2, fs, lh, labW, barW, valW, pad);
+        }
+
+        private void DrawQuadroCaixa(List<object[]> rows, float x, float y, float w, float h, float fs, float lh, float labW, float barW, float valW, float pad)
+        {
+            SharpDX.Color4 cVerde = new SharpDX.Color4(0.16f, 0.78f, 0.42f, 1f), cVerm = new SharpDX.Color4(0.90f, 0.26f, 0.24f, 1f);
+            SharpDX.Color4 cFundoBar = new SharpDX.Color4(1f, 1f, 1f, 0.10f), cFundo = new SharpDX.Color4(0.04f, 0.05f, 0.08f, 0.86f);
+            using (SharpDX.Direct2D1.Brush bg = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, cFundo))
+                RenderTarget.FillRectangle(new SharpDX.RectangleF(x, y, w, h), bg);
+            using (SharpDX.Direct2D1.Brush bVerde = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, cVerde))
+            using (SharpDX.Direct2D1.Brush bVerm = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, cVerm))
+            using (SharpDX.Direct2D1.Brush bBar = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, cFundoBar))
+            using (SharpDX.Direct2D1.Brush bMeio = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new SharpDX.Color4(1f, 1f, 1f, 0.45f)))
+            using (SharpDX.Direct2D1.Brush bBranco = System.Windows.Media.Brushes.White.ToDxBrush(RenderTarget))
+            using (SharpDX.Direct2D1.Brush bCinza = System.Windows.Media.Brushes.Silver.ToDxBrush(RenderTarget))
+            using (SharpDX.Direct2D1.Brush bOuro = System.Windows.Media.Brushes.Gold.ToDxBrush(RenderTarget))
+            using (SharpDX.DirectWrite.TextFormat tfN = new SharpDX.DirectWrite.TextFormat(NinjaTrader.Core.Globals.DirectWriteFactory, "Segoe UI", SharpDX.DirectWrite.FontWeight.Normal, SharpDX.DirectWrite.FontStyle.Normal, fs))
+            using (SharpDX.DirectWrite.TextFormat tfB = new SharpDX.DirectWrite.TextFormat(NinjaTrader.Core.Globals.DirectWriteFactory, "Segoe UI", SharpDX.DirectWrite.FontWeight.Bold, SharpDX.DirectWrite.FontStyle.Normal, fs))
+            using (SharpDX.DirectWrite.TextFormat tfT = new SharpDX.DirectWrite.TextFormat(NinjaTrader.Core.Globals.DirectWriteFactory, "Segoe UI", SharpDX.DirectWrite.FontWeight.Bold, SharpDX.DirectWrite.FontStyle.Normal, fs * 0.9f))
+            {
+                tfB.TextAlignment = SharpDX.DirectWrite.TextAlignment.Trailing;
+                float yy = y + pad;
+                foreach (object[] r in rows)
+                {
+                    string rot = (string)r[0]; double v = (double)r[1]; int tipo = (int)r[2];
+                    float xl = x + pad, xb = x + pad + labW, xv = xb + barW + pad, yt = yy + (lh - fs * 1.35f) / 2;
+                    if (tipo == 2)
+                    {
+                        using (SharpDX.DirectWrite.TextLayout tl = new SharpDX.DirectWrite.TextLayout(NinjaTrader.Core.Globals.DirectWriteFactory, rot + "  ·  GRIX", tfT, w, lh))
+                            RenderTarget.DrawTextLayout(new SharpDX.Vector2(xl, yt), tl, bOuro);
+                        yy += lh; continue;
+                    }
+                    using (SharpDX.DirectWrite.TextLayout tl = new SharpDX.DirectWrite.TextLayout(NinjaTrader.Core.Globals.DirectWriteFactory, rot, tfN, labW, lh))
+                        RenderTarget.DrawTextLayout(new SharpDX.Vector2(xl, yt), tl, bCinza);
+                    float bh = fs * 0.85f, yb = yy + (lh - bh) / 2;
+                    RenderTarget.FillRectangle(new SharpDX.RectangleF(xb, yb, barW, bh), bBar);
+                    string txt; SharpDX.Direct2D1.Brush bv = bCinza;
+                    if (double.IsNaN(v)) txt = "—";
+                    else if (tipo == 0)
+                    {
+                        double c = Math.Max(-100, Math.Min(100, v)); float mid = xb + barW / 2, len = (float)(Math.Abs(c) / 100.0 * barW / 2);
+                        if (c >= 0) RenderTarget.FillRectangle(new SharpDX.RectangleF(mid, yb, len, bh), bVerde);
+                        else RenderTarget.FillRectangle(new SharpDX.RectangleF(mid - len, yb, len, bh), bVerm);
+                        RenderTarget.FillRectangle(new SharpDX.RectangleF(mid - 0.5f, yb - 2, 1f, bh + 4), bMeio);
+                        txt = v.ToString("+0;-0;0"); bv = v > 0 ? bVerde : v < 0 ? bVerm : bCinza;
+                    }
+                    else
+                    {
+                        double c = Math.Max(0, Math.Min(100, v)); float len = (float)(c / 100.0 * barW);
+                        RenderTarget.FillRectangle(new SharpDX.RectangleF(xb, yb, len, bh), bVerde);
+                        RenderTarget.FillRectangle(new SharpDX.RectangleF(xb + len, yb, barW - len, bh), bVerm);
+                        txt = v.ToString("0") + "%"; bv = v >= 60 ? bVerde : v <= 40 ? bVerm : bBranco;
+                    }
+                    using (SharpDX.DirectWrite.TextLayout tl = new SharpDX.DirectWrite.TextLayout(NinjaTrader.Core.Globals.DirectWriteFactory, txt, tfB, valW, lh))
+                        RenderTarget.DrawTextLayout(new SharpDX.Vector2(xv, yt), tl, bv);
+                    yy += lh;
+                }
+            }
+        }
+
+        private void DrawTravaBadge(ChartControl cc, Feed f)
+        {
+            string txt = f.MsTrava < 0 ? "COMPRA PROIBIDA  ·  MS com raio vermelho"
+                       : f.MsTrava > 0 ? "VENDA PROIBIDA  ·  MS com raio verde"
+                       : "Trava MS: livre (sem raio)";
+            float size = f.MsTrava != 0 ? 16 : 11;
+            SharpDX.Color4 fundo = f.MsTrava < 0 ? new SharpDX.Color4(0.75f, 0.05f, 0.10f, 0.92f)
+                                 : f.MsTrava > 0 ? new SharpDX.Color4(0.05f, 0.55f, 0.20f, 0.92f)
+                                 : new SharpDX.Color4(0f, 0f, 0f, 0.55f);
+            using (SharpDX.DirectWrite.TextFormat tf = new SharpDX.DirectWrite.TextFormat(NinjaTrader.Core.Globals.DirectWriteFactory, "Segoe UI",
+                f.MsTrava != 0 ? SharpDX.DirectWrite.FontWeight.Bold : SharpDX.DirectWrite.FontWeight.Normal, SharpDX.DirectWrite.FontStyle.Normal, size))
+            using (SharpDX.DirectWrite.TextLayout tl = new SharpDX.DirectWrite.TextLayout(NinjaTrader.Core.Globals.DirectWriteFactory, txt, tf, 600, size * 2))
+            {
+                float w = tl.Metrics.Width, h = tl.Metrics.Height;
+                float xR = ChartPanel.X + ChartPanel.W - 70;   // folga para o eixo de precos
+                float x = xR - w - 12, y = ChartPanel.Y + 8;
+                using (SharpDX.Direct2D1.Brush bg = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, fundo))
+                    RenderTarget.FillRectangle(new SharpDX.RectangleF(x - 8, y - 4, w + 16, h + 8), bg);
+                using (SharpDX.Direct2D1.Brush dx = (f.MsTrava != 0 ? System.Windows.Media.Brushes.White : System.Windows.Media.Brushes.Gray).ToDxBrush(RenderTarget))
+                    RenderTarget.DrawTextLayout(new SharpDX.Vector2(x, y), tl, dx);
+            }
+        }
+
+        private float XForTime(ChartControl cc, DateTime t)
+        {
+            if (t == DateTime.MinValue || ChartBars == null) return -1;
+            try
+            {
+                int idx = ChartBars.GetBarIdxByTime(cc, t.AddHours(offsetNow));
+                if (idx < 0) return -1;
+                return cc.GetXByBarIndex(ChartBars, idx);
+            }
+            catch { return -1; }
+        }
+
+        private void DrawPanel(ChartControl cc, Feed f, double basis, double price)
+        {
+            List<string> lines = new List<string>();
+            List<System.Windows.Media.Brush> cols = new List<System.Windows.Media.Brush>();
+            double ageSec = (DateTime.Now - f.Fetched).TotalSeconds;
+            bool stale = ageSec > Math.Max(30, PollSeconds * 6) || failures >= 3;
+            lines.Add(string.Format("AXION · Grix   QQQ {0:0.00}  =  NQ {1:0.00}   (dados {2} ET)", f.Qqq, ToNq(f, f.Qqq, basis), f.HoraEt));
+            cols.Add(System.Windows.Media.Brushes.White);
+            if (MostrarVariacao && price > 0)
+            {
+                string txt; double refVar;
+                if (!double.IsNaN(openRth))
+                {
+                    txt = "Abertura 09:30: " + TextoVariacao(price, openRth);
+                    refVar = price - openRth;
+                }
+                else
+                {
+                    txt = "Abertura 09:30: aguardando";
+                    refVar = 0;
+                }
+                if (!double.IsNaN(openSessao)) txt += "  ·  sessão 18h: " + TextoVariacao(price, openSessao);
+                lines.Add(txt);
+                cols.Add(refVar > 0 ? System.Windows.Media.Brushes.Lime : refVar < 0 ? System.Windows.Media.Brushes.Tomato : System.Windows.Media.Brushes.Gainsboro);
+            }
+            lines.Add(f.MsTrava < 0 ? "TRAVA MS (raio vermelho): COMPRA PROIBIDA" : f.MsTrava > 0 ? "TRAVA MS (raio verde): VENDA PROIBIDA" : "Trava MS: livre (sem raio)");
+            cols.Add(f.MsTrava < 0 ? System.Windows.Media.Brushes.Tomato : f.MsTrava > 0 ? System.Windows.Media.Brushes.Lime : System.Windows.Media.Brushes.Gray);
+            if (!ChartIsLive)
+            {
+                lines.Add("GRÁFICO SEM PREÇO AO VIVO (parado): confira a conexão de dados do NinjaTrader");
+                cols.Add(System.Windows.Media.Brushes.Orange);
+            }
+            if (basisSuspect)
+            {
+                lines.Add("CALIBRAÇÃO IGNORADA (diferença QQQ×fator vs preço > " + MaxBaseAbs.ToString("0") + " pts): usando base manual " + BaseManual.ToString("0.0"));
+                cols.Add(System.Windows.Media.Brushes.Orange);
+            }
+            if (stale)
+            {
+                lines.Add("FEED DESATUALIZADO" + (lastError.Length > 0 ? " (" + lastError + ")" : ""));
+                cols.Add(System.Windows.Media.Brushes.Orange);
+            }
+            int gains = f.Sims.Count(x => x.IsGain), stops = f.Sims.Count(x => x.IsStop), open = f.Sims.Count(x => x.IsOpen);
+            lines.Add(string.Format("Simulações: {0} gain · {1} stop · {2} aberta(s)", gains, stops, open));
+            cols.Add(System.Windows.Media.Brushes.Gainsboro);
+            foreach (Sim s in f.Sims.OrderBy(x => x.IsOpen ? 0 : 1).ThenByDescending(x => x.Id).Take(8))
+            {
+                string st = s.IsOpen ? "ABERTA" : s.IsGain ? "GAIN" : s.IsStop ? "STOP" : s.Status;
+                string extra = "";
+                if (s.IsOpen && price > 0)
+                {
+                    double nowQqq = ChartIsLive ? f.Qqq + (price - ToNq(f, f.Qqq, basis)) / Factor(f) : f.Qqq;
+                    double pnl = s.IsBuy ? nowQqq - s.Entry : s.Entry - nowQqq;
+                    extra = string.Format("  | agora {0:+0.00;-0.00} QQQ ({1:+0;-0} pts NQ) {2}", pnl, pnl * Factor(f), Dolar(pnl * Factor(f)));
+                }
+                lines.Add(string.Format("#{0} {1} {2} {3:0.00} → {4}{5}", s.Id, s.Setup, s.IsBuy ? "COMPRA" : "VENDA", s.Entry, st, extra));
+                cols.Add(s.IsOpen ? System.Windows.Media.Brushes.Yellow : s.IsGain ? System.Windows.Media.Brushes.Lime : s.IsStop ? System.Windows.Media.Brushes.Tomato : System.Windows.Media.Brushes.Gainsboro);
+            }
+            lines.Add("Simulação, não é recomendação.");
+            cols.Add(System.Windows.Media.Brushes.Gray);
+
+            float lh = 17, x = 10, y = 24, w = 470, h = lines.Count * lh + 10;
+            painelAltura = h;
+            using (SharpDX.Direct2D1.Brush bg = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new SharpDX.Color4(0f, 0f, 0f, 0.62f)))
+                RenderTarget.FillRectangle(new SharpDX.RectangleF(x - 4, y - 3, w, h), bg);
+            for (int i = 0; i < lines.Count; i++)
+                DrawText(cc, lines[i], x, y + i * lh, cols[i], 12, i == 0 || (i == 1 && f.MsTrava != 0));
+        }
+
+        // ---- primitivas
+        private void DrawHLine(ChartControl cc, float x1, float x2, float y, System.Windows.Media.Brush b, float w, bool dash)
+        {
+            y = (float)Math.Floor(y) + 0.5f;   // alinha ao pixel: evita cintilacao
+            DrawLine(cc, x1, y, x2, y, b, w, dash);
+        }
+
+        private void DrawLine(ChartControl cc, float x1, float y1, float x2, float y2, System.Windows.Media.Brush b, float w, bool dash)
+        {
+            using (SharpDX.Direct2D1.Brush dx = b.ToDxBrush(RenderTarget))
+            {
+                if (dash)
+                {
+                    SharpDX.Direct2D1.StrokeStyleProperties sp = new SharpDX.Direct2D1.StrokeStyleProperties();
+                    sp.DashStyle = SharpDX.Direct2D1.DashStyle.Dash;
+                    using (SharpDX.Direct2D1.StrokeStyle ss = new SharpDX.Direct2D1.StrokeStyle(NinjaTrader.Core.Globals.D2DFactory, sp))
+                        RenderTarget.DrawLine(new SharpDX.Vector2(x1, y1), new SharpDX.Vector2(x2, y2), dx, w, ss);
+                }
+                else
+                    RenderTarget.DrawLine(new SharpDX.Vector2(x1, y1), new SharpDX.Vector2(x2, y2), dx, w);
+            }
+        }
+
+        private void DrawDot(ChartControl cc, float x, float y, float r, System.Windows.Media.Brush b)
+        {
+            using (SharpDX.Direct2D1.Brush dx = b.ToDxBrush(RenderTarget))
+            {
+                SharpDX.Direct2D1.Ellipse el = new SharpDX.Direct2D1.Ellipse(new SharpDX.Vector2(x, y), r, r);
+                RenderTarget.FillEllipse(el, dx);
+            }
+        }
+
+        private void DrawText(ChartControl cc, string text, float x, float y, System.Windows.Media.Brush b, float size, bool bold)
+        {
+            using (SharpDX.DirectWrite.TextFormat tf = new SharpDX.DirectWrite.TextFormat(NinjaTrader.Core.Globals.DirectWriteFactory, "Segoe UI",
+                bold ? SharpDX.DirectWrite.FontWeight.Bold : SharpDX.DirectWrite.FontWeight.Normal, SharpDX.DirectWrite.FontStyle.Normal, size))
+            using (SharpDX.DirectWrite.TextLayout tl = new SharpDX.DirectWrite.TextLayout(NinjaTrader.Core.Globals.DirectWriteFactory, text, tf, 900, size * 2))
+            using (SharpDX.Direct2D1.Brush dx = b.ToDxBrush(RenderTarget))
+                RenderTarget.DrawTextLayout(new SharpDX.Vector2(x, y), tl, dx);
+        }
+
+        // rotulo pequeno no canto esquerdo (strikes), com fundo escuro
+        private void DrawLabelLeft(ChartControl cc, string text, float x, float y, System.Windows.Media.Brush b, float size, bool bold)
+        {
+            using (SharpDX.DirectWrite.TextFormat tf = new SharpDX.DirectWrite.TextFormat(NinjaTrader.Core.Globals.DirectWriteFactory, "Segoe UI",
+                bold ? SharpDX.DirectWrite.FontWeight.Bold : SharpDX.DirectWrite.FontWeight.Normal, SharpDX.DirectWrite.FontStyle.Normal, size))
+            using (SharpDX.DirectWrite.TextLayout tl = new SharpDX.DirectWrite.TextLayout(NinjaTrader.Core.Globals.DirectWriteFactory, text, tf, 400, size * 2))
+            {
+                float w = tl.Metrics.Width;
+                using (SharpDX.Direct2D1.Brush bg = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new SharpDX.Color4(0f, 0f, 0f, 0.75f)))
+                    RenderTarget.FillRectangle(new SharpDX.RectangleF(x - 3, y - 1, w + 6, size + 5), bg);
+                using (SharpDX.Direct2D1.Brush dx = b.ToDxBrush(RenderTarget))
+                    RenderTarget.DrawTextLayout(new SharpDX.Vector2(x, y), tl, dx);
+            }
+        }
+
+        // rotulo no canto direito, com fundo escuro e sem sobrepor outros rotulos
+        private void DrawLabelRight(ChartControl cc, string text, float xRight, float y, System.Windows.Media.Brush b, float size, bool bold)
+        {
+            float lh = size + 7;
+            int guard = 0;
+            while (guard++ < 14 && labelYs.Any(u => Math.Abs(u - y) < lh)) y -= lh;
+            labelYs.Add(y);
+            using (SharpDX.DirectWrite.TextFormat tf = new SharpDX.DirectWrite.TextFormat(NinjaTrader.Core.Globals.DirectWriteFactory, "Segoe UI",
+                bold ? SharpDX.DirectWrite.FontWeight.Bold : SharpDX.DirectWrite.FontWeight.Normal, SharpDX.DirectWrite.FontStyle.Normal, size))
+            using (SharpDX.DirectWrite.TextLayout tl = new SharpDX.DirectWrite.TextLayout(NinjaTrader.Core.Globals.DirectWriteFactory, text, tf, 900, size * 2))
+            {
+                float w = tl.Metrics.Width;
+                float x = xRight - w;
+                using (SharpDX.Direct2D1.Brush bg = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new SharpDX.Color4(0f, 0f, 0f, 0.72f)))
+                    RenderTarget.FillRectangle(new SharpDX.RectangleF(x - 5, y - 1, w + 10, size + 6), bg);
+                using (SharpDX.Direct2D1.Brush dx = b.ToDxBrush(RenderTarget))
+                    RenderTarget.DrawTextLayout(new SharpDX.Vector2(x, y), tl, dx);
+            }
+        }
+
+        private void DrawTextRight(ChartControl cc, string text, float xRight, float y, System.Windows.Media.Brush b, float size, bool bold)
+        {
+            using (SharpDX.DirectWrite.TextFormat tf = new SharpDX.DirectWrite.TextFormat(NinjaTrader.Core.Globals.DirectWriteFactory, "Segoe UI",
+                bold ? SharpDX.DirectWrite.FontWeight.Bold : SharpDX.DirectWrite.FontWeight.Normal, SharpDX.DirectWrite.FontStyle.Normal, size))
+            {
+                tf.TextAlignment = SharpDX.DirectWrite.TextAlignment.Trailing;
+                using (SharpDX.DirectWrite.TextLayout tl = new SharpDX.DirectWrite.TextLayout(NinjaTrader.Core.Globals.DirectWriteFactory, text, tf, xRight, size * 2))
+                using (SharpDX.Direct2D1.Brush dx = b.ToDxBrush(RenderTarget))
+                    RenderTarget.DrawTextLayout(new SharpDX.Vector2(0, y), tl, dx);
+            }
+        }
+        #endregion
+
+        #region Propriedades
+                // Fonte de dados fixa (Supabase Axion, chave anon somente leitura) - nao aparece nas propriedades.
+        private const string AXION_FEED_URL = "https://db.vemviraramesa.com.br/rest/v1/ninjafeed_kv?select=chave,valor";
+        private const string AXION_FEED_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJyb2xlIjogImFub24iLAogICJpc3MiOiAic3VwYWJhc2UiLAogICJpYXQiOiAxNzE1MDUwODAwLAogICJleHAiOiAxODcyODE3MjAwCn0.vHuoZIP0JA10sCL-aBCQOhRffgwTPr9PWydjogh3yzk";
+        [Browsable(false)][XmlIgnore]
+        public string FeedUrl { get; set; }
+        [Browsable(false)][XmlIgnore]
+        public string ChaveSupabase { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Arquivo local (alternativa)", Description = "Caminho de um CSV local com o mesmo formato da aba NinjaFeed. Usado se a URL estiver vazia.", GroupName = "1. Fonte de dados", Order = 2)]
+        public string LocalFile { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, 60)]
+        [Display(Name = "Consultar a cada (s)", GroupName = "1. Fonte de dados", Order = 3)]
+        public int PollSeconds { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Calibrar pelo preço atual", Description = "Alinha os níveis ao preço ao vivo do contrato (absorve a base entre QQQ x fator e o futuro).", GroupName = "2. Conversão QQQ para NQ", Order = 1)]
+        public bool CalibrarPeloPreco { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0, 100)]
+        [Display(Name = "Fator manual (0 = usar o do feed)", GroupName = "2. Conversão QQQ para NQ", Order = 2)]
+        public double FatorManual { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(10, 1440)]
+        [Display(Name = "Idade maxima do fator (min)", Description = "Fator da planilha mais velho que isso: usa 41.46. Usa fator_data/fator_hora_et do feed, se existirem.", GroupName = "2. Conversão QQQ para NQ", Order = 3)]
+        public int MaxIdadeFatorMin { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Mostrar trava do MS (raio)", Description = "Ligado: mostra o aviso de COMPRA/VENDA PROIBIDA. A chave usar_trava_ms=0 na aba NinjaFeed tambem desliga.", GroupName = "2. Conversão QQQ para NQ", Order = 4)]
+        public bool UsarTravaMS { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(-5000, 5000)]
+        [Display(Name = "Base manual (pontos de NQ)", Description = "Usada quando o gráfico não tem preço ao vivo ou quando a calibração está desligada: NQ = QQQ x fator + base.", GroupName = "2. Conversão QQQ para NQ", Order = 5)]
+        public double BaseManual { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(5, 1000)]
+        [Display(Name = "Base máxima aceita na calibração (pts)", Description = "Se a calibração pelo preço der uma base maior que isso (em módulo), ela é ignorada e vale a base manual. Protege contra níveis deslocados por barra/fuso errado.", GroupName = "2. Conversão QQQ para NQ", Order = 6)]
+        public double MaxBaseAbs { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Mostrar tempo para fechar a vela", Description = "Contagem regressiva ao lado da última vela (barras de minuto/segundo).", GroupName = "3. Exibição", Order = 9)]
+        public bool MostrarTempoVela { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Mostrar ganho/perda em US$ no STOP e no GAIN", GroupName = "3. Exibição", Order = 10)]
+        public bool MostrarPnlStopGain { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, 1000)]
+        [Display(Name = "Contratos (para o cálculo em US$)", Description = "Valor do ponto vem do instrumento do gráfico (MNQ = US$ 2, NQ = US$ 20).", GroupName = "3. Exibição", Order = 11)]
+        public int ContratosSim { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Traço entrada→saída das simulações fechadas", GroupName = "3. Exibição", Order = 8)]
+        public bool TracoEntradaSaida { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Fuso automático", Description = "Descobre sozinho a diferença entre o horário ET do feed e o horário do gráfico (compara com a última barra). Se desligar, usa o valor manual abaixo.", GroupName = "2. Conversão QQQ para NQ", Order = 3)]
+        public bool FusoAutomatico { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(-12, 12)]
+        [Display(Name = "Horas de ET para o fuso do gráfico (manual)", Description = "Só vale com o fuso automático desligado. Gráfico em ET = 0; em Brasília = +1 (horário de verão dos EUA) ou +2.", GroupName = "2. Conversão QQQ para NQ", Order = 4)]
+        public double OffsetHorasEtParaGrafico { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Mostrar níveis (walls, POC, flip)", GroupName = "3. Exibição", Order = 1)]
+        public bool MostrarNiveis { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Mostrar Sigma", GroupName = "3. Exibição", Order = 2)]
+        public bool MostrarSigma { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Mostrar Range do dia", GroupName = "3. Exibição", Order = 3)]
+        public bool MostrarRange { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Mostrar paredes do Heatmap (OI e VOL)", Description = "Paredes de call/put e flip estimado do GEX Heatmap (chaves hm_* do feed).", GroupName = "3. Exibição", Order = 3)]
+        public bool MostrarHeatmap { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Mostrar entradas das simulações", GroupName = "3. Exibição", Order = 4)]
+        public bool MostrarSimulacoes { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Mostrar painel de texto", GroupName = "3. Exibição", Order = 5)]
+        public bool MostrarPainel { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Mostrar todos os strikes do QQQ", GroupName = "3. Exibição", Order = 6)]
+        public bool MostrarStrikes { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Som ao abrir nova simulação", GroupName = "3. Exibição", Order = 7)]
+        public bool SomNovaEntrada { get; set; }
+
+        [Display(Name = "Mostrar variação desde a abertura", Description = "Linha no painel: variação em pontos e % desde a abertura das 09:30 ET e desde a abertura da sessão (18:00 ET).", GroupName = "3. Exibição", Order = 12)]
+        public bool MostrarVariacao { get; set; }
+
+        [Display(Name = "Mostrar última atualização do feed", Description = "Canto inferior direito: hora dos dados do Grix (ET) e quando a última leitura chegou. Fica laranja se o feed parar.", GroupName = "3. Exibição", Order = 13)]
+        public bool MostrarHoraFeed { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Mostrar quadro de indicadores (Gamma, Rho, MS...)", Description = "Barras verde/vermelho com os indicadores do Grix, como no painel da Grix.", GroupName = "3. Exibição", Order = 13)]
+        public bool MostrarQuadro { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Posição do quadro", GroupName = "3. Exibição", Order = 14)]
+        public PosQuadro QuadroPosicao { get; set; }
+
+        [NinjaScriptProperty][Range(9, 24)]
+        [Display(Name = "Tamanho da fonte do quadro", GroupName = "3. Exibição", Order = 15)]
+        public int QuadroFonte { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Net Gamma (QQQ)", GroupName = "4. Quadro de indicadores", Order = 1)]
+        public bool QNet { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Analytics (QQQ)", GroupName = "4. Quadro de indicadores", Order = 2)]
+        public bool QAnalytics { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Rho (QQQ)", GroupName = "4. Quadro de indicadores", Order = 3)]
+        public bool QRho { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Market Structure (QQQ)", GroupName = "4. Quadro de indicadores", Order = 4)]
+        public bool QMs { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Anchors (QQQ)", GroupName = "4. Quadro de indicadores", Order = 5)]
+        public bool QAnchors { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Hedge (QQQ)", GroupName = "4. Quadro de indicadores", Order = 6)]
+        public bool QHedge { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Smart Delta (QQQ)", GroupName = "4. Quadro de indicadores", Order = 7)]
+        public bool QSmartDelta { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Tail Risk (QQQ)", GroupName = "4. Quadro de indicadores", Order = 8)]
+        public bool QTailRisk { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Vol Smile (QQQ)", GroupName = "4. Quadro de indicadores", Order = 9)]
+        public bool QVolSmile { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "VAP (QQQ)", GroupName = "4. Quadro de indicadores", Order = 10)]
+        public bool QVap { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Stock Replacement call (QQQ)", GroupName = "4. Quadro de indicadores", Order = 11)]
+        public bool QSrCall { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Stock Replacement put (QQQ)", GroupName = "4. Quadro de indicadores", Order = 12)]
+        public bool QSrPut { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Fluxo comprador QQQ", GroupName = "4. Quadro de indicadores", Order = 13)]
+        public bool QFluxoQqq { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Fluxo comprador SPY", GroupName = "4. Quadro de indicadores", Order = 14)]
+        public bool QFluxoSpy { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "PHC (% comprador)", GroupName = "4. Quadro de indicadores", Order = 15)]
+        public bool QPhc { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Net Gamma (SPY)", GroupName = "4. Quadro de indicadores", Order = 16)]
+        public bool QSpyNet { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Analytics (SPY)", GroupName = "4. Quadro de indicadores", Order = 17)]
+        public bool QSpyAnalytics { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Rho (SPY)", GroupName = "4. Quadro de indicadores", Order = 18)]
+        public bool QSpyRho { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Market Structure (SPY)", GroupName = "4. Quadro de indicadores", Order = 19)]
+        public bool QSpyMs { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Quadro Setup abertura (QQQ e SPY, caixa separada embaixo)", GroupName = "4. Quadro de indicadores", Order = 20)]
+        public bool QSetupAbertura { get; set; }
+        #endregion
+    }
+}

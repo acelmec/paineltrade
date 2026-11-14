@@ -27,6 +27,7 @@ interface ReplayControlCardProps {
   onSetDataSource?: (source: 'local' | 'supabase') => void;
   isStreamerOnline?: boolean;
   streamerBarsCount?: number;
+  isNinjaPlaybackActive?: boolean;
 }
 
 const SPEED_OPTIONS = [1, 2, 3, 5, 10, 20, 50, 100, 500, 1000];
@@ -57,7 +58,8 @@ export const ReplayControlCard: React.FC<ReplayControlCardProps> = ({
   dataSource = 'local',
   onSetDataSource,
   isStreamerOnline = false,
-  streamerBarsCount = 0
+  streamerBarsCount = 0,
+  isNinjaPlaybackActive = false
 }) => {
   // Draggable Card State
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 24, y: 70 });
@@ -237,15 +239,35 @@ export const ReplayControlCard: React.FC<ReplayControlCardProps> = ({
               <span className="text-[10px] font-bold text-slate-400">Fonte de Dados:</span>
               {dataSource === 'local' && (
                 <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold flex items-center gap-1 ${
-                  isStreamerOnline
-                    ? 'bg-emerald-950/70 border border-emerald-500/40 text-emerald-400'
-                    : 'bg-rose-950/70 border border-rose-500/40 text-rose-400'
+                  !isStreamerOnline
+                    ? 'bg-rose-950/70 border border-rose-500/40 text-rose-400'
+                    : isNinjaPlaybackActive
+                      ? 'bg-emerald-950/80 border border-emerald-500/50 text-emerald-300'
+                      : 'bg-amber-950/80 border border-amber-500/50 text-amber-300'
                 }`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${isStreamerOnline ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
-                  {isStreamerOnline ? `NT8 Online (${streamerBarsCount} velas)` : 'NT8 Offline'}
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    !isStreamerOnline ? 'bg-rose-400' : isNinjaPlaybackActive ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                  }`} />
+                  {!isStreamerOnline
+                    ? 'NT8 Offline'
+                    : isNinjaPlaybackActive
+                      ? `Playback Ativo (${streamerBarsCount}v)`
+                      : `NT8 Online (Sem Playback)`}
                 </span>
               )}
             </div>
+
+            {dataSource === 'local' && isStreamerOnline && !isNinjaPlaybackActive && (
+              <div className="bg-amber-950/60 border border-amber-500/50 p-1.5 rounded text-[9.5px] text-amber-200 flex items-start gap-1.5">
+                <span className="text-amber-400 font-bold text-xs">⚠️</span>
+                <div className="leading-tight">
+                  <div className="font-bold text-amber-300">Conexão de Replay (Playback) desligada no NT8</div>
+                  <div className="text-[8.5px] text-slate-300 pt-0.5">
+                    No NinjaTrader 8, vá em <strong>Connections ➔ Playback Connection</strong> para espelhar o Replay tick a tick.
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-1 bg-[#161a25] p-0.5 rounded border border-[#2d3241]">
               <button
@@ -327,59 +349,71 @@ export const ReplayControlCard: React.FC<ReplayControlCardProps> = ({
           </div>
 
           {/* Row 2: Play/Pause, Scrubber, Speed */}
-          <div className="flex items-center gap-2 no-drag pt-0.5">
-            {/* Play/Pause Button */}
-            <button
-              onClick={onTogglePlay}
-              disabled={totalCandlesCount === 0}
-              className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black transition-all transform active:scale-90 shadow cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                isPlaying
-                  ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/30'
-                  : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/30'
-              }`}
-              title={isPlaying ? 'Pausar' : 'Iniciar'}
-            >
-              {isPlaying ? '⏸' : '▶'}
-            </button>
-
-            {/* Scrubber Timeline Slider */}
-            <div className="flex-1 flex flex-col justify-center">
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="0.1"
-                value={progressPercent}
-                onChange={(e) => onSeek(parseFloat(e.target.value))}
-                disabled={totalCandlesCount === 0}
-                className="w-full h-1.5 bg-slate-700 rounded appearance-none cursor-pointer accent-emerald-400 disabled:opacity-40"
-                title={`Progresso: ${progressPercent.toFixed(1)}%`}
-              />
-            </div>
-
-            {/* Speed Multiplier */}
-            <div className="flex items-center bg-[#0f121d] border border-[#242836] rounded px-1.5 py-0.5 gap-1 shrink-0">
-              <div className="flex flex-col justify-center">
-                <button
-                  onClick={() => handleSpeedStep('up')}
-                  className="text-[8px] text-slate-400 hover:text-emerald-400 leading-none py-0.2"
-                  title="Aumentar Velocidade"
-                >
-                  ▲
-                </button>
-                <button
-                  onClick={() => handleSpeedStep('down')}
-                  className="text-[8px] text-slate-400 hover:text-emerald-400 leading-none py-0.2"
-                  title="Diminuir Velocidade"
-                >
-                  ▼
-                </button>
-              </div>
-              <span className="font-mono text-[11px] font-black text-emerald-400 min-w-[24px] text-center">
-                {speedLabel}
+          {dataSource === 'local' && isNinjaPlaybackActive ? (
+            <div className="bg-emerald-950/40 border border-emerald-500/50 rounded p-1.5 flex items-center justify-between text-[10px] font-mono text-emerald-300 no-drag">
+              <span className="flex items-center gap-1.5 font-bold">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Playback NinjaTrader Ativo</span>
+              </span>
+              <span className="text-[9px] text-slate-300 font-sans bg-emerald-900/60 px-2 py-0.5 rounded border border-emerald-500/40 font-semibold">
+                🎮 Velocidade e Play comandados pelo NinjaTrader 8
               </span>
             </div>
-          </div>
+          ) : (
+            <div className="flex items-center gap-2 no-drag pt-0.5">
+              {/* Play/Pause Button */}
+              <button
+                onClick={onTogglePlay}
+                disabled={totalCandlesCount === 0}
+                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black transition-all transform active:scale-90 shadow cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                  isPlaying
+                    ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/30'
+                    : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/30'
+                }`}
+                title={isPlaying ? 'Pausar' : 'Iniciar'}
+              >
+                {isPlaying ? '⏸' : '▶'}
+              </button>
+
+              {/* Scrubber Timeline Slider */}
+              <div className="flex-1 flex flex-col justify-center">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={progressPercent}
+                  onChange={(e) => onSeek(parseFloat(e.target.value))}
+                  disabled={totalCandlesCount === 0}
+                  className="w-full h-1.5 bg-slate-700 rounded appearance-none cursor-pointer accent-emerald-400 disabled:opacity-40"
+                  title={`Progresso: ${progressPercent.toFixed(1)}%`}
+                />
+              </div>
+
+              {/* Speed Multiplier */}
+              <div className="flex items-center bg-[#0f121d] border border-[#242836] rounded px-1.5 py-0.5 gap-1 shrink-0">
+                <div className="flex flex-col justify-center">
+                  <button
+                    onClick={() => handleSpeedStep('up')}
+                    className="text-[8px] text-slate-400 hover:text-emerald-400 leading-none py-0.2"
+                    title="Aumentar Velocidade"
+                  >
+                    ▲
+                  </button>
+                  <button
+                    onClick={() => handleSpeedStep('down')}
+                    className="text-[8px] text-slate-400 hover:text-emerald-400 leading-none py-0.2"
+                    title="Diminuir Velocidade"
+                  >
+                    ▼
+                  </button>
+                </div>
+                <span className="font-mono text-[11px] font-black text-emerald-400 min-w-[24px] text-center">
+                  {speedLabel}
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Row 3: Compact Quick Action Tools (Conta, Avançar, Sem Gráfico, Reset) */}
           <div className="grid grid-cols-4 gap-1 pt-1 border-t border-[#242836] no-drag">

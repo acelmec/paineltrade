@@ -13,7 +13,8 @@ export type WidgetType =
   | 'projecao_mercado'
   | 'axion_ml_radar'
   | 'gamma_quant_map'
-  | 'wyckoff_structural_radar';
+  | 'wyckoff_structural_radar'
+  | 'market_matrix';
 
 export interface WidgetPosition {
   x: number; // pixels from left of chart container
@@ -188,6 +189,19 @@ export const WIDGET_DEFINITIONS: Record<WidgetType, WidgetDefinition> = {
     defaultPosition: { x: 20, y: 75 },
     defaultParams: {
       selectedStudyId: ''
+    }
+  },
+  market_matrix: {
+    type: 'market_matrix',
+    name: 'Market Matrix',
+    icon: '🎯',
+    description: 'Painel institucional completo de Exposição Gamma, Gregas, Estrutura de Mercado e Fluxo QQQ/SPY.',
+    defaultPosition: { x: 20, y: 50 },
+    defaultParams: {
+      showQqq: true,
+      showSpy: true,
+      showSetupAbertura: true,
+      titleMode: 'grix'
     }
   }
 };

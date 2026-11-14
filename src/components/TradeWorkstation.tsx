@@ -587,6 +587,30 @@ export const TradeWorkstation: React.FC = () => {
     ];
   });
 
+  // Active Widgets on Chart state initialized with default presets or localStorage
+  const [activeWidgets, setActiveWidgets] = useState<WidgetConfig[]>(() => {
+    try {
+      const isGlob = (settings?.chart_template_mode || (typeof localStorage !== 'undefined' ? localStorage.getItem('vortex_chart_template_mode') : 'global') || 'global') === 'global';
+      const saved = isGlob
+        ? (localStorage.getItem('vortex_global_active_widgets') || localStorage.getItem('vortex_workstation_widgets') || localStorage.getItem(`vortex_active_widgets_${pKey}`) || localStorage.getItem(`vortex_active_widgets_${currentSymbol}`))
+        : (localStorage.getItem(`vortex_active_widgets_${pKey}`) || localStorage.getItem(`vortex_active_widgets_${currentSymbol}`) || localStorage.getItem('vortex_workstation_widgets'));
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+
+    // Check if default template has widgets
+    try {
+      const defTemplateStr = localStorage.getItem('vortex_default_template_panel2');
+      if (defTemplateStr) {
+        const defTemplate = JSON.parse(defTemplateStr);
+        if (defTemplate?.widgets && Array.isArray(defTemplate.widgets) && defTemplate.widgets.length > 0) {
+          return defTemplate.widgets;
+        }
+      }
+    } catch (e) {}
+
+    return DEFAULT_ACTIVE_WIDGETS;
+  });
+
   // =========================================================================
   // MULTI-GRÁFICOS: Layouts, Divisores Arrastáveis, Foco Ativo e Templates
   // =========================================================================
@@ -642,10 +666,10 @@ export const TradeWorkstation: React.FC = () => {
       }
     } catch {}
     return [
-      { id: 'slot_0', panelId: pKey, timeframe: 5, indicators: [], autoCenter: false, showTradeMarkers: true, showIndicatorsLegend: true, showRobots: false },
-      { id: 'slot_1', panelId: pKey, timeframe: 15, indicators: [], autoCenter: false, showTradeMarkers: true, showIndicatorsLegend: true, showRobots: false },
-      { id: 'slot_2', panelId: pKey, timeframe: 1, indicators: [], autoCenter: false, showTradeMarkers: true, showIndicatorsLegend: true, showRobots: false },
-      { id: 'slot_3', panelId: pKey, timeframe: 60, indicators: [], autoCenter: false, showTradeMarkers: true, showIndicatorsLegend: true, showRobots: false },
+      { id: 'slot_0', panelId: pKey, timeframe: 5, indicators: [], widgets: [], autoCenter: false, showTradeMarkers: true, showIndicatorsLegend: true, showRobots: false },
+      { id: 'slot_1', panelId: pKey, timeframe: 15, indicators: [], widgets: [], autoCenter: false, showTradeMarkers: true, showIndicatorsLegend: true, showRobots: false },
+      { id: 'slot_2', panelId: pKey, timeframe: 1, indicators: [], widgets: [], autoCenter: false, showTradeMarkers: true, showIndicatorsLegend: true, showRobots: false },
+      { id: 'slot_3', panelId: pKey, timeframe: 60, indicators: [], widgets: [], autoCenter: false, showTradeMarkers: true, showIndicatorsLegend: true, showRobots: false },
     ];
   });
 
@@ -781,6 +805,7 @@ export const TradeWorkstation: React.FC = () => {
         panelId: activePanel?.id || pKey,
         timeframe,
         indicators: activeIndicators,
+        widgets: activeWidgets,
         autoCenter,
         showTradeMarkers,
         showOrderLines,
@@ -792,8 +817,9 @@ export const TradeWorkstation: React.FC = () => {
     return {
       ...base,
       panelId: (panels || []).some((p: any) => p.id === base.panelId) ? base.panelId : (activePanel?.id || pKey),
+      widgets: base.widgets || [],
     };
-  }, [activePanel?.id, pKey, timeframe, activeIndicators, autoCenter, showTradeMarkers, showOrderLines, showIndicatorsLegend, showRobots, multiSlots, panels]);
+  }, [activePanel?.id, pKey, timeframe, activeIndicators, activeWidgets, autoCenter, showTradeMarkers, showOrderLines, showIndicatorsLegend, showRobots, multiSlots, panels]);
 
   const effectiveFocusedIdx = chartLayout === 'single' ? 0 : focusedSlotIndex;
   const focusedSlot = useMemo(() => getEffectiveSlot(effectiveFocusedIdx), [getEffectiveSlot, effectiveFocusedIdx]);
@@ -809,6 +835,14 @@ export const TradeWorkstation: React.FC = () => {
       }
       if (next0.timeframe !== current0.timeframe) {
         handleSetTimeframe(next0.timeframe);
+      }
+      if (next0.widgets !== current0.widgets) {
+        setActiveWidgets(next0.widgets || []);
+        try {
+          localStorage.setItem('vortex_active_widgets_' + pKey, JSON.stringify(next0.widgets || []));
+          localStorage.setItem('vortex_global_active_widgets', JSON.stringify(next0.widgets || []));
+          localStorage.setItem('vortex_workstation_widgets', JSON.stringify(next0.widgets || []));
+        } catch {}
       }
       if (next0.indicators !== current0.indicators) {
         setActiveIndicators(next0.indicators);
@@ -872,30 +906,6 @@ export const TradeWorkstation: React.FC = () => {
       return next;
     });
   }, []);
-
-  // Active Widgets on Chart state initialized with default presets or localStorage
-  const [activeWidgets, setActiveWidgets] = useState<WidgetConfig[]>(() => {
-    try {
-      const isGlob = (settings?.chart_template_mode || (typeof localStorage !== 'undefined' ? localStorage.getItem('vortex_chart_template_mode') : 'global') || 'global') === 'global';
-      const saved = isGlob
-        ? (localStorage.getItem('vortex_global_active_widgets') || localStorage.getItem('vortex_workstation_widgets') || localStorage.getItem(`vortex_active_widgets_${pKey}`) || localStorage.getItem(`vortex_active_widgets_${currentSymbol}`))
-        : (localStorage.getItem(`vortex_active_widgets_${pKey}`) || localStorage.getItem(`vortex_active_widgets_${currentSymbol}`) || localStorage.getItem('vortex_workstation_widgets'));
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-
-    // Check if default template has widgets
-    try {
-      const defTemplateStr = localStorage.getItem('vortex_default_template_panel2');
-      if (defTemplateStr) {
-        const defTemplate = JSON.parse(defTemplateStr);
-        if (defTemplate?.widgets && Array.isArray(defTemplate.widgets) && defTemplate.widgets.length > 0) {
-          return defTemplate.widgets;
-        }
-      }
-    } catch (e) {}
-
-    return DEFAULT_ACTIVE_WIDGETS;
-  });
 
   // Troca de Painel: Se modo for por ativo, recarrega o template daquele painel.
   // Se modo for global (intermitente), mantém o mesmo template! E NUNCA recarrega ao trocar de conta!
@@ -1019,6 +1029,7 @@ export const TradeWorkstation: React.FC = () => {
       updateSlotByIndex(effectiveFocusedIdx, s => ({
         ...s,
         indicators: cloned,
+        widgets: (widgets && Array.isArray(widgets)) ? JSON.parse(JSON.stringify(widgets)) : s.widgets,
         timeframe: (tf && typeof tf === 'number') ? tf : s.timeframe
       }));
       return;
@@ -1071,10 +1082,12 @@ export const TradeWorkstation: React.FC = () => {
     }
   };
 
-  // Widget Handlers
+  // Widget Handlers (atuam exclusivamente no gráfico focado, assim como os indicadores!)
   const handleAddWidget = (type: WidgetType, customParams?: Record<string, any>, customTitle?: string) => {
     const def = WIDGET_DEFINITIONS[type];
     if (!def) return;
+
+    const currentSlotWidgets = focusedSlot.widgets || [];
 
     const newWidget: WidgetConfig = {
       id: `widget-${type}-${Date.now()}`,
@@ -1082,40 +1095,59 @@ export const TradeWorkstation: React.FC = () => {
       title: customTitle || `${def.icon} ${def.name}`,
       visible: true,
       position: {
-        x: def.defaultPosition.x + (activeWidgets.length % 5) * 20,
-        y: def.defaultPosition.y + (activeWidgets.length % 5) * 20
+        x: def.defaultPosition.x + (currentSlotWidgets.length % 5) * 20,
+        y: def.defaultPosition.y + (currentSlotWidgets.length % 5) * 20
       },
       collapsed: false,
       opacity: 0.94,
       params: customParams ? { ...def.defaultParams, ...customParams } : { ...def.defaultParams }
     };
 
-    setActiveWidgets(prev => [...prev, newWidget]);
+    updateSlotByIndex(effectiveFocusedIdx, s => ({
+      ...s,
+      widgets: [...(s.widgets || []), newWidget]
+    }));
   };
 
-  const handleUpdateWidget = (updated: WidgetConfig) => {
-    setActiveWidgets(prev => prev.map(w => w.id === updated.id ? updated : w));
+  const handleUpdateWidget = (updated: WidgetConfig, slotIdx?: number) => {
+    const targetIdx = slotIdx !== undefined ? slotIdx : effectiveFocusedIdx;
+    updateSlotByIndex(targetIdx, s => ({
+      ...s,
+      widgets: (s.widgets || []).map(w => w.id === updated.id ? updated : w)
+    }));
   };
 
-  const handleRemoveWidget = (id: string) => {
-    setActiveWidgets(prev => prev.filter(w => w.id !== id));
+  const handleRemoveWidget = (id: string, slotIdx?: number) => {
+    const targetIdx = slotIdx !== undefined ? slotIdx : effectiveFocusedIdx;
+    updateSlotByIndex(targetIdx, s => ({
+      ...s,
+      widgets: (s.widgets || []).filter(w => w.id !== id)
+    }));
   };
 
-  const handleToggleWidgetVisibility = (id: string) => {
-    setActiveWidgets(prev => prev.map(w => w.id === id ? { ...w, visible: !w.visible } : w));
+  const handleToggleWidgetVisibility = (id: string, slotIdx?: number) => {
+    const targetIdx = slotIdx !== undefined ? slotIdx : effectiveFocusedIdx;
+    updateSlotByIndex(targetIdx, s => ({
+      ...s,
+      widgets: (s.widgets || []).map(w => w.id === id ? { ...w, visible: !w.visible } : w)
+    }));
   };
 
-  const handleResetWidgetPositions = () => {
-    setActiveWidgets(prev => prev.map((w, idx) => {
-      const def = WIDGET_DEFINITIONS[w.type];
-      const defPos = def?.defaultPosition || { x: 20, y: 50 };
-      return {
-        ...w,
-        position: {
-          x: defPos.x + (idx % 4) * 25,
-          y: defPos.y + Math.floor(idx / 4) * 30
-        }
-      };
+  const handleResetWidgetPositions = (slotIdx?: number) => {
+    const targetIdx = slotIdx !== undefined ? slotIdx : effectiveFocusedIdx;
+    updateSlotByIndex(targetIdx, s => ({
+      ...s,
+      widgets: (s.widgets || []).map((w, idx) => {
+        const def = WIDGET_DEFINITIONS[w.type];
+        const defPos = def?.defaultPosition || { x: 20, y: 50 };
+        return {
+          ...w,
+          position: {
+            x: defPos.x + (idx % 4) * 25,
+            y: defPos.y + Math.floor(idx / 4) * 30
+          }
+        };
+      })
     }));
   };
 
@@ -1574,7 +1606,7 @@ export const TradeWorkstation: React.FC = () => {
             >
               <span>🧩</span>
               <span className="bg-purple-900 text-purple-200 px-1.5 py-0.2 rounded-full text-[10px]">
-                {activeWidgets.filter(w => w.visible).length}
+                {(focusedSlot.widgets || []).filter(w => w.visible).length}
               </span>
             </button>
 
@@ -2079,14 +2111,14 @@ export const TradeWorkstation: React.FC = () => {
                     selectedDrawingId={selectedDrawingId}
                     onSelectDrawing={(d) => setSelectedDrawingId(d ? d.id : null)}
                     onOpenDrawingSettings={handleOpenDrawingSettings}
-                    activeWidgets={activeWidgets}
-                    onUpdateWidget={handleUpdateWidget}
-                    onRemoveWidget={handleRemoveWidget}
+                    activeWidgets={slotCfg.widgets || []}
+                    onUpdateWidget={(w) => handleUpdateWidget(w, slotIdx)}
+                    onRemoveWidget={(widId) => handleRemoveWidget(widId, slotIdx)}
                     isLightTheme={isLightTheme}
                     isBlackTheme={isBlackTheme}
                     isSlateTheme={isSlateTheme}
                     isMidnightTheme={isMidnightTheme}
-                    showWidgets={isSlotFocused || !isSlotMulti}
+                    showWidgets={true}
                   />
                 );
               }}
@@ -2565,7 +2597,7 @@ export const TradeWorkstation: React.FC = () => {
         onRemoveIndicator={handleRemoveIndicator}
         onToggleVisibility={handleToggleVisibility}
         onLoadTemplate={handleLoadTemplate}
-        activeWidgets={activeWidgets}
+        activeWidgets={focusedSlot.widgets || []}
         currentTimeframe={focusedSlot.timeframe}
         onAddWidget={handleAddWidget}
         onRemoveWidget={handleRemoveWidget}
@@ -2577,7 +2609,7 @@ export const TradeWorkstation: React.FC = () => {
       <WidgetsManagerModal
         isOpen={isWidgetsModalOpen}
         onClose={() => setIsWidgetsModalOpen(false)}
-        activeWidgets={activeWidgets}
+        activeWidgets={focusedSlot.widgets || []}
         onAddWidget={handleAddWidget}
         onToggleVisibility={handleToggleWidgetVisibility}
         onRemoveWidget={handleRemoveWidget}

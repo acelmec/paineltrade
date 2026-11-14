@@ -30,6 +30,9 @@ export interface StreamerItem {
   timeframe: number;
   bars_count: number;
   last_price: number;
+  first_candle_time?: string;
+  last_candle_time?: string;
+  current_timestamp?: string;
   updated_at: string;
 }
 
@@ -37,6 +40,8 @@ export interface StreamerStatusDto {
   status: 'online' | 'offline';
   version?: string;
   service?: string;
+  is_playback?: boolean;
+  playback_status?: 'Connected' | 'Disconnected' | string;
   activeStreams: StreamerItem[];
 }
 
@@ -80,6 +85,8 @@ export async function checkStreamerStatus(force = false): Promise<StreamerStatus
           status: data.status === 'online' ? 'online' : 'offline',
           version: data.version || '1.0.0',
           service: data.service || 'VortexDataStreamer',
+          is_playback: data.is_playback === true,
+          playback_status: data.playback_status || (data.is_playback ? 'Connected' : 'Disconnected'),
           activeStreams: Array.isArray(data.active_streams) ? data.active_streams : []
         };
       } else {
@@ -221,10 +228,14 @@ export function isStreamFresh(updatedAt?: string): boolean {
 /**
  * Retorna as informações do Streamer para o painel atual (se conectado ao NT8 :8002)
  */
-export async function getStreamerInfoForPanel(panelOrId: any, panelSettings?: any): Promise<{ isLocal: boolean; stream: StreamerItem | null }> {
+export async function getStreamerInfoForPanel(panelOrId: any, panelSettings?: any): Promise<{
+  isLocal: boolean;
+  isPlayback: boolean;
+  stream: StreamerItem | null;
+}> {
   const status = await checkStreamerStatus();
   if (status.status !== 'online' || !status.activeStreams || status.activeStreams.length === 0) {
-    return { isLocal: false, stream: null };
+    return { isLocal: false, isPlayback: false, stream: null };
   }
 
   const { symbol, panelName } = resolveStreamerKey(panelOrId, panelSettings);
@@ -260,10 +271,10 @@ export async function getStreamerInfoForPanel(panelOrId: any, panelSettings?: an
   }
 
   if (matched && (matched.bars_count > 0 || Number(matched.last_price || 0) > 0 || isStreamFresh(matched.updated_at))) {
-    return { isLocal: true, stream: matched };
+    return { isLocal: true, isPlayback: !!status.is_playback, stream: matched };
   }
 
-  return { isLocal: false, stream: null };
+  return { isLocal: false, isPlayback: !!status.is_playback, stream: null };
 }
 
 /**
@@ -377,6 +388,25 @@ export function initStreamerWebSocket(): void {
             lastValidStreamerPrices.set(sym, price);
             if (panel) lastValidStreamerPrices.set(`${sym}_${panel}`, price);
           }
+
+          // Disparo Event-Driven imediato (<1ms): notifica React e motor de ordens sem esperar o timer
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
+              detail: {
+                symbol: sym,
+                panel,
+                price: Number(msg.price || 0),
+                open: Number(msg.open || msg.price || 0),
+                high: Number(msg.high || msg.price || 0),
+                low: Number(msg.low || msg.price || 0),
+                close: Number(msg.close || msg.price || 0),
+                volume: Number(msg.volume || 0),
+                timestamp: msg.timestamp || new Date().toISOString(),
+                updated_at: msg.updated_at || new Date().toISOString(),
+                isBar: msg.type === 'bar'
+              }
+            }));
+          }
         }
 
         if (msg.type === 'bar' && msg.timestamp) {
@@ -438,16 +468,22 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Busca os candles de 1m gerados pelo NinjaTrader local
+ * Busca os candles de 1m gerados pelo NinjaTrader local (com suporte a Delta Sync via 'since')
  */
-export async function fetchStreamerCandles(panelOrId: any, panelSettings?: any, force = false, limit?: number): Promise<Candle[] | null> {
+export async function fetchStreamerCandles(
+  panelOrId: any,
+  panelSettings?: any,
+  force = false,
+  limit?: number,
+  since?: string
+): Promise<Candle[] | null> {
   try {
     const { symbol, panelName } = resolveStreamerKey(panelOrId, panelSettings);
     const cacheKey = `${symbol}_${panelName}`;
     const now = Date.now();
     const existing = cachedStreamerCandles.get(cacheKey);
-    // Se o WebSocket estiver ativo ou o cache recente (<1200ms), retorna imediatamente
-    if (!force && existing && (now - existing.time < 1200)) {
+    // Se o WebSocket estiver ativo ou o cache recente (<1200ms) e NÃO for consulta de delta nem forçada, retorna imediatamente
+    if (!force && !since && existing && (now - existing.time < 1200)) {
       return existing.candles;
     }
 
@@ -456,15 +492,31 @@ export async function fetchStreamerCandles(panelOrId: any, panelSettings?: any, 
       return existing?.candles || null;
     }
 
-    const requestedCount = limit ? Math.max(limit, 15000) : 35000;
-    const countParam = force ? '' : `&count=${requestedCount}`;
-    const url = `${getStreamerBaseUrl()}/candles?symbol=${encodeURIComponent(symbol)}&panel=${encodeURIComponent(panelName)}${countParam}`;
+    // Otimização Delta Sync: se 'since' estiver presente, solicita apenas os candles novos a partir desse timestamp
+    let url = '';
+    if (since && !force) {
+      url = `${getStreamerBaseUrl()}/candles?symbol=${encodeURIComponent(symbol)}&panel=${encodeURIComponent(panelName)}&since=${encodeURIComponent(since)}`;
+    } else {
+      const requestedCount = limit ? Math.max(limit, 15000) : 35000;
+      const countParam = force ? '' : `&count=${requestedCount}`;
+      url = `${getStreamerBaseUrl()}/candles?symbol=${encodeURIComponent(symbol)}&panel=${encodeURIComponent(panelName)}${countParam}`;
+    }
     
     const res = await fetchWithTimeout(url, DATA_TIMEOUT_MS);
     if (!res.ok) return existing?.candles || null;
 
     const data = await res.json();
-    if (!data || !Array.isArray(data.candles) || data.candles.length === 0) {
+    if (!data || !Array.isArray(data.candles)) {
+      return existing?.candles || null;
+    }
+
+    // Se for delta query e não houve nenhum candle novo além de 'since'
+    if (data.candles.length === 0 && since && existing && existing.candles.length > 0) {
+      existing.time = now;
+      return existing.candles;
+    }
+
+    if (data.candles.length === 0) {
       return existing?.candles || null;
     }
 
@@ -496,6 +548,23 @@ export async function fetchStreamerCandles(panelOrId: any, panelSettings?: any, 
         });
       }
     });
+
+    // Se foi uma consulta de Delta Sync ('since'), funde cirurgicamente com o histórico já existente em memória
+    if (since && existing && Array.isArray(existing.candles) && existing.candles.length > 0) {
+      const mergedMap = new Map<number, Candle>();
+      existing.candles.forEach(c => {
+        if (!c || !c.timestamp) return;
+        const t = new Date(c.timestamp).getTime();
+        if (!isNaN(t) && t > 0) mergedMap.set(Math.floor(t / 60000), c);
+      });
+      minuteMap.forEach((c, k) => mergedMap.set(k, c));
+      const mergedCandles = cleanAndSanitizeCandles(Array.from(mergedMap.values()));
+      if (mergedCandles.length > 0) {
+        cachedStreamerCandles.set(cacheKey, { time: now, candles: mergedCandles });
+        return mergedCandles;
+      }
+      return existing.candles;
+    }
 
     const uniqueCandles = cleanAndSanitizeCandles(Array.from(minuteMap.values()));
 
