@@ -194,6 +194,11 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
 // ---------------------------------------------------------------------
 export const DEFAULT_NINJA_TUNNEL_URL = 'ws://144.126.141.254/ws';
 
+let streamerTunnelListener: ((payload: any) => void) | null = null;
+export function setStreamerTunnelListener(cb: (payload: any) => void): void {
+  streamerTunnelListener = cb;
+}
+
 export function getNinjaTunnelWsUrl(): string {
   if (typeof localStorage !== 'undefined') {
     const custom = localStorage.getItem('vortex_ninja_tunnel_ws_url');
@@ -279,6 +284,17 @@ function getOrCreateTunnelWebSocket(token: string): WebSocket | null {
         if (data.type === 'tunnel_ack' || data.type === 'tunnel_status') {
           isNt8OnlineInTunnel = data.status === 'online';
           console.log(`[NinjaGateway] 📡 Status do NT8 no túnel: ${data.status}`);
+          return;
+        }
+
+        if (data.type === 'streamer_push' && data.payload) {
+          if (streamerTunnelListener) {
+            try {
+              streamerTunnelListener(data.payload);
+            } catch (err) {
+              console.warn('[NinjaGateway] Erro no listener de streamer do túnel:', err);
+            }
+          }
           return;
         }
 

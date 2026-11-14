@@ -44,6 +44,7 @@ export const AccountsDashboard: React.FC = () => {
     addLog,
     panels,
     activePanel,
+    createPanelAction,
     customStrategies,
     publicStrategies,
     canAccessAlgorithmCreator,
@@ -242,6 +243,10 @@ export const AccountsDashboard: React.FC = () => {
   const [formExecutionSymbol, setFormExecutionSymbol] = useState('');
   const [formSymbolMapping, setFormSymbolMapping] = useState('NQ->MNQ, ES->MES, YM->MYM');
   const [formMappingPreset, setFormMappingPreset] = useState<'none' | 'nq_mnq' | 'es_mes' | 'fixed' | 'custom'>('nq_mnq');
+  const [formApiKey, setFormApiKey] = useState('');
+  const [formApiSecret, setFormApiSecret] = useState('');
+  const [formConnectionHost, setFormConnectionHost] = useState('');
+  const [formPairingToken, setFormPairingToken] = useState('');
   const [modalTab, setModalTab] = useState<'mesa' | 'manual' | 'mapping'>('mesa');
 
   // States para Modal de Estratégias por Conta
@@ -276,6 +281,10 @@ export const AccountsDashboard: React.FC = () => {
     setFormExecutionSymbol('');
     setFormSymbolMapping('NQ->MNQ, ES->MES, YM->MYM');
     setFormMappingPreset('nq_mnq');
+    setFormApiKey('');
+    setFormApiSecret('');
+    setFormConnectionHost('');
+    setFormPairingToken('');
 
     setFormManualTradingEnabled(true);
     setFormManualStartTime('00:00:00');
@@ -310,6 +319,10 @@ export const AccountsDashboard: React.FC = () => {
     setFormSendLocalhost(acc.send_localhost || false);
     setFormExecutionSymbol(acc.execution_symbol || '');
     setFormSymbolMapping(acc.symbol_mapping || '');
+    setFormApiKey(acc.api_key || '');
+    setFormApiSecret(acc.api_secret || '');
+    setFormConnectionHost(acc.connection_host || '');
+    setFormPairingToken(acc.pairing_token || '');
 
     if (acc.symbol_mapping === 'NQ->MNQ, ES->MES, YM->MYM') {
       setFormMappingPreset('nq_mnq');
@@ -341,15 +354,32 @@ export const AccountsDashboard: React.FC = () => {
     const isNinja = formPlatform === 'nt8' || editingAccount?.platform === 'nt8' || formSendLocalhost || isNinjaExecutionAccount(editingAccount || { platform: formPlatform, account_name: accountNameTrimmed, send_localhost: formSendLocalhost });
     const finalSimulateElimination = isNinja ? false : formSimulateElimination;
 
+    let autoSyncedSymbols: string[] = [];
+    let effectiveInitialBalance = Number(formInitialBalance);
+    if (formPlatform === 'binance' && formApiKey.trim() && formApiSecret.trim()) {
+      try {
+        const { fetchBinanceAccount } = await import('../services/binanceService');
+        const bInfo = await fetchBinanceAccount(formApiKey.trim(), formApiSecret.trim(), false);
+        if (bInfo && bInfo.totalBalanceUsd !== undefined) {
+          const realB = bInfo.totalBalanceUsd;
+          effectiveInitialBalance = realB;
+          autoSyncedSymbols = bInfo.suggestedSymbols || ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
+          addLog('SISTEMA', `⚡ Binance: Saldo real detectado: US$ ${realB.toFixed(2)}. Ativos: ${autoSyncedSymbols.join(', ')}`, 'sistema');
+        }
+      } catch (bErr) {
+        console.warn('[AccountsDashboard] Auto-sync Binance ao salvar:', bErr);
+      }
+    }
+
     if (editingAccount) {
-      const balanceChanged = Number(editingAccount.initial_balance) !== Number(formInitialBalance);
+      const balanceChanged = Number(editingAccount.initial_balance) !== effectiveInitialBalance;
       if (balanceChanged) {
         if (editingAccount.platform === 'nt8' || editingAccount.send_localhost) {
           alert('O saldo de contas sincronizadas com o NinjaTrader 8 não pode ser alterado manualmente. Utilize a sincronização do NinjaTrader para atualizar o saldo.');
           return;
         }
         const confirmReset = window.confirm(
-          `⚠️ ATENÇÃO: Alterar o Saldo Inicial de US$ ${editingAccount.initial_balance.toLocaleString()} para US$ ${Number(formInitialBalance).toLocaleString()} irá RESETAR a conta e APAGAR TODO O HISTÓRICO DE OPERAÇÕES desta conta no banco de dados.\n\nDeseja prosseguir com o reset e salvar o novo saldo?`
+          `⚠️ ATENÇÃO: Alterar o Saldo Inicial de US$ ${editingAccount.initial_balance.toLocaleString()} para US$ ${effectiveInitialBalance.toLocaleString()} irá RESETAR a conta e APAGAR TODO O HISTÓRICO DE OPERAÇÕES desta conta no banco de dados.\n\nDeseja prosseguir com o reset e salvar o novo saldo?`
         );
         if (!confirmReset) return;
       }
@@ -362,7 +392,7 @@ export const AccountsDashboard: React.FC = () => {
       const updatedFields: Partial<BrokerAccount> = {
         account_name: accountNameTrimmed,
         platform: formPlatform,
-        initial_balance: Number(formInitialBalance),
+        initial_balance: effectiveInitialBalance,
         dd_mode: formDdMode,
         max_drawdown_usd: Number(formMaxDd),
         daily_stop_loss_usd: Number(formDailyStop),
@@ -381,11 +411,15 @@ export const AccountsDashboard: React.FC = () => {
         trader_daily_stop_loss_usd: Number(formTraderDailyStopLossUsd),
         trader_daily_take_profit_usd: Number(formTraderDailyTakeProfitUsd),
         execution_symbol: formExecutionSymbol.trim(),
-        symbol_mapping: formSymbolMapping.trim()
+        symbol_mapping: formSymbolMapping.trim(),
+        api_key: formApiKey.trim(),
+        api_secret: formApiSecret.trim(),
+        connection_host: formConnectionHost.trim(),
+        pairing_token: formPairingToken.trim()
       };
 
       if (balanceChanged) {
-        const newBal = Number(formInitialBalance);
+        const newBal = effectiveInitialBalance;
         updatedFields.balance = newBal;
         updatedFields.high_watermark = newBal;
         updatedFields.eod_baseline_balance = newBal;
@@ -404,7 +438,7 @@ export const AccountsDashboard: React.FC = () => {
 
       await updateAccountSupabase(editingAccount.id, updatedFields);
       if (balanceChanged) {
-        await resetAccountAction(editingAccount, Number(formInitialBalance));
+        await resetAccountAction(editingAccount, effectiveInitialBalance);
       }
       await refreshAccounts();
       await syncAllCopyRulesToNinjaTrader().catch(() => {});
@@ -428,7 +462,7 @@ export const AccountsDashboard: React.FC = () => {
       const newParams = {
         account_name: accountNameTrimmed,
         platform: formPlatform,
-        initial_balance: Number(formInitialBalance),
+        initial_balance: effectiveInitialBalance,
         dd_mode: formDdMode,
         max_drawdown_usd: Number(formMaxDd),
         daily_stop_loss_usd: Number(formDailyStop),
@@ -447,7 +481,11 @@ export const AccountsDashboard: React.FC = () => {
         trader_daily_stop_loss_usd: Number(formTraderDailyStopLossUsd),
         trader_daily_take_profit_usd: Number(formTraderDailyTakeProfitUsd),
         execution_symbol: formExecutionSymbol.trim(),
-        symbol_mapping: formSymbolMapping.trim()
+        symbol_mapping: formSymbolMapping.trim(),
+        api_key: formApiKey.trim(),
+        api_secret: formApiSecret.trim(),
+        connection_host: formConnectionHost.trim(),
+        pairing_token: formPairingToken.trim()
       };
 
       setIsCreateModalOpen(false);
@@ -463,6 +501,19 @@ export const AccountsDashboard: React.FC = () => {
       }
       await refreshAccounts();
       await syncAllCopyRulesToNinjaTrader().catch(() => {});
+    }
+
+    if (autoSyncedSymbols.length > 0 && createPanelAction) {
+      for (const sym of autoSyncedSymbols) {
+        const exists = (panels || []).some((p: any) => 
+          p.name?.toUpperCase() === sym || 
+          p.instance_id?.toLowerCase() === sym.toLowerCase()
+        );
+        if (!exists) {
+          const tick = sym.startsWith('BTC') ? 0.10 : 0.01;
+          await createPanelAction(sym, sym.toLowerCase(), 1.0, tick, 50, 100);
+        }
+      }
     }
   };
 
@@ -526,6 +577,54 @@ export const AccountsDashboard: React.FC = () => {
     }
     if (window.confirm(`Excluir a conta "${acc.account_name}"?\n\n⚠️ Atenção: Esta ação é definitiva.\n• Todas as operações desta conta na Análise de Desempenho serão excluídas da base de dados.`)) {
       await deleteAccountAction(acc);
+    }
+  };
+
+  const handleSyncBinanceBalance = async (acc: BrokerAccount) => {
+    if (!acc.api_key || !acc.api_secret) {
+      alert('Chaves de API da Binance ausentes nesta conta. Clique em "⚙️ Editar Regras" e preencha a API Key e Secret.');
+      return;
+    }
+    addLog('SISTEMA', `🔄 Consultando saldo real na Binance para a conta "${acc.account_name}"...`, 'sistema');
+    try {
+      const { fetchBinanceAccount } = await import('../services/binanceService');
+      const info = await fetchBinanceAccount(acc.api_key, acc.api_secret, false);
+      if (info && info.totalBalanceUsd !== undefined) {
+        const realBal = info.totalBalanceUsd;
+        await updateAccountSupabase(acc.id, {
+          balance: realBal,
+          initial_balance: realBal,
+          high_watermark: realBal,
+          eod_baseline_balance: realBal,
+          status: 'active'
+        });
+        setAccounts(prev => prev.map(a => a.id === acc.id ? { ...a, balance: realBal, initial_balance: realBal } : a));
+        if (activeAccount?.id === acc.id) {
+          setActiveAccount(prev => prev ? { ...prev, balance: realBal, initial_balance: realBal } : null);
+        }
+        // Auto-provisionar painéis/ativos da Binance se não existirem
+        const symbolsToCreate = info.suggestedSymbols || ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
+        if (createPanelAction) {
+          for (const sym of symbolsToCreate) {
+            const exists = (panels || []).some((p: any) => 
+              p.name?.toUpperCase() === sym || 
+              p.instance_id?.toLowerCase() === sym.toLowerCase()
+            );
+            if (!exists) {
+              const tick = sym.startsWith('BTC') ? 0.10 : 0.01;
+              await createPanelAction(sym, sym.toLowerCase(), 1.0, tick, 50, 100);
+            }
+          }
+        }
+
+        addLog('SISTEMA', `✅ Binance: Saldo sincronizado (US$ ${realBal.toFixed(2)}) e ativos listados (${symbolsToCreate.join(', ')}).`, 'sistema');
+        const activosStr = info.balances.length > 0 ? info.balances.map(b => `${b.asset}: ${b.free}`).join(', ') : 'Nenhum ativo com saldo positivo';
+        alert(`✅ Conexão com Binance Sincronizada com Sucesso!\n\n• Saldo Real: US$ ${realBal.toLocaleString('en-US', { minimumFractionDigits: 2 })}\n• Ativos na Carteira: ${activosStr}\n• Ativos Prontos no Gráfico: ${symbolsToCreate.join(', ')}\n\nOs pares de negociação foram listados e já estão prontos no seletor de gráficos para transmissão ao vivo!`);
+      } else {
+        alert('⚠️ Não foi possível obter o saldo da Binance.\n\nVerifique:\n1. Se a API Key e Secret estão corretas;\n2. Se a permissão "Habilitar Leitura" está marcada na Binance;\n3. Se o seu IP atual de internet está cadastrado na lista de IPs confiáveis da Binance.');
+      }
+    } catch (err: any) {
+      alert(`Erro ao conectar com a Binance: ${err.message}`);
     }
   };
 
@@ -613,6 +712,18 @@ export const AccountsDashboard: React.FC = () => {
         return (
           <span className="px-1.5 py-0.5 text-[9px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded shrink-0 flex items-center gap-1" title="Plataforma: MetaTrader 5">
             <span className="text-[10px]">🟩</span> MT5
+          </span>
+        );
+      case 'binance':
+        return (
+          <span className="px-1.5 py-0.5 text-[9px] font-black uppercase bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 rounded shrink-0 flex items-center gap-1" title="Plataforma: Binance Cripto Cloud API">
+            <span className="text-[10px]">🟨</span> BINANCE
+          </span>
+        );
+      case 'ctrader':
+        return (
+          <span className="px-1.5 py-0.5 text-[9px] font-black uppercase bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 rounded shrink-0 flex items-center gap-1" title="Plataforma: cTrader Open API">
+            <span className="text-[10px]">🌐</span> CTRADER
           </span>
         );
       case 'nt8':
@@ -1063,7 +1174,16 @@ export const AccountsDashboard: React.FC = () => {
                       >
                         ⚙️ Editar Regras
                       </button>
-                      {!(acc.platform === 'nt8' || acc.send_localhost) && (
+                      {acc.platform === 'binance' && (
+                        <button
+                          onClick={() => handleSyncBinanceBalance(acc)}
+                          className="text-yellow-400 hover:text-yellow-300 font-bold transition cursor-pointer flex items-center gap-1 bg-yellow-500/10 hover:bg-yellow-500/20 px-2 py-0.5 rounded border border-yellow-500/30"
+                          title="Sincronizar saldo real e listar ativos da Binance automaticamente no Axion"
+                        >
+                          ⚡ Sincronizar Saldo & Ativos
+                        </button>
+                      )}
+                      {!(acc.platform === 'nt8' || acc.send_localhost || acc.platform === 'binance') && (
                         <button
                           onClick={() => handleResetBalance(acc)}
                           className="text-amber-400 hover:text-amber-300 transition cursor-pointer"
@@ -1394,7 +1514,18 @@ export const AccountsDashboard: React.FC = () => {
                                 ⚙️
                               </button>
 
-                              {!(acc.platform === 'nt8' || acc.send_localhost) && (
+                              {acc.platform === 'binance' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSyncBinanceBalance(acc)}
+                                  className="p-1 text-yellow-400 hover:text-yellow-300 rounded hover:bg-yellow-950/30 transition cursor-pointer"
+                                  title="Sincronizar Saldo Real e Ativos da Binance"
+                                >
+                                  ⚡
+                                </button>
+                              )}
+
+                              {!(acc.platform === 'nt8' || acc.send_localhost || acc.platform === 'binance') && (
                                 <button
                                   type="button"
                                   onClick={() => handleResetBalance(acc)}
@@ -1468,9 +1599,11 @@ export const AccountsDashboard: React.FC = () => {
                         {formPlatform === 'nt8' && 'NinjaTrader 8'}
                         {formPlatform === 'mt4' && 'MetaTrader 4'}
                         {formPlatform === 'mt5' && 'MetaTrader 5'}
+                        {formPlatform === 'binance' && 'Binance Cripto'}
+                        {formPlatform === 'ctrader' && 'cTrader Open API'}
                       </div>
                       <div className="text-[10px] text-slate-400">
-                        {formPlatform === 'axion' ? 'Execução nativa no painel' : 'Sincronizada via NinjaTrader 8'}
+                        {formPlatform === 'axion' ? 'Execução nativa no painel' : 'Sincronizada via Gateway / API'}
                       </div>
                     </div>
                   </div>
@@ -1479,61 +1612,250 @@ export const AccountsDashboard: React.FC = () => {
                   </span>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Opção A: Demo Axion */}
-                  <button
-                    type="button"
-                    onClick={() => setFormPlatform('axion')}
-                    className={`p-3 rounded-lg border text-left transition flex items-center justify-between cursor-pointer ${
-                      formPlatform === 'axion'
-                        ? 'bg-blue-600/20 border-blue-500 text-blue-300 ring-1 ring-blue-500/40 shadow-sm'
-                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-xl">⚡</span>
-                      <div>
-                        <div className="font-bold text-xs text-white">a) Demo Axion</div>
-                        <div className="text-[10px] text-slate-400">Conta simulada nativa de alta velocidade</div>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                    {/* Opção 1: Demo Axion */}
+                    <button
+                      type="button"
+                      onClick={() => { setFormPlatform('axion'); setFormSendLocalhost(false); }}
+                      className={`p-2.5 rounded-lg border text-left transition flex flex-col justify-between cursor-pointer ${
+                        formPlatform === 'axion'
+                          ? 'bg-blue-600/20 border-blue-500 text-blue-300 ring-1 ring-blue-500/40 shadow-sm'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="text-xl">⚡</span>
+                        {formPlatform === 'axion' && <span className="text-xs text-blue-400 font-black">✓</span>}
                       </div>
-                    </div>
-                    {formPlatform === 'axion' && <span className="text-xs text-blue-400 font-black">✓</span>}
-                  </button>
+                      <div className="mt-1.5">
+                        <div className="font-bold text-xs text-white">Axion Demo</div>
+                        <div className="text-[10px] text-slate-400">Simulado Nativo</div>
+                      </div>
+                    </button>
 
-                  {/* Opção B: Sincronizar do NinjaTrader */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!canAccessCopyTrading) {
-                        alert('🔒 Recurso Exclusivo do Copy NT8:\n\nA sincronização de contas com o NinjaTrader 8 está disponível para assinantes com o módulo Copy NT8 ativo.');
-                        return;
-                      }
-                      setIsCreateModalOpen(false);
-                      setIsNinjaSyncOpen(true);
-                    }}
-                    className={`p-3 rounded-lg border text-left transition flex items-center justify-between cursor-pointer group ${
-                      canAccessCopyTrading
-                        ? 'border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20'
-                        : 'border-slate-800 bg-slate-900/50 opacity-60'
-                    }`}
-                    title={!canAccessCopyTrading ? "Requer módulo Copy NT8" : "Importar contas conectadas diretamente do NinjaTrader 8"}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-xl">🟧</span>
-                      <div>
-                        <div className="font-bold text-xs text-amber-300 group-hover:text-amber-200 flex items-center gap-1.5">
-                          <span>b) Sincronizar do NinjaTrader</span>
-                          {!canAccessCopyTrading && <span className="text-xs">🔒</span>}
+                    {/* Opção 2: NinjaTrader 8 */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!canAccessCopyTrading) {
+                          alert('🔒 Recurso Exclusivo do Copy NT8:\n\nA sincronização de contas com o NinjaTrader 8 está disponível para assinantes com o módulo Copy NT8 ativo.');
+                          return;
+                        }
+                        setIsCreateModalOpen(false);
+                        setIsNinjaSyncOpen(true);
+                      }}
+                      className={`p-2.5 rounded-lg border text-left transition flex flex-col justify-between cursor-pointer group ${
+                        formPlatform === 'nt8'
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-300 ring-1 ring-amber-500/40 shadow-sm'
+                          : canAccessCopyTrading
+                            ? 'border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20'
+                            : 'border-slate-800 bg-slate-900/50 opacity-60'
+                      }`}
+                      title="Importar contas conectadas diretamente do NinjaTrader 8"
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="text-xl">🟧</span>
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">NT8</span>
+                      </div>
+                      <div className="mt-1.5">
+                        <div className="font-bold text-xs text-amber-300 group-hover:text-amber-200">NinjaTrader 8</div>
+                        <div className="text-[10px] text-amber-400/80">Addon / Túnel</div>
+                      </div>
+                    </button>
+
+                    {/* Opção 3: MetaTrader 5 */}
+                    <button
+                      type="button"
+                      onClick={() => { setFormPlatform('mt5'); setFormSendLocalhost(true); }}
+                      className={`p-2.5 rounded-lg border text-left transition flex flex-col justify-between cursor-pointer ${
+                        formPlatform === 'mt5'
+                          ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300 ring-1 ring-emerald-500/40 shadow-sm'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="text-xl">🟩</span>
+                        {formPlatform === 'mt5' && <span className="text-xs text-emerald-400 font-black">✓</span>}
+                      </div>
+                      <div className="mt-1.5">
+                        <div className="font-bold text-xs text-white">MetaTrader 5</div>
+                        <div className="text-[10px] text-slate-400">EA Conector MQL5</div>
+                      </div>
+                    </button>
+
+                    {/* Opção 4: MetaTrader 4 */}
+                    <button
+                      type="button"
+                      onClick={() => { setFormPlatform('mt4'); setFormSendLocalhost(true); }}
+                      className={`p-2.5 rounded-lg border text-left transition flex flex-col justify-between cursor-pointer ${
+                        formPlatform === 'mt4'
+                          ? 'bg-sky-600/20 border-sky-500 text-sky-300 ring-1 ring-sky-500/40 shadow-sm'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="text-xl">🟦</span>
+                        {formPlatform === 'mt4' && <span className="text-xs text-sky-400 font-black">✓</span>}
+                      </div>
+                      <div className="mt-1.5">
+                        <div className="font-bold text-xs text-white">MetaTrader 4</div>
+                        <div className="text-[10px] text-slate-400">EA Conector MQL4</div>
+                      </div>
+                    </button>
+
+                    {/* Opção 5: Binance Cripto */}
+                    <button
+                      type="button"
+                      onClick={() => { setFormPlatform('binance'); setFormSendLocalhost(false); }}
+                      className={`p-2.5 rounded-lg border text-left transition flex flex-col justify-between cursor-pointer ${
+                        formPlatform === 'binance'
+                          ? 'bg-yellow-600/20 border-yellow-500 text-yellow-300 ring-1 ring-yellow-500/40 shadow-sm'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="text-xl">🟨</span>
+                        {formPlatform === 'binance' && <span className="text-xs text-yellow-400 font-black">✓</span>}
+                      </div>
+                      <div className="mt-1.5">
+                        <div className="font-bold text-xs text-white">Binance</div>
+                        <div className="text-[10px] text-slate-400">API Cripto Cloud</div>
+                      </div>
+                    </button>
+
+                    {/* Opção 6: cTrader */}
+                    <button
+                      type="button"
+                      onClick={() => { setFormPlatform('ctrader'); setFormSendLocalhost(false); }}
+                      className={`p-2.5 rounded-lg border text-left transition flex flex-col justify-between cursor-pointer ${
+                        formPlatform === 'ctrader'
+                          ? 'bg-cyan-600/20 border-cyan-500 text-cyan-300 ring-1 ring-cyan-500/40 shadow-sm'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="text-xl">🌐</span>
+                        {formPlatform === 'ctrader' && <span className="text-xs text-cyan-400 font-black">✓</span>}
+                      </div>
+                      <div className="mt-1.5">
+                        <div className="font-bold text-xs text-white">cTrader</div>
+                        <div className="text-[10px] text-slate-400">Spotware Open API</div>
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Subcard de Ajuda / Conexão para MetaTrader */}
+                  {(formPlatform === 'mt4' || formPlatform === 'mt5') && (
+                    <div className="p-3 bg-slate-900/90 border border-emerald-900/40 rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                          <span>{formPlatform === 'mt5' ? '🟩' : '🟦'}</span>
+                          <span>Conector {formPlatform === 'mt5' ? 'MetaTrader 5' : 'MetaTrader 4'}</span>
+                        </span>
+                        <a
+                          href={formPlatform === 'mt5' ? "/AxionGatewayEA.mq5" : "/AxionGatewayEA.mq4"}
+                          download={formPlatform === 'mt5' ? "AxionGatewayEA.mq5" : "AxionGatewayEA.mq4"}
+                          className="px-2 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded text-[10px] font-bold transition flex items-center gap-1"
+                        >
+                          <span>⬇️</span> Baixar EA ({formPlatform.toUpperCase()})
+                        </a>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-0.5">Endereço IP / Host da VPS</label>
+                          <input
+                            type="text"
+                            value={formConnectionHost}
+                            onChange={(e) => setFormConnectionHost(e.target.value)}
+                            placeholder="Ex: localhost ou 144.22.x.x"
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs"
+                          />
                         </div>
-                        <div className="text-[10px] text-amber-400/80">
-                          {!canAccessCopyTrading ? 'Requer módulo Copy NT8' : 'Importar contas ativas do NT8'}
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-0.5">Token de Pareamento (Túnel)</label>
+                          <input
+                            type="text"
+                            value={formPairingToken}
+                            onChange={(e) => setFormPairingToken(e.target.value)}
+                            placeholder="Ex: VTX-MT5-XYZ"
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs"
+                          />
                         </div>
                       </div>
+                      <div className="text-[10px] text-slate-400">
+                        💡 Arraste o EA para o gráfico do MetaTrader. Ele transmitirá candles e executará ordens automaticamente.
+                      </div>
                     </div>
-                    <span className="text-[10px] font-bold px-2 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                      {canAccessCopyTrading ? 'Sincronizar ➔' : 'Bloqueado 🔒'}
-                    </span>
-                  </button>
+                  )}
+
+                  {/* Subcard de Ajuda / Conexão para Binance */}
+                  {formPlatform === 'binance' && (
+                    <div className="p-3 bg-slate-900/90 border border-yellow-900/40 rounded-lg space-y-2">
+                      <span className="text-xs font-bold text-yellow-300 flex items-center gap-1.5">
+                        <span>🟨</span> Credenciais Binance Cloud API
+                      </span>
+                      <div className="space-y-2 text-xs">
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-0.5">API Key</label>
+                          <input
+                            type="text"
+                            value={formApiKey}
+                            onChange={(e) => setFormApiKey(e.target.value)}
+                            placeholder="Cole sua Binance API Key pública"
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-0.5">API Secret</label>
+                          <input
+                            type="password"
+                            value={formApiSecret}
+                            onChange={(e) => setFormApiSecret(e.target.value)}
+                            placeholder="Cole sua Binance API Secret"
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs"
+                          />
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        🔒 Conexão direta 100% em Nuvem sem precisar de robô aberto no PC.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Subcard de Ajuda / Conexão para cTrader */}
+                  {formPlatform === 'ctrader' && (
+                    <div className="p-3 bg-slate-900/90 border border-cyan-900/40 rounded-lg space-y-2">
+                      <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                        <span>🌐</span> Credenciais cTrader Open API
+                      </span>
+                      <div className="space-y-2 text-xs">
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-0.5">Access Token (Spotware)</label>
+                          <input
+                            type="text"
+                            value={formApiKey}
+                            onChange={(e) => setFormApiKey(e.target.value)}
+                            placeholder="Access Token da Open API cTrader"
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-0.5">Account ID cTrader</label>
+                          <input
+                            type="text"
+                            value={formConnectionHost}
+                            onChange={(e) => setFormConnectionHost(e.target.value)}
+                            placeholder="Ex: 1234567"
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs"
+                          />
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        🌐 Conexão nativa em nuvem via Spotware Open API.
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

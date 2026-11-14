@@ -417,6 +417,36 @@ namespace NinjaTrader.NinjaScript.AddOns
         private static readonly Dictionary<string, SymbolStreamData> _streams =
             new Dictionary<string, SymbolStreamData>(StringComparer.OrdinalIgnoreCase);
 
+        // Evento público para repasse de dados para o Túnel em Nuvem (AxionGatewayAddOn)
+        public static event Action<string> OnStreamerBroadcast;
+
+        public static SymbolStreamData GetStream(string symbolOrPanel)
+        {
+            if (string.IsNullOrWhiteSpace(symbolOrPanel)) return null;
+            lock (_serverLock)
+            {
+                if (_streams.TryGetValue(symbolOrPanel, out var s)) return s;
+                foreach (var kvp in _streams)
+                {
+                    if (string.Equals(kvp.Key, symbolOrPanel, StringComparison.OrdinalIgnoreCase) ||
+                        (kvp.Value != null && (string.Equals(kvp.Value.RootSymbol, symbolOrPanel, StringComparison.OrdinalIgnoreCase) ||
+                                               string.Equals(kvp.Value.TargetPanel, symbolOrPanel, StringComparison.OrdinalIgnoreCase))))
+                    {
+                        return kvp.Value;
+                    }
+                }
+            }
+            return null;
+        }
+
+        public static string GetCandlesForSymbol(string symbolOrPanel, int count = 2000)
+        {
+            var stream = GetStream(symbolOrPanel);
+            if (stream == null) return "{\"candles\":[]}";
+            string candlesJson = stream.GetCandlesJson(count);
+            return $"{{\"symbol\":\"{stream.RootSymbol}\",\"panel\":\"{stream.TargetPanel}\",\"count\":{stream.Candles.Count},\"candles\":{candlesJson}}}";
+        }
+
         public class CandleItem
         {
             public string timestamp;
@@ -825,7 +855,12 @@ namespace NinjaTrader.NinjaScript.AddOns
 
         public static void BroadcastWebSocket(string json)
         {
-            if (_wsClients.IsEmpty || string.IsNullOrEmpty(json)) return;
+            if (string.IsNullOrEmpty(json)) return;
+
+            // Repasse assíncrono para o Túnel de Nuvem (se conectado)
+            try { OnStreamerBroadcast?.Invoke(json); } catch { }
+
+            if (_wsClients.IsEmpty) return;
 
             byte[] bytes = Encoding.UTF8.GetBytes(json);
             var segment = new ArraySegment<byte>(bytes);

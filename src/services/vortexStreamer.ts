@@ -6,7 +6,13 @@
 
 import type { Candle, MarketData, BlockTrade } from './db';
 import { cleanAndSanitizeCandles } from './db';
-import { getNinjaGatewayUrl } from './ninjaGateway';
+import {
+  getNinjaGatewayUrl,
+  isNinjaTunnelNt8Online,
+  getNinjaConnectionMode,
+  executeCloudRpc,
+  setStreamerTunnelListener
+} from './ninjaGateway';
 
 const STREAMER_PORT = 8002;
 export function getStreamerBaseUrl(): string {
@@ -90,10 +96,32 @@ export async function checkStreamerStatus(force = false): Promise<StreamerStatus
           activeStreams: Array.isArray(data.active_streams) ? data.active_streams : []
         };
       } else {
-        cachedStatus = { status: 'offline', activeStreams: [] };
+        if (isNinjaTunnelNt8Online() || getNinjaConnectionMode() === 'cloud') {
+          cachedStatus = {
+            status: 'online',
+            version: '2.0.0-cloud',
+            service: 'AxionStreamerTunnel',
+            is_playback: false,
+            playback_status: 'Connected',
+            activeStreams: []
+          };
+        } else {
+          cachedStatus = { status: 'offline', activeStreams: [] };
+        }
       }
     } catch {
-      cachedStatus = { status: 'offline', activeStreams: [] };
+      if (isNinjaTunnelNt8Online() || getNinjaConnectionMode() === 'cloud') {
+        cachedStatus = {
+          status: 'online',
+          version: '2.0.0-cloud',
+          service: 'AxionStreamerTunnel',
+          is_playback: false,
+          playback_status: 'Connected',
+          activeStreams: []
+        };
+      } else {
+        cachedStatus = { status: 'offline', activeStreams: [] };
+      }
     } finally {
       lastStatusFetchTime = Date.now();
       inFlightStatusPromise = null;
@@ -348,7 +376,90 @@ export function getStreamerWsUrl(): string {
 }
 
 export function isStreamerWsConnected(): boolean {
-  return !!(streamerWs && streamerWs.readyState === WebSocket.OPEN);
+  if (streamerWs && streamerWs.readyState === WebSocket.OPEN) return true;
+  return isNinjaTunnelNt8Online();
+}
+
+/**
+ * Processador unificado de eventos de Streamer (compatível com WebSocket Local :8002 e Túnel Cloud RPC)
+ */
+export function handleStreamerIncomingMessage(rawMsg: any): void {
+  try {
+    const msg = typeof rawMsg === 'string' ? JSON.parse(rawMsg) : rawMsg;
+    if (!msg || !msg.symbol) return;
+    const sym = String(msg.symbol).toUpperCase();
+    const panel = String(msg.panel || '').toUpperCase();
+    const cacheKey = `${sym}_${panel}`;
+
+    if (msg.type === 'market_data' || msg.type === 'bar') {
+      const price = Number(msg.price || 0);
+      if (price > 0) {
+        lastValidStreamerPrices.set(sym, price);
+        if (panel) lastValidStreamerPrices.set(`${sym}_${panel}`, price);
+      }
+
+      // Disparo Event-Driven imediato (<1ms): notifica React e motor de ordens sem esperar o timer
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
+          detail: {
+            symbol: sym,
+            panel,
+            price: Number(msg.price || 0),
+            open: Number(msg.open || msg.price || 0),
+            high: Number(msg.high || msg.price || 0),
+            low: Number(msg.low || msg.price || 0),
+            close: Number(msg.close || msg.price || 0),
+            volume: Number(msg.volume || 0),
+            timestamp: msg.timestamp || new Date().toISOString(),
+            updated_at: msg.updated_at || new Date().toISOString(),
+            isBar: msg.type === 'bar'
+          }
+        }));
+      }
+    }
+
+    if (msg.type === 'bar' && msg.timestamp) {
+      const existing = cachedStreamerCandles.get(cacheKey);
+      if (existing && Array.isArray(existing.candles)) {
+        const candles = existing.candles;
+        const newCandle: Candle = {
+          timestamp: msg.timestamp,
+          open: Number(msg.open || msg.price),
+          high: Number(msg.high || msg.price),
+          low: Number(msg.low || msg.price),
+          close: Number(msg.close || msg.price),
+          volume: Number(msg.volume || 0)
+        };
+        const last = candles[candles.length - 1];
+        if (last && last.timestamp === msg.timestamp) {
+          candles[candles.length - 1] = newCandle;
+        } else if (!last || new Date(msg.timestamp).getTime() > new Date(last.timestamp).getTime()) {
+          candles.push(newCandle);
+          if (candles.length > 50000) candles.shift();
+        }
+        cachedStreamerCandles.set(cacheKey, { time: Date.now(), candles });
+      }
+    }
+
+    if (msg.type === 'block_trade') {
+      const bt: BlockTrade = {
+        time: msg.time || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        price: Number(msg.price || 0),
+        volume: Number(msg.volume || 0),
+        side: String(msg.side || 'COMPRA').toUpperCase() as 'COMPRA' | 'VENDA'
+      };
+      if (bt.price > 0 && bt.volume > 0) {
+        addStreamerBlockTrade(sym, panel, bt);
+      }
+    }
+  } catch { }
+}
+
+// Vincula o receptor de Streamer do Túnel de Nuvem ao processador unificado
+if (typeof setStreamerTunnelListener === 'function') {
+  setStreamerTunnelListener((payload) => {
+    handleStreamerIncomingMessage(payload);
+  });
 }
 
 export function initStreamerWebSocket(): void {
@@ -375,75 +486,7 @@ export function initStreamerWebSocket(): void {
     };
 
     ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (!msg || !msg.symbol) return;
-        const sym = String(msg.symbol).toUpperCase();
-        const panel = String(msg.panel || '').toUpperCase();
-        const cacheKey = `${sym}_${panel}`;
-
-        if (msg.type === 'market_data' || msg.type === 'bar') {
-          const price = Number(msg.price || 0);
-          if (price > 0) {
-            lastValidStreamerPrices.set(sym, price);
-            if (panel) lastValidStreamerPrices.set(`${sym}_${panel}`, price);
-          }
-
-          // Disparo Event-Driven imediato (<1ms): notifica React e motor de ordens sem esperar o timer
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
-              detail: {
-                symbol: sym,
-                panel,
-                price: Number(msg.price || 0),
-                open: Number(msg.open || msg.price || 0),
-                high: Number(msg.high || msg.price || 0),
-                low: Number(msg.low || msg.price || 0),
-                close: Number(msg.close || msg.price || 0),
-                volume: Number(msg.volume || 0),
-                timestamp: msg.timestamp || new Date().toISOString(),
-                updated_at: msg.updated_at || new Date().toISOString(),
-                isBar: msg.type === 'bar'
-              }
-            }));
-          }
-        }
-
-        if (msg.type === 'bar' && msg.timestamp) {
-          const existing = cachedStreamerCandles.get(cacheKey);
-          if (existing && Array.isArray(existing.candles)) {
-            const candles = existing.candles;
-            const newCandle: Candle = {
-              timestamp: msg.timestamp,
-              open: Number(msg.open || msg.price),
-              high: Number(msg.high || msg.price),
-              low: Number(msg.low || msg.price),
-              close: Number(msg.close || msg.price),
-              volume: Number(msg.volume || 0)
-            };
-            const last = candles[candles.length - 1];
-            if (last && last.timestamp === msg.timestamp) {
-              candles[candles.length - 1] = newCandle;
-            } else if (!last || new Date(msg.timestamp).getTime() > new Date(last.timestamp).getTime()) {
-              candles.push(newCandle);
-              if (candles.length > 50000) candles.shift();
-            }
-            cachedStreamerCandles.set(cacheKey, { time: Date.now(), candles });
-          }
-        }
-
-        if (msg.type === 'block_trade') {
-          const bt: BlockTrade = {
-            time: msg.time || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-            price: Number(msg.price || 0),
-            volume: Number(msg.volume || 0),
-            side: String(msg.side || 'COMPRA').toUpperCase() as 'COMPRA' | 'VENDA'
-          };
-          if (bt.price > 0 && bt.volume > 0) {
-            addStreamerBlockTrade(sym, panel, bt);
-          }
-        }
-      } catch { }
+      handleStreamerIncomingMessage(event.data);
     };
 
     ws.onerror = () => {
@@ -502,26 +545,43 @@ export async function fetchStreamerCandles(
       url = `${getStreamerBaseUrl()}/candles?symbol=${encodeURIComponent(symbol)}&panel=${encodeURIComponent(panelName)}${countParam}`;
     }
     
-    const res = await fetchWithTimeout(url, DATA_TIMEOUT_MS);
-    if (!res.ok) return existing?.candles || null;
-
-    const data = await res.json();
-    if (!data || !Array.isArray(data.candles)) {
-      return existing?.candles || null;
+    let rawCandles: any[] = [];
+    try {
+      const res = await fetchWithTimeout(url, DATA_TIMEOUT_MS);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.candles)) {
+          rawCandles = data.candles;
+        }
+      }
+    } catch {
+      // Fallback transparente: se a conexão local falhar (acesso remoto), consulta histórico de velas pelo Túnel Cloud RPC
+      if (isNinjaTunnelNt8Online() || getNinjaConnectionMode() === 'cloud') {
+        try {
+          const tunnelData = await executeCloudRpc('candles', {
+            symbol,
+            panel: panelName,
+            count: limit ? Math.max(limit, 15000) : 35000
+          }, 6000);
+          if (tunnelData && Array.isArray(tunnelData.candles)) {
+            rawCandles = tunnelData.candles;
+          }
+        } catch { }
+      }
     }
 
     // Se for delta query e não houve nenhum candle novo além de 'since'
-    if (data.candles.length === 0 && since && existing && existing.candles.length > 0) {
+    if (rawCandles.length === 0 && since && existing && existing.candles.length > 0) {
       existing.time = now;
       return existing.candles;
     }
 
-    if (data.candles.length === 0) {
+    if (rawCandles.length === 0) {
       return existing?.candles || null;
     }
 
     // Suporta até 50.000 barras (mais de 30 dias de histórico 1m) sem truncar períodos como 3 ou 7 dias
-    const rawList = data.candles.length > 50000 ? data.candles.slice(-50000) : data.candles;
+    const rawList = rawCandles.length > 50000 ? rawCandles.slice(-50000) : rawCandles;
 
     // Deduplicação e conversão segura para o formato Candle do Vortex
     const minuteMap = new Map<number, Candle>();

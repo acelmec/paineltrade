@@ -37,6 +37,12 @@ export default defineConfig({
     port: 5173,
     strictPort: false,
     proxy: {
+      '/binance-api': {
+        target: 'https://api.binance.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/binance-api/, ''),
+        secure: true
+      },
       '/api/ml': {
         target: 'http://127.0.0.1:8080',
         changeOrigin: true

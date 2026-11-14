@@ -3584,6 +3584,28 @@ export async function fetchCandlesSupabase(
 
   onProgress?.(15, 0, limit);
 
+  // 0. Detecção e alimentação nativa de Cripto (Binance Cloud Feed)
+  const symToCheck = (targetPanelObj?.name || targetPanelObj?.symbol || targetPanelObj?.instance_id || queryId || '').toUpperCase();
+  const isCrypto = /USDT|BUSD|USDC/i.test(symToCheck) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(symToCheck);
+  if (isCrypto) {
+    try {
+      let cleanSym = symToCheck.replace(/[^A-Za-z0-9]/g, '');
+      if (!cleanSym.endsWith('USDT') && !cleanSym.endsWith('BUSD') && !cleanSym.endsWith('USDC')) {
+        cleanSym = `${cleanSym}USDT`;
+      }
+      const { fetchBinanceCandles, subscribeBinanceMarketData } = await import('./binanceService');
+      const binanceCandles = await fetchBinanceCandles(cleanSym, '1m', limit, false);
+      if (binanceCandles && binanceCandles.length > 0) {
+        onProgress?.(100, binanceCandles.length, limit);
+        saveLocalCandles(queryId, binanceCandles);
+        subscribeBinanceMarketData(cleanSym, false);
+        return binanceCandles;
+      }
+    } catch (e) {
+      console.warn('[DB] Falha no feed da Binance para cripto, tentando fallback:', e);
+    }
+  }
+
   // 1. Tentar coletar dados do streamer local NinjaTrader (:8002) com suporte a Delta Sync
   // Timeout curto (1800ms) e retorno em 0ms se :8002 estiver em cooldown offline
   let localCandles: Candle[] | null = null;
@@ -4815,7 +4837,7 @@ export async function deleteUserLayoutProfileSupabase(profileId: string): Promis
 // GESTÃO DE CONTAS DEMONSTRATIVAS GLOBAIS, COPY TRADE E RISK
 // ================================================================
 
-export type AccountPlatform = 'axion' | 'mt4' | 'mt5' | 'nt8';
+export type AccountPlatform = 'axion' | 'mt4' | 'mt5' | 'nt8' | 'binance' | 'ctrader';
 
 export interface BrokerAccount {
   id: string;
@@ -4849,6 +4871,11 @@ export interface BrokerAccount {
   send_localhost?: boolean;
   execution_symbol?: string;
   symbol_mapping?: string;
+  api_key?: string;
+  api_secret?: string;
+  connection_host?: string;
+  connection_port?: number;
+  pairing_token?: string;
   high_watermark: number;
   eod_baseline_balance: number;
   enforce_dd_lockout: boolean;
@@ -5010,7 +5037,12 @@ const saveLocalAccountRules = (id: string, rules: Partial<BrokerAccount>) => {
       ...(rules.trader_daily_take_profit_usd !== undefined ? { trader_daily_take_profit_usd: Number(rules.trader_daily_take_profit_usd) } : {}),
       ...(rules.manual_strategy_id !== undefined ? { manual_strategy_id: rules.manual_strategy_id } : {}),
       ...(rules.execution_symbol !== undefined ? { execution_symbol: rules.execution_symbol } : {}),
-      ...(rules.symbol_mapping !== undefined ? { symbol_mapping: rules.symbol_mapping } : {})
+      ...(rules.symbol_mapping !== undefined ? { symbol_mapping: rules.symbol_mapping } : {}),
+      ...(rules.api_key !== undefined ? { api_key: rules.api_key } : {}),
+      ...(rules.api_secret !== undefined ? { api_secret: rules.api_secret } : {}),
+      ...(rules.connection_host !== undefined ? { connection_host: rules.connection_host } : {}),
+      ...(rules.connection_port !== undefined ? { connection_port: rules.connection_port } : {}),
+      ...(rules.pairing_token !== undefined ? { pairing_token: rules.pairing_token } : {})
     };
     localStorage.setItem('vortex_account_custom_rules', JSON.stringify(map));
   } catch (e) {}
@@ -5250,7 +5282,12 @@ export async function fetchAccountsSupabase(): Promise<BrokerAccount[]> {
           trader_daily_take_profit_usd: a.trader_daily_take_profit_usd !== undefined && a.trader_daily_take_profit_usd !== null
             ? Number(a.trader_daily_take_profit_usd)
             : (lr.trader_daily_take_profit_usd !== undefined ? Number(lr.trader_daily_take_profit_usd) : 0),
-          manual_strategy_id: a.manual_strategy_id || lr.manual_strategy_id || getAccountManualStrategyId(a)
+          manual_strategy_id: a.manual_strategy_id || lr.manual_strategy_id || getAccountManualStrategyId(a),
+          api_key: a.api_key || lr.api_key || '',
+          api_secret: a.api_secret || lr.api_secret || '',
+          connection_host: a.connection_host || lr.connection_host || '',
+          connection_port: a.connection_port || lr.connection_port || undefined,
+          pairing_token: a.pairing_token || lr.pairing_token || ''
         };
         return fullAcc;
       });
@@ -5326,6 +5363,11 @@ export async function createDemoAccountSupabase(params: {
   trader_daily_take_profit_usd?: number;
   execution_symbol?: string;
   symbol_mapping?: string;
+  api_key?: string;
+  api_secret?: string;
+  connection_host?: string;
+  connection_port?: number;
+  pairing_token?: string;
 }): Promise<BrokerAccount | null> {
   try {
     const user = await getAuthUser();
@@ -5407,6 +5449,11 @@ export async function createDemoAccountSupabase(params: {
       manual_max_daily_trades: params.manual_max_daily_trades !== undefined ? Number(params.manual_max_daily_trades) : 0,
       trader_daily_stop_loss_usd: params.trader_daily_stop_loss_usd !== undefined ? Number(params.trader_daily_stop_loss_usd) : 0,
       trader_daily_take_profit_usd: params.trader_daily_take_profit_usd !== undefined ? Number(params.trader_daily_take_profit_usd) : 0,
+      api_key: params.api_key || '',
+      api_secret: params.api_secret || '',
+      connection_host: params.connection_host || '',
+      connection_port: params.connection_port || undefined,
+      pairing_token: params.pairing_token || '',
       created_at: new Date().toISOString()
     };
 
@@ -5563,6 +5610,11 @@ export async function updateAccountSupabase(
         if (error.message && error.message.includes('manual_trading_enabled')) delete safeUpdates.manual_trading_enabled;
         if (error.message && error.message.includes('trader_daily_stop_loss_usd')) delete safeUpdates.trader_daily_stop_loss_usd;
         if (error.message && error.message.includes('trader_daily_take_profit_usd')) delete safeUpdates.trader_daily_take_profit_usd;
+        if (error.message && error.message.includes('api_key')) delete safeUpdates.api_key;
+        if (error.message && error.message.includes('api_secret')) delete safeUpdates.api_secret;
+        if (error.message && error.message.includes('connection_host')) delete safeUpdates.connection_host;
+        if (error.message && error.message.includes('connection_port')) delete safeUpdates.connection_port;
+        if (error.message && error.message.includes('pairing_token')) delete safeUpdates.pairing_token;
 
         if (Object.keys(safeUpdates).length > 0) {
           const { error: error2 } = await withDbTimeout(

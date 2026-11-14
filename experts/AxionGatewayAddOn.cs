@@ -5444,6 +5444,24 @@ namespace NinjaTrader.NinjaScript.AddOns
                     return "{\"success\":true,\"message\":\"Relatório enviado ao Telegram com sucesso.\"}";
                 }
 
+                if (norm == "candles" || norm == "get_candles" || norm == "bars")
+                {
+                    string symbol = AxionGatewayState.ExtractJsonString(payloadJson, "symbol") ?? "";
+                    string panel = AxionGatewayState.ExtractJsonString(payloadJson, "panel") ?? "";
+                    int count = 2000;
+                    string countStr = AxionGatewayState.ExtractJsonString(payloadJson, "count") ?? AxionGatewayState.ExtractJsonString(payloadJson, "limit");
+                    if (!string.IsNullOrEmpty(countStr)) int.TryParse(countStr, out count);
+                    
+                    try
+                    {
+                        return AxionAddOnStreamServer.GetCandlesForSymbol(!string.IsNullOrEmpty(symbol) ? symbol : panel, count);
+                    }
+                    catch (Exception ex)
+                    {
+                        return $"{{\"error\":\"{AxionGatewayState.EscapeJson(ex.Message)}\",\"candles\":[]}}";
+                    }
+                }
+
                 if (norm == "copy_rules")
                 {
                     if (!string.IsNullOrWhiteSpace(payloadJson) && payloadJson.Length > 5)
@@ -7854,6 +7872,40 @@ ORDER BY e.Time ASC;";
         public static string StatusMessage { get; private set; } = "Desconectado";
         public static event Action OnStatusChanged;
 
+        private static readonly ConcurrentQueue<string> _streamerPushQueue = new ConcurrentQueue<string>();
+        private static int _isStreamerPushLoopRunning = 0;
+
+        public static void BroadcastStreamerPayload(string json)
+        {
+            if (!IsConnected || _activeSocket == null || _activeSocket.State != WebSocketState.Open || string.IsNullOrEmpty(json)) return;
+            string pairingToken = (AxionGatewayState.NuvemPairingToken ?? "").Trim();
+            if (string.IsNullOrEmpty(pairingToken)) return;
+
+            _streamerPushQueue.Enqueue(json);
+            while (_streamerPushQueue.Count > 60 && _streamerPushQueue.TryDequeue(out _)) { }
+
+            if (Interlocked.CompareExchange(ref _isStreamerPushLoopRunning, 1, 0) == 0)
+            {
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        while (IsConnected && _activeSocket != null && _activeSocket.State == WebSocketState.Open && _streamerPushQueue.TryDequeue(out string payload))
+                        {
+                            string msg = $"{{\"type\":\"streamer_push\",\"token\":\"{pairingToken}\",\"payload\":{payload}}}";
+                            await SendTextAsync(_activeSocket, msg, CancellationToken.None).ConfigureAwait(false);
+                            await Task.Delay(25).ConfigureAwait(false);
+                        }
+                    }
+                    catch { }
+                    finally
+                    {
+                        Interlocked.Exchange(ref _isStreamerPushLoopRunning, 0);
+                    }
+                });
+            }
+        }
+
         private static void UpdateStatus(int sessionId, bool connected, string message)
         {
             if (sessionId != Volatile.Read(ref _sessionId)) return;
@@ -7870,6 +7922,14 @@ ORDER BY e.Time ASC;";
         {
             int newSession = Interlocked.Increment(ref _sessionId);
             CleanupOldSocket();
+
+            // Inscreve repasse em tempo real dos dados do Streamer para o Túnel de Nuvem
+            try
+            {
+                AxionAddOnStreamServer.OnStreamerBroadcast -= BroadcastStreamerPayload;
+                AxionAddOnStreamServer.OnStreamerBroadcast += BroadcastStreamerPayload;
+            }
+            catch { }
 
             if (!AxionGatewayState.HabilitarNuvemBroadcast)
             {
@@ -7892,6 +7952,12 @@ ORDER BY e.Time ASC;";
 
         public static void Stop()
         {
+            try
+            {
+                AxionAddOnStreamServer.OnStreamerBroadcast -= BroadcastStreamerPayload;
+            }
+            catch { }
+
             int newSession = Interlocked.Increment(ref _sessionId);
             CleanupOldSocket();
             UpdateStatus(newSession, false, AxionGatewayState.HabilitarNuvemBroadcast ? "Desconectado" : "Nuvem Desativada");
