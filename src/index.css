@@ -360,4 +360,30 @@ input:checked + .toggle-slider:before { transform: translateX(18px); }
   font-size: clamp(9px, 0.7vw, 13px) !important;
 }
 
+/* ========================================================================= */
+/* LETREIRO HORIZONTAL CONTÍNUO (TICKER MARQUEE)                             */
+/* ========================================================================= */
+@keyframes vortexMarqueeScroll {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.vortex-ticker-track {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  width: max-content !important;
+  will-change: transform;
+  animation: vortexMarqueeScroll 180s linear infinite;
+}
+
+.vortex-ticker-track:hover {
+  animation-play-state: paused !important;
+}
+
+
 

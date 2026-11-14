@@ -29,6 +29,7 @@ export interface IndicatorDefinition {
     lineWidth: 1 | 2 | 3 | 4;
     lineStyle: 'solid' | 'dashed' | 'dotted';
     secondaryColor?: string;
+    tertiaryColor?: string;
     fillColor?: string;
   };
 }
@@ -158,6 +159,69 @@ export const PRESET_CHART_TEMPLATES: ChartTemplate[] = [
         overlay: false,
         params: { period: 14, overbought: 70, oversold: 30 },
         style: { color: '#f59e0b', lineWidth: 2, lineStyle: 'solid' }
+      }
+    ]
+  },
+  {
+    id: 'preset-orderflow-sessions',
+    name: '🏛️ Template Order Flow & Sessões Mundiais (Fundo + CVD + Absorções + VWAP)',
+    indicators: [
+      {
+        id: 'sessions-bg-preset',
+        type: 'SESSIONS_COLOR_BG',
+        name: 'Sessões de Mercado (Fundo Colorido - Ásia, Londres, NY)',
+        category: 'Níveis',
+        visible: true,
+        overlay: true,
+        params: {
+          showAsia: true,
+          asiaStart: '19:00',
+          asiaEnd: '03:00',
+          showLondon: true,
+          londonStart: '04:00',
+          londonEnd: '12:00',
+          showNewYork: true,
+          newYorkStart: '10:30',
+          newYorkEnd: '17:00',
+          showLabels: true
+        },
+        style: {
+          color: 'rgba(245, 158, 11, 0.08)',
+          secondaryColor: 'rgba(6, 182, 212, 0.08)',
+          tertiaryColor: 'rgba(99, 102, 241, 0.08)',
+          lineWidth: 1,
+          lineStyle: 'solid'
+        }
+      },
+      {
+        id: 'orderflow-cvd-preset',
+        type: 'ORDER_FLOW_CVD',
+        name: 'CVD - Cumulative Volume Delta & Absorções',
+        category: 'Volume',
+        visible: true,
+        overlay: true,
+        params: {
+          resetMode: 'session',
+          showDeltaMarkers: true,
+          minDeltaHighlight: 500,
+          markerLabelMode: 'compact'
+        },
+        style: {
+          color: '#06b6d4',
+          secondaryColor: '#f59e0b',
+          lineWidth: 2,
+          lineStyle: 'solid'
+        }
+      },
+      {
+        id: 'vwap-orderflow-preset',
+        type: 'VWAP',
+        name: 'VWAP Diária',
+        category: 'Volume',
+        visible: true,
+        overlay: true,
+        params: { showDeviations: true },
+        style: { color: '#e11d48', lineWidth: 2, lineStyle: 'solid' }
       }
     ]
   }
@@ -1786,6 +1850,69 @@ export const INDICATOR_DEFINITIONS: Record<string, IndicatorDefinition> = {
       { key: 'showExtremeLevels', label: 'Linhas Extremas de Rally (80 / 20)', type: 'boolean', default: true }
     ],
     defaultStyle: { color: '#06b6d4', secondaryColor: '#eab308', lineWidth: 2, lineStyle: 'solid' }
+  },
+  SESSIONS_COLOR_BG: {
+    type: 'SESSIONS_COLOR_BG',
+    name: 'Sessões de Mercado (Fundo Colorido - Ásia, Londres, NY)',
+    category: 'Níveis',
+    description: 'Coloração suave de fundo identificando as principais sessões mundiais: Ásia/Globex, Londres e Nova York (RTH).',
+    overlay: true,
+    paramDefs: [
+      { key: 'showAsia', label: '🌏 Exibir Sessão Ásia / Globex', type: 'boolean', default: true },
+      { key: 'asiaStart', label: 'Início Ásia (Horário Local)', type: 'string', default: '19:00' },
+      { key: 'asiaEnd', label: 'Fim Ásia (Horário Local)', type: 'string', default: '03:00' },
+      { key: 'showLondon', label: '🏛️ Exibir Sessão Londres / Europa', type: 'boolean', default: true },
+      { key: 'londonStart', label: 'Início Londres (Horário Local)', type: 'string', default: '04:00' },
+      { key: 'londonEnd', label: 'Fim Londres (Horário Local)', type: 'string', default: '12:00' },
+      { key: 'showNewYork', label: '🗽 Exibir Nova York (RTH Regular)', type: 'boolean', default: true },
+      { key: 'newYorkStart', label: 'Início Nova York (Horário Local)', type: 'string', default: '10:30' },
+      { key: 'newYorkEnd', label: 'Fim Nova York (Horário Local)', type: 'string', default: '17:00' },
+      { key: 'showLabels', label: 'Exibir Rótulos das Sessões no Topo', type: 'boolean', default: true }
+    ],
+    defaultStyle: {
+      color: 'rgba(245, 158, 11, 0.08)',
+      secondaryColor: 'rgba(6, 182, 212, 0.08)',
+      tertiaryColor: 'rgba(99, 102, 241, 0.08)',
+      lineWidth: 1,
+      lineStyle: 'solid'
+    }
+  },
+  ORDER_FLOW_CVD: {
+    type: 'ORDER_FLOW_CVD',
+    name: '🌊 CVD - Cumulative Volume Delta & Absorções',
+    category: 'Volume',
+    description: 'Delta Acumulado de Agressão Institucional (CVD) e Marcadores de Absorções Relevantes por Barra com HUD Informativo.',
+    overlay: true,
+    paramDefs: [
+      {
+        key: 'resetMode',
+        label: 'Modo de Acúmulo do CVD',
+        type: 'select',
+        default: 'session',
+        options: [
+          { label: '🔄 Reset Diário (Abertura da Sessão)', value: 'session' },
+          { label: '📈 Contínuo (Acumulado de Todo o Histórico)', value: 'continuous' }
+        ]
+      },
+      { key: 'showDeltaMarkers', label: 'Exibir Absorções Institucionais nas Velas', type: 'boolean', default: true },
+      { key: 'minDeltaHighlight', label: 'Filtro Mínimo de Absorção (Contratos)', type: 'number', default: 500, min: 50, max: 50000, step: 50 },
+      {
+        key: 'markerLabelMode',
+        label: 'Formato do Rótulo no Gráfico',
+        type: 'select',
+        default: 'compact',
+        options: [
+          { label: '🔢 Apenas Valor (+500 / -350)', value: 'compact' },
+          { label: '🏷️ Completo (Absorção +500)', value: 'full' }
+        ]
+      }
+    ],
+    defaultStyle: {
+      color: '#06b6d4',
+      secondaryColor: '#f59e0b',
+      lineWidth: 2,
+      lineStyle: 'solid'
+    }
   }
 };
 
@@ -5199,6 +5326,211 @@ function _calculateIndicatorInternal(
         markers: [],
         customData: {
           params: cConfig.params
+        }
+      };
+    }
+
+    case 'SESSIONS_COLOR_BG': {
+      const showAsia = cConfig.params?.showAsia !== false;
+      const asiaStart = cConfig.params?.asiaStart || '19:00';
+      const asiaEnd = cConfig.params?.asiaEnd || '03:00';
+      const asiaColor = cConfig.style?.tertiaryColor || 'rgba(99, 102, 241, 0.08)';
+
+      const showLondon = cConfig.params?.showLondon !== false;
+      const londonStart = cConfig.params?.londonStart || '04:00';
+      const londonEnd = cConfig.params?.londonEnd || '12:00';
+      const londonColor = cConfig.style?.secondaryColor || 'rgba(6, 182, 212, 0.08)';
+
+      const showNewYork = cConfig.params?.showNewYork !== false;
+      const newYorkStart = cConfig.params?.newYorkStart || '10:30';
+      const newYorkEnd = cConfig.params?.newYorkEnd || '17:00';
+      const newYorkColor = cConfig.style?.color || 'rgba(245, 158, 11, 0.08)';
+
+      const showLabels = cConfig.params?.showLabels !== false;
+
+      const parseMinutes = (tStr: string) => {
+        const [h, m] = (tStr || '00:00').split(':').map(Number);
+        return (h || 0) * 60 + (m || 0);
+      };
+
+      const isInRange = (mins: number, sStr: string, eStr: string) => {
+        const s = parseMinutes(sStr);
+        const e = parseMinutes(eStr);
+        return s < e ? (mins >= s && mins < e) : (mins >= s || mins < e);
+      };
+
+      const sessionBlocks: {
+        session: 'asia' | 'london' | 'newyork';
+        startTime: number;
+        endTime: number;
+        color: string;
+        label: string;
+        icon: string;
+        showLabel: boolean;
+      }[] = [];
+
+      type ActiveBlock = {
+        session: 'asia' | 'london' | 'newyork';
+        startTime: number;
+        endTime: number;
+        color: string;
+        label: string;
+        icon: string;
+      };
+
+      let activeAsia: ActiveBlock | null = null;
+      let activeLondon: ActiveBlock | null = null;
+      let activeNY: ActiveBlock | null = null;
+
+      for (let i = 0; i < candles.length; i++) {
+        const c = candles[i];
+        const tSec = getCandleTimeSeconds(c);
+        const sInfo = getCandleSessionInfo(c);
+        if (!sInfo || tSec <= 0) continue;
+
+        const mins = parseMinutes(sInfo.timeStr);
+
+        // Ásia
+        if (showAsia && isInRange(mins, asiaStart, asiaEnd)) {
+          if (!activeAsia) {
+            activeAsia = { session: 'asia', startTime: tSec, endTime: tSec, color: asiaColor, label: '🌏 ÁSIA (Globex)', icon: '🌏' };
+          } else {
+            activeAsia.endTime = tSec;
+          }
+        } else if (activeAsia) {
+          sessionBlocks.push({ ...activeAsia, showLabel: showLabels });
+          activeAsia = null;
+        }
+
+        // Londres
+        if (showLondon && isInRange(mins, londonStart, londonEnd)) {
+          if (!activeLondon) {
+            activeLondon = { session: 'london', startTime: tSec, endTime: tSec, color: londonColor, label: '🏛️ LONDRES', icon: '🏛️' };
+          } else {
+            activeLondon.endTime = tSec;
+          }
+        } else if (activeLondon) {
+          sessionBlocks.push({ ...activeLondon, showLabel: showLabels });
+          activeLondon = null;
+        }
+
+        // Nova York
+        if (showNewYork && isInRange(mins, newYorkStart, newYorkEnd)) {
+          if (!activeNY) {
+            activeNY = { session: 'newyork', startTime: tSec, endTime: tSec, color: newYorkColor, label: '🗽 NOVA YORK (RTH)', icon: '🗽' };
+          } else {
+            activeNY.endTime = tSec;
+          }
+        } else if (activeNY) {
+          sessionBlocks.push({ ...activeNY, showLabel: showLabels });
+          activeNY = null;
+        }
+      }
+
+      if (activeAsia) sessionBlocks.push({ ...activeAsia, showLabel: showLabels });
+      if (activeLondon) sessionBlocks.push({ ...activeLondon, showLabel: showLabels });
+      if (activeNY) sessionBlocks.push({ ...activeNY, showLabel: showLabels });
+
+      return {
+        id: cConfig.id,
+        type: 'SESSIONS_COLOR_BG',
+        overlay: true,
+        series: [],
+        markers: [],
+        customData: {
+          sessionBlocks
+        }
+      };
+    }
+
+    case 'ORDER_FLOW_CVD': {
+      const resetMode = cConfig.params?.resetMode || 'session';
+      const showDeltaMarkers = cConfig.params?.showDeltaMarkers !== false;
+      const minDeltaHighlight = Number(cConfig.params?.minDeltaHighlight || 500);
+      const markerLabelMode = cConfig.params?.markerLabelMode || 'compact';
+
+      let cvdAcc = 0;
+      let lastDateKey = '';
+      const cvdData: { time: number; value: number }[] = [];
+      const markers: any[] = [];
+      const barDeltas: { time: number; delta: number; price: number }[] = [];
+
+      for (let i = 0; i < candles.length; i++) {
+        const c = candles[i];
+        const tSec = getCandleTimeSeconds(c);
+        if (tSec <= 0) continue;
+
+        const sInfo = getCandleSessionInfo(c, options?.systemSessionStart || '20:00:00');
+        const sessionKey = sInfo?.sessionKey || '';
+
+        // Reset diário na virada de sessão
+        if (resetMode === 'session' && lastDateKey && sessionKey !== lastDateKey) {
+          cvdAcc = 0;
+        }
+        lastDateKey = sessionKey;
+
+        const o = Number(c.open);
+        const h = Number(c.high);
+        const l = Number(c.low);
+        const cl = Number(c.close);
+        const vol = Number((c as any).volume || 100);
+
+        // Se a vela tiver delta explícito na última barra vindo do marketData em tempo real
+        const explicitDelta = i === candles.length - 1 && (options?.marketContext as any)?.delta;
+        let delta = 0;
+
+        if (typeof explicitDelta === 'number' && !isNaN(explicitDelta) && explicitDelta !== 0) {
+          delta = explicitDelta;
+        } else {
+          const range = h - l;
+          if (range > 0) {
+            delta = Math.round(vol * ((2 * cl - h - l) / range));
+          } else {
+            delta = cl >= o ? vol : -vol;
+          }
+        }
+
+        cvdAcc += delta;
+        cvdData.push({ time: tSec, value: cvdAcc });
+        barDeltas.push({ time: tSec, delta, price: delta >= 0 ? h : l });
+
+        // Marcadores de Absorção Institucional Relevante (somente quando excede o filtro de absorção!)
+        if (showDeltaMarkers) {
+          const isAbsBig = Math.abs(delta) >= minDeltaHighlight;
+          if (isAbsBig) {
+            const isPositive = delta >= 0;
+            const deltaStr = Math.abs(delta) >= 1000 
+              ? `${(delta / 1000).toFixed(1)}k` 
+              : `${delta}`;
+            const prefix = markerLabelMode === 'full' ? 'Absorção ' : '';
+
+            markers.push({
+              time: tSec,
+              position: isPositive ? 'aboveBar' : 'belowBar',
+              color: isPositive ? '#10b981' : '#f43f5e',
+              shape: isPositive ? 'arrowUp' : 'arrowDown',
+              text: `${prefix}${isPositive ? '+' : ''}${deltaStr}`
+            });
+          }
+        }
+      }
+
+      // NUNCA plotar série contínua com valores de volume/CVD na escala de preços do gráfico principal,
+      // pois os valores de volume (ex: -39.000) distorcem e achatam a escala de preços (27.900).
+      // Os dados de CVD são exibidos com perfeição no HUD do gráfico.
+      const series: any[] = [];
+
+      return {
+        id: cConfig.id,
+        type: 'ORDER_FLOW_CVD',
+        overlay: true,
+        series,
+        markers,
+        customData: {
+          cvdData,
+          barDeltas,
+          lastCvd: cvdAcc,
+          lastDelta: barDeltas[barDeltas.length - 1]?.delta || 0
         }
       };
     }

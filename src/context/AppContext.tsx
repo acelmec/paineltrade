@@ -1517,8 +1517,8 @@ interface AppContextType {
   clearCustomSignals: () => void;
 
   // Gerenciamento de Painéis
-  createPanelAction: (name: string, instanceId: string, pointValue?: number, tickSize?: number) => Promise<boolean>;
-  updatePanelAction: (panelId: string, name: string, instanceId: string, pointValue?: number, tickSize?: number) => Promise<boolean>;
+  createPanelAction: (name: string, instanceId: string, pointValue?: number, tickSize?: number, defaultSlPoints?: number, defaultTpPoints?: number) => Promise<boolean>;
+  updatePanelAction: (panelId: string, name: string, instanceId: string, pointValue?: number, tickSize?: number, defaultSlPoints?: number, defaultTpPoints?: number) => Promise<boolean>;
   deletePanelAction: (panelId: string) => Promise<boolean>;
 
   // Relatórios de Sinais
@@ -3700,8 +3700,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                     'cfg:general_prompt_master_enabled:false',
                     'cfg:chart_candle_bar_count:60',
                     'cfg:chart_manual_trade_mode:nivel',
-                    'cfg:chart_manual_sl_points:50',
-                    'cfg:chart_manual_tp_points:50',
+                    `cfg:chart_manual_sl_points:${newPanel?.default_sl_points || (typeof window !== 'undefined' ? localStorage.getItem(`vortex_panel_default_sl_${newPanel.id}`) : null) || 50}`,
+                    `cfg:chart_manual_tp_points:${newPanel?.default_tp_points || (typeof window !== 'undefined' ? localStorage.getItem(`vortex_panel_default_tp_${newPanel.id}`) : null) || 50}`,
                     'cfg:chart_show_levels:true',
                     'cfg:chart_confirm_manual_trade:true',
                     'cfg:chart_manual_ia_validate:false',
@@ -3986,6 +3986,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const enrichedPanels = (panelsData || []).map((p: any) => {
         const localPt = typeof window !== 'undefined' ? localStorage.getItem(`vortex_panel_point_value_${p.id}`) : null;
         const localTick = typeof window !== 'undefined' ? localStorage.getItem(`vortex_panel_tick_size_${p.id}`) : null;
+        const localSl = typeof window !== 'undefined' ? localStorage.getItem(`vortex_panel_default_sl_${p.id}`) : null;
+        const localTp = typeof window !== 'undefined' ? localStorage.getItem(`vortex_panel_default_tp_${p.id}`) : null;
         const resolvedPt = (p.point_value !== undefined && p.point_value !== null && Number(p.point_value) > 0)
           ? Number(p.point_value)
           : (localPt && Number(localPt) > 0 ? Number(localPt) : Number(p.point_value || 1.0));
@@ -3994,7 +3996,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           point_value: resolvedPt,
           tick_size: (p.tick_size !== undefined && p.tick_size !== null && Number(p.tick_size) > 0)
             ? Number(p.tick_size)
-            : (localTick && Number(localTick) > 0 ? Number(localTick) : undefined)
+            : (localTick && Number(localTick) > 0 ? Number(localTick) : undefined),
+          default_sl_points: (p.default_sl_points !== undefined && p.default_sl_points !== null && Number(p.default_sl_points) > 0)
+            ? Number(p.default_sl_points)
+            : (localSl && Number(localSl) > 0 ? Number(localSl) : undefined),
+          default_tp_points: (p.default_tp_points !== undefined && p.default_tp_points !== null && Number(p.default_tp_points) > 0)
+            ? Number(p.default_tp_points)
+            : (localTp && Number(localTp) > 0 ? Number(localTp) : undefined)
         };
       });
 
@@ -9738,13 +9746,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return success;
   };
 
-  const createPanelAction = async (name: string, instanceId: string, pointValue = 1.0, tickSize = 0.25): Promise<boolean> => {
+  const createPanelAction = async (name: string, instanceId: string, pointValue = 1.0, tickSize = 0.25, defaultSlPoints = 50, defaultTpPoints = 50): Promise<boolean> => {
     if (!user) return false;
     try {
       const isSystemAdmin = user.email?.toLowerCase() === 'admin@vortex.com';
       const storedSubscriptionId = isSystemAdmin ? 'admin' : localStorage.getItem('vortex_subscription_id');
       const safeTick = Number(tickSize) > 0 ? Number(tickSize) : 0.25;
       const safePoint = Number(pointValue) > 0 ? Number(pointValue) : 1.0;
+      const safeSl = Number(defaultSlPoints) > 0 ? Number(defaultSlPoints) : 50;
+      const safeTp = Number(defaultTpPoints) > 0 ? Number(defaultTpPoints) : 50;
       const payload: any = {
         user_id: user.id,
         subscription_id: storedSubscriptionId,
@@ -9784,6 +9794,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         try {
           localStorage.setItem(`vortex_panel_tick_size_${newPanel.id}`, String(safeTick));
           localStorage.setItem(`vortex_panel_point_value_${newPanel.id}`, String(safePoint));
+          localStorage.setItem(`vortex_panel_default_sl_${newPanel.id}`, String(safeSl));
+          localStorage.setItem(`vortex_panel_default_tp_${newPanel.id}`, String(safeTp));
         } catch (_) {}
       }
 
@@ -9797,7 +9809,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           .from('painelvm_settings')
           .insert([{
             panel_id: newPanel.id,
-            ai_provider: 'groq',
+            ai_provider: settings?.ai_provider || 'groq',
             groq_api_key: settings?.groq_api_key || '',
             gemini_api_key: settings?.gemini_api_key || '',
             openai_api_key: settings?.openai_api_key || '',
@@ -9810,17 +9822,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             instance_id_screen: instanceId,
             gamma_symbol: gammaSymbol,
             alert_mode: 'individual',
-            ai_trigger_mode: 'tempo',
+            ai_trigger_mode: settings?.ai_trigger_mode || 'tempo',
             telegram_enabled: settings?.telegram_enabled || false,
             telegram_bot_token: settings?.telegram_bot_token || '',
-            telegram_chat_id: settings?.telegram_chat_id || ''
+            telegram_chat_id: settings?.telegram_chat_id || '',
+            disabled_levels: [
+              `cfg:chart_manual_sl_points:${safeSl}`,
+              `cfg:chart_manual_tp_points:${safeTp}`
+            ]
           }]),
         4000
       );
 
       if (settingsError) throw settingsError;
 
-      addLog('SISTEMA', `Novo painel '${name}' adicionado com sucesso (Ponto: U$ ${safePoint}, Tick: ${safeTick} pts).`, 'sistema');
+      addLog('SISTEMA', `Novo painel/ativo '${name}' adicionado com sucesso (Ponto: U$ ${safePoint}, Tick: ${safeTick} pts, SL Sugerido: ${safeSl} pts, TP Sugerido: ${safeTp} pts).`, 'sistema');
       await loadUserSettings(user.id, storedSubscriptionId, { skipAuxiliary: true });
       return true;
     } catch (err: any) {
@@ -9830,18 +9846,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const updatePanelAction = async (panelId: string, name: string, instanceId: string, pointValue = 1.0, tickSize = 0.25): Promise<boolean> => {
+  const updatePanelAction = async (panelId: string, name: string, instanceId: string, pointValue = 1.0, tickSize = 0.25, defaultSlPoints = 50, defaultTpPoints = 50): Promise<boolean> => {
     if (!user) return false;
     try {
       const isSystemAdmin = user.email?.toLowerCase() === 'admin@vortex.com';
       const storedSubscriptionId = isSystemAdmin ? 'admin' : localStorage.getItem('vortex_subscription_id');
       const safeTick = Number(tickSize) > 0 ? Number(tickSize) : 0.25;
       const safePoint = Number(pointValue) > 0 ? Number(pointValue) : 1.0;
+      const safeSl = Number(defaultSlPoints) > 0 ? Number(defaultSlPoints) : 50;
+      const safeTp = Number(defaultTpPoints) > 0 ? Number(defaultTpPoints) : 50;
 
       // 1. Salvar no localStorage de imediato
       try {
         localStorage.setItem(`vortex_panel_tick_size_${panelId}`, String(safeTick));
         localStorage.setItem(`vortex_panel_point_value_${panelId}`, String(safePoint));
+        localStorage.setItem(`vortex_panel_default_sl_${panelId}`, String(safeSl));
+        localStorage.setItem(`vortex_panel_default_tp_${panelId}`, String(safeTp));
       } catch (_) {}
 
       // 2. Atualizar estado em memória de imediato (UI instantânea, sem atraso de 10-20 segundos)
@@ -9852,7 +9872,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             name,
             instance_id: instanceId,
             point_value: safePoint,
-            tick_size: safeTick
+            tick_size: safeTick,
+            default_sl_points: safeSl,
+            default_tp_points: safeTp
           };
         }
         return p;
@@ -9864,7 +9886,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           name,
           instance_id: instanceId,
           point_value: safePoint,
-          tick_size: safeTick
+          tick_size: safeTick,
+          default_sl_points: safeSl,
+          default_tp_points: safeTp
         };
         activePanelRef.current = updated as any;
         setActivePanel(updated as any);

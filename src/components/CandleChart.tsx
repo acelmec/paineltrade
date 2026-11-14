@@ -739,18 +739,15 @@ const MobilePriceReferenceLine: React.FC<{
   return (
     <div
       style={{ top: `${topCoord}px` }}
-      className="absolute left-0 right-0 pointer-events-none z-30 flex items-center justify-end -translate-y-1/2"
+      className="absolute left-0 right-0 pointer-events-none z-30 flex items-center justify-start -translate-y-1/2"
     >
-      {/* Linha horizontal tracejada do candle até a margem direita */}
-      <div className="w-full border-b border-dashed border-cyan-400/50 shadow-sm" />
-
-      {/* Card discreto com o preço na margem direita */}
+      {/* Card discreto com o preço justificado à esquerda */}
       <div
         onClick={(e) => {
           e.stopPropagation();
           onRestorePriceScale();
         }}
-        className={`pointer-events-auto px-2 py-0.5 rounded-l-md font-mono font-black text-[10px] shadow-lg flex items-center gap-1 active:scale-95 transition cursor-pointer select-none border-l-2 shrink-0 ${
+        className={`pointer-events-auto px-2 py-0.5 rounded-r-md font-mono font-black text-[10px] shadow-lg flex items-center gap-1 active:scale-95 transition cursor-pointer select-none border-r-2 shrink-0 ${
           isLastCandleUp
             ? 'bg-emerald-600/95 text-white border-emerald-300 shadow-[0_0_8px_rgba(16,185,129,0.5)]'
             : 'bg-rose-600/95 text-white border-rose-300 shadow-[0_0_8px_rgba(244,63,94,0.5)]'
@@ -759,6 +756,9 @@ const MobilePriceReferenceLine: React.FC<{
       >
         <span>{currentPrice.toFixed(2)}</span>
       </div>
+
+      {/* Linha horizontal tracejada do card até a margem direita */}
+      <div className="w-full border-b border-dashed border-cyan-400/50 shadow-sm" />
     </div>
   );
 };
@@ -953,6 +953,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   }>({});
   const timeRangeResultsRef = useRef<any[]>([]);
   const timeHeatmapResultsRef = useRef<any[]>([]);
+  const sessionsColorBgRef = useRef<any[]>([]);
+  const orderFlowCvdRef = useRef<any | null>(null);
   const currentPriceRef = useRef<number | null>(null);
   const chartDataRef = useRef<any[]>([]);
   const autoCenterRef = useRef<boolean>(false);
@@ -1268,15 +1270,23 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
   // Autoajuste dinâmico da altura do gráfico ao ocultar/mostrar a boleta
   useEffect(() => {
-    const timer = setTimeout(() => {
+    const run = () => {
       if (resizeChartsRef.current) {
         resizeChartsRef.current();
       }
       if (updateLevelLabelsRef.current) {
         updateLevelLabelsRef.current();
       }
-    }, 40);
-    return () => clearTimeout(timer);
+    };
+    run();
+    const t1 = setTimeout(run, 40);
+    const t2 = setTimeout(run, 150);
+    const t3 = setTimeout(run, 300);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
   }, [isBoletaCollapsed]);
 
   const isSimulatorMode = Boolean(isSimulator || simulatedReports !== undefined || simulatedPrice !== undefined);
@@ -1472,13 +1482,25 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   useEffect(() => {
     if (!mainChartRef.current) return;
     try {
-      mainChartRef.current.applyOptions({
+      const pScaleOptions = {
         rightPriceScale: {
           visible: isMobile ? !hidePriceScaleMobile : true,
           minimumWidth: isMobile ? (hidePriceScaleMobile ? 0 : 55) : 85,
         }
-      });
+      };
+      mainChartRef.current.applyOptions(pScaleOptions);
+      if (rsiChartRef.current) rsiChartRef.current.applyOptions(pScaleOptions);
+      if (macdChartRef.current) macdChartRef.current.applyOptions(pScaleOptions);
+      if (emacdChartRef.current) emacdChartRef.current.applyOptions(pScaleOptions);
+      if (timeHeatmapChartRef.current) timeHeatmapChartRef.current.applyOptions(pScaleOptions);
+      if (axionTrendChartRef.current) axionTrendChartRef.current.applyOptions(pScaleOptions);
+      if (momentumMatrixChartRef.current) momentumMatrixChartRef.current.applyOptions(pScaleOptions);
+
+      if (updateLevelLabelsRef.current) {
+        updateLevelLabelsRef.current();
+      }
       setTimeout(() => {
+        if (resizeChartsRef.current) resizeChartsRef.current();
         window.dispatchEvent(new Event('resize'));
       }, 30);
     } catch {}
@@ -4361,7 +4383,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       const dpr = window.devicePixelRatio || 1;
       const cWidth = containerEl.clientWidth || 800;
       const cHeight = containerEl.clientHeight || 400;
-      const chartAreaWidth = Math.max(50, cWidth - 80);
+      const effectivePriceScaleWidth = isMobile ? (hidePriceScaleMobile ? 0 : 55) : 80;
+      const chartAreaWidth = Math.max(50, cWidth - effectivePriceScaleWidth);
 
       // Helper de interpolação matemática de preço para coordenada Y
       // Garante que mesmo com zoom extremo ou compressão, a posição vertical seja calculada perfeitamente
@@ -4589,7 +4612,69 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         ctx.scale(dpr, dpr);
         ctx.clearRect(0, 0, cWidth, cHeight);
 
-        const chartAreaWidth = Math.max(50, cWidth - 80);
+        const effectivePriceScaleWidth = isMobile ? (hidePriceScaleMobile ? 0 : 55) : 80;
+        const chartAreaWidth = Math.max(50, cWidth - effectivePriceScaleWidth);
+
+        // 0. Renderizar Coloração de Fundo das Sessões de Mercado (Ásia, Londres, NY)
+        const timeScale = mainChartRef.current?.timeScale();
+        const currentThemeKey = settings?.chart_color_theme || localStorage.getItem('vortex_chart_theme') || 'ninja_carbon';
+        const isLightChartTheme = currentThemeKey === 'ninja_light' || currentThemeKey === 'light' || currentThemeKey === 'cinza_grafite';
+
+        if (ctx && timeScale && sessionsColorBgRef.current && sessionsColorBgRef.current.length > 0) {
+          sessionsColorBgRef.current.forEach((block: any, bIdx: number) => {
+            const x1 = timeScale.timeToCoordinate(block.startTime as any);
+            const x2 = timeScale.timeToCoordinate(block.endTime as any);
+            if (x1 !== null && x2 !== null && !isNaN(x1) && !isNaN(x2)) {
+              const xLeft = Math.min(x1, x2);
+              const w = Math.max(10, Math.abs(x2 - x1));
+              if (xLeft + w >= 0 && xLeft <= chartAreaWidth) {
+                // Em temas com fundo branco, ajusta a opacidade para 16-18% para que o azul e ciano fiquem nítidos e bonitos em tons pastéis
+                let fillColor = block.color;
+                if (isLightChartTheme) {
+                  if (block.session === 'asia') fillColor = 'rgba(99, 102, 241, 0.18)';
+                  else if (block.session === 'london') fillColor = 'rgba(6, 182, 212, 0.18)';
+                  else if (block.session === 'newyork') fillColor = 'rgba(245, 158, 11, 0.16)';
+                }
+
+                ctx.fillStyle = fillColor;
+                ctx.fillRect(xLeft, 0, w, cHeight);
+
+                // Linha divisória sutil vertical no início da sessão
+                ctx.save();
+                ctx.strokeStyle = fillColor.replace(/[\d.]+\)$/, '0.45)');
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+                ctx.beginPath();
+                ctx.moveTo(xLeft, 0);
+                ctx.lineTo(xLeft, cHeight);
+                ctx.stroke();
+                ctx.restore();
+
+                // Rótulo elegante da Sessão no topo
+                if (block.showLabel && xLeft >= 0 && xLeft <= chartAreaWidth - 90) {
+                  const tagKey = `sess_bg_${block.session}_${block.startTime}_${bIdx}`;
+                  const badgeColor = block.session === 'newyork' ? '#d97706' : block.session === 'london' ? '#0891b2' : '#6366f1';
+                  const tagBg = isLightChartTheme ? '#ffffff' : 'rgba(15, 23, 42, 0.88)';
+                  const tagStyle = `position: absolute; left: ${Math.max(4, xLeft + 6)}px; top: 10px; color: ${badgeColor}; font-size: 9.5px; font-family: 'JetBrains Mono', monospace; font-weight: 700; background: ${tagBg}; padding: 2px 5px; border-radius: 3px; border: 1px solid ${badgeColor}66; box-shadow: 0 1px 2px rgba(0,0,0,0.1); line-height: 1; white-space: nowrap; pointer-events: none; user-select: none; z-index: 52;`;
+                  upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, tagKey, block.label, false, tagStyle);
+                }
+              }
+            }
+          });
+        }
+
+        // HUD Informativo Discreto de Order Flow CVD (no canto inferior esquerdo do gráfico)
+        if (orderFlowCvdRef.current) {
+          const cvdInfo = orderFlowCvdRef.current;
+          const lastCvd = cvdInfo.lastCvd ?? 0;
+          const lastDelta = cvdInfo.lastDelta ?? 0;
+          const isCvdPos = lastCvd >= 0;
+          const isDeltaPos = lastDelta >= 0;
+          const hudKey = 'orderflow_cvd_hud';
+          const hudHtml = `🌊 CVD: <b style="color: ${isCvdPos ? '#34d399' : '#f87171'}">${isCvdPos ? '+' : ''}${lastCvd.toLocaleString('pt-BR')}</b> &nbsp;|&nbsp; Delta Barra: <b style="color: ${isDeltaPos ? '#34d399' : '#f87171'}">${isDeltaPos ? '+' : ''}${lastDelta.toLocaleString('pt-BR')}</b>`;
+          const hudStyle = `position: absolute; left: 14px; bottom: 30px; font-size: 11px; font-family: 'JetBrains Mono', monospace; color: #94a3b8; background: rgba(15, 23, 42, 0.85); padding: 3px 8px; border-radius: 5px; border: 1px solid rgba(56, 189, 248, 0.3); backdrop-filter: blur(4px); pointer-events: none; user-select: none; z-index: 55;`;
+          upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, hudKey, hudHtml, true, hudStyle);
+        }
 
         // A. Renderizar Volume Heatmap (Zonas de Calor)
         const heatmapData = volumeAnalysisResultsRef.current?.heatmap;
@@ -4943,7 +5028,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           hvnData.result.hvnBlocks.forEach((blk: any, bIdx: number) => {
             const y = safePriceToY(blk.priceCenter);
             if (y !== null && !isNaN(y) && y >= 0 && y <= containerEl.clientHeight) {
-              const tagStyle = `position: absolute; right: 95px; top: ${y - 12}px; color: ${bColor}; font-size: 11.5px; font-family: 'JetBrains Mono', monospace; font-weight: 700; background: #070b14f5; padding: 2.5px 8px; border-radius: 4px; border: 1px solid ${bColor}bb; line-height: 1; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.8); z-index: 54;`;
+              const hvnRight = isMobile && hidePriceScaleMobile ? 12 : 95;
+              const tagStyle = `position: absolute; right: ${hvnRight}px; top: ${y - 12}px; color: ${bColor}; font-size: 11.5px; font-family: 'JetBrains Mono', monospace; font-weight: 700; background: #070b14f5; padding: 2.5px 8px; border-radius: 4px; border: 1px solid ${bColor}bb; line-height: 1; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.8); z-index: 54;`;
               upsertPooledEl(labelsContainer, labelPool, usedLabelKeys, `vol_hvn_${blk.rank}_${bIdx}`, `HVN #${blk.rank}`, false, tagStyle);
             }
           });
@@ -5653,7 +5739,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           const isCustomMarker = tradeId === 'custom_marker';
           const isRangeMarker = tradeId === 'range_marker_buy' || tradeId === 'range_marker_sell' || tradeId === 'range_marker';
           const isLevelMarker = tradeId === 'nivel_marker_buy' || tradeId === 'nivel_marker_sell' || tradeId === 'nivel_marker';
-          const rightOffset = (tradeToDraw as any).rangeOffset || 88;
+          const rightOffset = (tradeToDraw as any).rangeOffset || (isMobile && hidePriceScaleMobile ? 12 : 88);
           const entryPrice = 'entry_price' in tradeToDraw ? Number((tradeToDraw as any).entry_price) : Number((tradeToDraw as any).entry);
           const rawStopLossPrice = 'stop_loss' in tradeToDraw ? Number((tradeToDraw as any).stop_loss) : Number((tradeToDraw as any).stopLoss);
           const rawTakeProfitPrice = 'take_profit' in tradeToDraw ? Number((tradeToDraw as any).take_profit) : Number((tradeToDraw as any).takeProfit);
@@ -6283,7 +6369,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     let totalHeight = chartRootRef.current && chartRootRef.current.clientHeight > 0
       ? chartRootRef.current.clientHeight
       : 0;
-    if (totalHeight <= 0 && chartRootRef.current && chartRootRef.current.parentElement) {
+    if (chartRootRef.current?.parentElement && chartRootRef.current.parentElement.clientHeight > totalHeight) {
       totalHeight = chartRootRef.current.parentElement.clientHeight;
     }
     if (totalHeight <= 0) {
@@ -7222,7 +7308,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       let totalHeight = chartRootRef.current.clientHeight > 0
         ? chartRootRef.current.clientHeight
         : 0;
-      if (totalHeight <= 0 && chartRootRef.current.parentElement) {
+      if (chartRootRef.current.parentElement && chartRootRef.current.parentElement.clientHeight > totalHeight) {
         totalHeight = chartRootRef.current.parentElement.clientHeight;
       }
       if (totalHeight <= 0) {
@@ -7233,8 +7319,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       const bottomControlsHeight = isBoletaVisible && bottomControlsRef.current
         ? bottomControlsRef.current.offsetHeight
         : (isBoletaVisible ? (isMobile ? 112 : 105) : 0);
-      const containerPadding = 8;
-      const availableHeight = Math.max(200, totalHeight - toolbarHeight - bottomControlsHeight - containerPadding);
+      const containerPadding = 4;
+      const availableHeight = Math.max(180, totalHeight - toolbarHeight - bottomControlsHeight - containerPadding);
       
       let activeIndicatorCount = 0;
       if (effectiveShowRsi) activeIndicatorCount++;
@@ -7290,9 +7376,16 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     if (chartRootRef.current) {
       resizeObserver.observe(chartRootRef.current);
     }
+    if (chartRootRef.current?.parentElement) {
+      resizeObserver.observe(chartRootRef.current.parentElement);
+    }
+    if (mainContainerRef.current) {
+      resizeObserver.observe(mainContainerRef.current);
+    }
 
     window.addEventListener('resize', runResize);
     window.addEventListener('focus', runResize);
+    window.addEventListener('vortex_bottom_nav_collapsed', runResize);
     document.addEventListener('visibilitychange', runResize);
 
     // Custom wheel handler to keep smooth zoom and preserve viewport when scrolled into past
@@ -7403,6 +7496,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       resizeObserver.disconnect();
       window.removeEventListener('resize', runResize);
       window.removeEventListener('focus', runResize);
+      window.removeEventListener('vortex_bottom_nav_collapsed', runResize);
       document.removeEventListener('visibilitychange', runResize);
       clearTimeout(initialResizeTimer);
 
@@ -8705,6 +8799,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     volumeAnalysisResultsRef.current = {};
     timeRangeResultsRef.current = [];
     timeHeatmapResultsRef.current = [];
+    sessionsColorBgRef.current = [];
+    orderFlowCvdRef.current = null;
 
     if (!activeIndicators || activeIndicators.length === 0) {
       dynamicMarkersRef.current = [];
@@ -8779,6 +8875,10 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
             ...calculated.customData.radar
           };
         }
+      } else if (indConfig.type === 'SESSIONS_COLOR_BG' && calculated.customData?.sessionBlocks) {
+        sessionsColorBgRef.current = calculated.customData.sessionBlocks;
+      } else if (indConfig.type === 'ORDER_FLOW_CVD' && calculated.customData) {
+        orderFlowCvdRef.current = calculated.customData;
       }
 
       // Filter only overlay indicators for main chart
@@ -8832,7 +8932,9 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         if (prevList && prevList.length > 0) {
           prevList.forEach(s => {
             try { s.setData([]); } catch (_) {}
+            try { mainChartRef.current?.removeSeries(s); } catch (_) {}
           });
+          dynamicSeriesPoolRef.current.delete(indConfig.id);
         }
       }
 
@@ -9029,7 +9131,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   };
 
   return (
-    <div ref={chartRootRef} className="flex flex-col w-full select-none relative" style={{ height }} onDoubleClickCapture={onDoubleClick}>
+    <div ref={chartRootRef} className="flex flex-col w-full h-full min-h-0 select-none relative" style={{ height: height || '100%' }} onDoubleClickCapture={onDoubleClick}>
       {Boolean(((loadingProgress?.isLoading && (loadingProgress.percent < 100) && (!aggregatedCandles || aggregatedCandles.length === 0 || loadingProgress?.isExplicitDaysChange)) || ((!aggregatedCandles || aggregatedCandles.length === 0) && !isSimulator)) && tempViewMode === 'candles') && (
         <div className={`absolute inset-0 z-[60] flex flex-col items-center justify-center p-6 text-center select-none transition-all duration-300 ${
           chartData.length === 0 ? 'bg-[#090d16]/95' : 'bg-[#090d16]/75 backdrop-blur-sm'
@@ -9327,7 +9429,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       )}
 
       {/* Chart Canvas Area */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-[#090d16] p-1 relative">
+      <div className="flex-1 w-full min-h-0 flex flex-col overflow-hidden bg-[#090d16] p-1 relative">
 
         {/* Minimalist Floating Robot Strategy Card Overlay */}
         {!isSimulatorMode && showRobots && (

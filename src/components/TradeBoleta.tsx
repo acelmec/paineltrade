@@ -273,11 +273,28 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
     }
   }, [settings?.chart_manual_sizing_mode]);
   const [slPoints, setSlPoints] = useState<number>(
-    settings?.chart_manual_sl_points !== undefined ? Number(settings.chart_manual_sl_points) : 50
+    effectiveSettings?.chart_manual_sl_points !== undefined
+      ? Number(effectiveSettings.chart_manual_sl_points)
+      : (effectivePanel?.default_sl_points !== undefined ? Number(effectivePanel.default_sl_points) : 50)
   );
   const [tpPoints, setTpPoints] = useState<number>(
-    settings?.chart_manual_tp_points !== undefined ? Number(settings.chart_manual_tp_points) : 50
+    effectiveSettings?.chart_manual_tp_points !== undefined
+      ? Number(effectiveSettings.chart_manual_tp_points)
+      : (effectivePanel?.default_tp_points !== undefined ? Number(effectivePanel.default_tp_points) : 50)
   );
+
+  useEffect(() => {
+    if (effectiveSettings?.chart_manual_sl_points !== undefined) {
+      setSlPoints(Number(effectiveSettings.chart_manual_sl_points));
+    } else if (effectivePanel?.default_sl_points !== undefined) {
+      setSlPoints(Number(effectivePanel.default_sl_points));
+    }
+    if (effectiveSettings?.chart_manual_tp_points !== undefined) {
+      setTpPoints(Number(effectiveSettings.chart_manual_tp_points));
+    } else if (effectivePanel?.default_tp_points !== undefined) {
+      setTpPoints(Number(effectivePanel.default_tp_points));
+    }
+  }, [effectivePanel?.id, effectiveSettings?.chart_manual_sl_points, effectiveSettings?.chart_manual_tp_points]);
 
   // Copilot Mode (C) State: SL e TP em Preço Direto + Gatilho
   const [copilotSlPrice, setCopilotSlPrice] = useState<number | null>(() => {
@@ -407,12 +424,12 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
 
   const updateSlPointsSetting = (val: number) => {
     setSlPoints(val);
-    if (saveSettings) saveSettings({ chart_manual_sl_points: val });
+    if (saveSettings) saveSettings({ chart_manual_sl_points: val }, effectivePanel?.id);
   };
 
   const updateTpPointsSetting = (val: number) => {
     setTpPoints(val);
-    if (saveSettings) saveSettings({ chart_manual_tp_points: val });
+    if (saveSettings) saveSettings({ chart_manual_tp_points: val }, effectivePanel?.id);
   };
 
   // ATM Strategy State & Activation Toggle

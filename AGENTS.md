@@ -129,5 +129,26 @@ Toda e qualquer modificação no fluxo de transmissão local do NinjaTrader 8, e
    - **Instalador Windows (`npm run installer:build` / `npm run win:exe`):** Compila o frontend atualizado para `dist/`, compacta em `wwwroot.zip`, compila o runtime .NET 8 com WebView2 e gera o executável standalone do instalador.
    - **Android APK (`npm run apk:release`):** Executa sincronização com Capacitor (`cap:sync`) garantindo que os assets embutidos em `android/app/src/main/assets/public/` reflitam com precisão a versão mais recente da interface.
 
+---
+
+## 11. Arquitetura de Ativos vs. Painéis e Unificação de Configurações (Asset-Centric Architecture)
+
+Toda e qualquer manutenção em cadastro de dados de mercado, alertas e configurações de sistema DEVE respeitar a seguinte separação conceitual e técnica:
+
+1. **Equivalência Semântica `panel_id` = Ativo:**
+   - Historicamente o sistema utilizava o conceito de "Painéis". Com a evolução para a interface Multi-Chart (`TradeChartGrid`), as entidades `panels`, `painelvm_panels` e o identificador técnico `panel_id` representam na prática os **ATIVOS** do sistema (ex: NQ, GOLD, ES, B3).
+   - O identificador `panel_id` é preservado rigorosamente nas tabelas, rotas e estados para manter total compatibilidade com Robôs (`AlgorithmBuilder`), Prompts de IA, Replay e dados históricos.
+2. **Configurações Gerais de Sistema (Globais / `'all'`):**
+   - As abas de configurações de sistema — **Geral, IA & Voz, Recursos, Fontes/Transmissão, Telegram, Notícias e Regras Gerais de Sinais Manuais** (modo de dimensionamento, confirmação, risco USD) — são **GLOBAIS**.
+   - Toda alteração nestas abas é salva com escopo `'all'` (`saveSettings(fields, 'all')`), unificando o comportamento da plataforma independentemente de qual ativo esteja sendo visualizado.
+3. **Configurações Granulares por Ativo (`panel_id`):**
+   - São estritamente atreladas a cada Ativo (`panel_id`):
+     - **Alertas Técnicos (`alert_*`):** Limites e gatilhos de Sentimento, Block Trades, Delta/Ratio, Acelerômetro, Níveis, Força/Viés e PVA. Cada ativo possui no máximo uma regra por tipo de alerta, preservando a coerência do Modo Individual e do Modo Lógica.
+     - **Metadados de Mercado:** Símbolo, `instance_id`, `tick_size`, `point_value`.
+     - **Sugestões de Stop Loss e Take Profit da Boleta:** Cadastradas no Admin e carregadas como padrão inicial na boleta de cada ativo.
+4. **Governança de Alertas em Segundo Plano:**
+   - O loop de monitoramento contínuo em Web Worker deve iterar sobre todos os ativos que possuam alertas ativos habilitados (`allSettings[panel.id]`), garantindo disparo sonoro/visual/Telegram ininterrupto mesmo quando o usuário estiver operando outro gráfico na tela.
+
+
 
 

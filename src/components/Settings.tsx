@@ -214,6 +214,8 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
   const [panelInstanceInput, setPanelInstanceInput] = useState<string>('');
   const [panelPointValueInput, setPanelPointValueInput] = useState<string>('1.0');
   const [panelTickSizeInput, setPanelTickSizeInput] = useState<string>('0.25');
+  const [panelDefaultSlInput, setPanelDefaultSlInput] = useState<string>('50');
+  const [panelDefaultTpInput, setPanelDefaultTpInput] = useState<string>('50');
   const [isSavingPanel, setIsSavingPanel] = useState<boolean>(false);
 
   useEffect(() => {
@@ -463,9 +465,9 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
       log_show_noticia: logShowNoticia,
       global_cycle_start: globalCycleStart,
       global_cycle_end: globalCycleEnd
-    });
+    }, 'all');
     if (success) {
-      setMessage({ text: 'Configurações Gerais salvas com sucesso!', type: 'success' });
+      setMessage({ text: 'Configurações Gerais salvas com sucesso para todos os ativos!', type: 'success' });
     } else {
       setMessage({ text: 'Falha ao salvar configurações gerais.', type: 'error' });
     }
@@ -554,9 +556,9 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
       tts_trigger_mode: ttsTriggerMode,
       tts_cooldown_seconds: Number(ttsCooldownSeconds),
       tts_volume: Number(ttsVolume),
-    });
+    }, 'all');
     if (success) {
-      setMessage({ text: 'Configurações de IA & Voz salvas com sucesso!', type: 'success' });
+      setMessage({ text: 'Configurações de IA & Voz salvas com sucesso para todos os ativos!', type: 'success' });
     } else {
       setMessage({ text: 'Falha ao salvar configurações de IA & Voz.', type: 'error' });
     }
@@ -579,9 +581,9 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
       resource_telegram_enabled: resourceTelegramEnabled,
       resource_tts_enabled: resourceTtsEnabled,
       resource_sound_beeps_enabled: resourceSoundBeepsEnabled
-    });
+    }, 'all');
     if (success) {
-      setMessage({ text: 'Configurações de Recursos e Desempenho salvas com sucesso!', type: 'success' });
+      setMessage({ text: 'Configurações de Recursos e Desempenho salvas com sucesso para todos os ativos!', type: 'success' });
     } else {
       setMessage({ text: 'Falha ao salvar configurações de recursos.', type: 'error' });
     }
@@ -637,9 +639,9 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
       telegram_send_image: telegramSendImage,
       telegram_send_signal: telegramSendSignal,
       telegram_only_signals: telegramOnlySignals
-    });
+    }, 'all');
     if (success) {
-      setMessage({ text: 'Configuração do Telegram salva com sucesso!', type: 'success' });
+      setMessage({ text: 'Configuração do Telegram salva com sucesso para todos os ativos!', type: 'success' });
     } else {
       setMessage({ text: 'Falha ao salvar configurações do Telegram.', type: 'error' });
     }
@@ -760,14 +762,14 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
       chart_manual_sizing_mode: chartManualSizingMode,
       chart_manual_risk_usd: Number(chartManualRiskUsd),
       chart_history_days: Number(chartHistoryDays)
-    });
+    }, 'all');
     if (success) {
       if (typeof window !== 'undefined' && settings?.panel_id) {
         try {
           localStorage.setItem(`vortex_manual_strat_id_${settings.panel_id}`, manualStrategyId);
         } catch (e) {}
       }
-      setMessage({ text: 'Ajustes de Sinais Manuais salvos com sucesso!', type: 'success' });
+      setMessage({ text: 'Ajustes de Sinais Manuais salvos com sucesso para todos os ativos!', type: 'success' });
     } else {
       setMessage({ text: 'Falha ao salvar ajustes de sinais manuais.', type: 'error' });
     }
@@ -3553,6 +3555,8 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
                   setPanelInstanceInput('');
                   setPanelPointValueInput('1.0');
                   setPanelTickSizeInput('0.25');
+                  setPanelDefaultSlInput('50');
+                  setPanelDefaultTpInput('50');
                   setIsAddingPanel(true);
                 }}
                 className="bg-blue-600 hover:bg-blue-750 text-white font-bold px-3 py-1.5 rounded text-xs transition active:scale-95"
@@ -3577,11 +3581,13 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
                 try {
                   const ptValue = Number(panelPointValueInput) || 1.0;
                   const tickSz = Number(panelTickSizeInput) || 0.25;
+                  const defSl = Number(panelDefaultSlInput) || 50;
+                  const defTp = Number(panelDefaultTpInput) || 50;
                   let success = false;
                   if (editingPanelId) {
-                    success = await updatePanelAction(editingPanelId, panelNameInput, panelInstanceInput, ptValue, tickSz);
+                    success = await updatePanelAction(editingPanelId, panelNameInput, panelInstanceInput, ptValue, tickSz, defSl, defTp);
                   } else {
-                    success = await createPanelAction(panelNameInput, panelInstanceInput, ptValue, tickSz);
+                    success = await createPanelAction(panelNameInput, panelInstanceInput, ptValue, tickSz, defSl, defTp);
                   }
                   if (success) {
                     setMessage({ text: editingPanelId ? 'Painel atualizado com sucesso!' : 'Novo painel cadastrado!', type: 'success' });
@@ -3599,9 +3605,9 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
               <h3 className="text-xs uppercase font-bold text-slate-400">
                 {editingPanelId ? '✏️ Editar Painel' : '➕ Novo Painel'}
               </h3>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1">Nome do Painel (Ex: NASDAQ)</label>
+                  <label className="text-xs text-slate-400 block mb-1">Nome do Ativo (Ex: NASDAQ)</label>
                   <input
                     type="text"
                     value={panelNameInput}
@@ -3644,6 +3650,32 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
                     className="bg-slate-950 border border-slate-800 p-2 rounded text-xs w-full text-amber-300 font-mono font-bold focus:outline-none focus:border-amber-500/50"
                   />
                 </div>
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1" title="Sugestão de Stop Loss padrão em pontos para boletas deste ativo">
+                    Sugestão SL (pts) 🛡️
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={panelDefaultSlInput}
+                    onChange={(e) => setPanelDefaultSlInput(e.target.value)}
+                    placeholder="Ex: 50"
+                    className="bg-slate-950 border border-slate-800 p-2 rounded text-xs w-full text-rose-300 font-mono font-bold focus:outline-none focus:border-rose-500/50"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1" title="Sugestão de Take Profit padrão em pontos para boletas deste ativo">
+                    Sugestão TP (pts) 🎯
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={panelDefaultTpInput}
+                    onChange={(e) => setPanelDefaultTpInput(e.target.value)}
+                    placeholder="Ex: 50"
+                    className="bg-slate-950 border border-slate-800 p-2 rounded text-xs w-full text-emerald-300 font-mono font-bold focus:outline-none focus:border-emerald-500/50"
+                  />
+                </div>
               </div>
               <div className="flex gap-2 justify-end">
                 <button
@@ -3683,6 +3715,8 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
               {panels.map((p) => {
                 const resolvedTick = resolvePanelTickSize(p, settings);
                 const resolvedPoint = resolvePanelPointValue(p, settings);
+                const resolvedSl = (p as any).default_sl_points ?? (typeof window !== 'undefined' ? localStorage.getItem(`vortex_panel_default_sl_${p.id}`) : null) ?? 50;
+                const resolvedTp = (p as any).default_tp_points ?? (typeof window !== 'undefined' ? localStorage.getItem(`vortex_panel_default_tp_${p.id}`) : null) ?? 50;
                 return (
                   <div key={p.id} className="p-4 flex items-center justify-between hover:bg-slate-900/10 transition">
                     <div className="space-y-1">
@@ -3695,6 +3729,10 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
                         <span>Ponto:</span> <span className="text-emerald-400 font-bold">U$ {resolvedPoint.toFixed(2)}</span>
                         <span className="text-slate-700">|</span>
                         <span>Tick:</span> <span className="text-amber-400 font-bold">{resolvedTick} pts</span>
+                        <span className="text-slate-700">|</span>
+                        <span>SL Sugerido:</span> <span className="text-rose-400 font-bold">{resolvedSl} pts</span>
+                        <span className="text-slate-700">|</span>
+                        <span>TP Sugerido:</span> <span className="text-emerald-400 font-bold">{resolvedTp} pts</span>
                         <span className="text-slate-700">|</span>
                         <span>Panel ID:</span> <span className="bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-purple-300 font-bold max-w-[120px] truncate" title={p.id}>{p.id}</span>
                         <button
@@ -3720,6 +3758,8 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
                             setPanelInstanceInput(p.instance_id);
                             setPanelPointValueInput(String(resolvedPoint));
                             setPanelTickSizeInput(String((p as any).tick_size ?? localStorage.getItem(`vortex_panel_tick_size_${p.id}`) ?? resolvedTick));
+                            setPanelDefaultSlInput(String(resolvedSl));
+                            setPanelDefaultTpInput(String(resolvedTp));
                             setIsAddingPanel(false);
                           }}
                           className="bg-blue-600/15 text-blue-400 border border-blue-600/30 hover:bg-blue-600 hover:text-white px-2.5 py-1 rounded text-xs transition"

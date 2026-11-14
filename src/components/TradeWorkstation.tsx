@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+﻿import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { TradeBoleta } from './TradeBoleta';
 import { TradeDock } from './TradeDock';
@@ -7,6 +7,7 @@ import { WidgetsManagerModal } from './WidgetsManagerModal';
 import { TradeChartGrid } from './TradeChartGrid';
 import { TradeChartSlot } from './TradeChartSlot';
 import { LayoutSelectorMenu } from './LayoutSelectorMenu';
+import { MarketPulseTicker } from './MarketPulseTicker';
 import {
   DEFAULT_SPLIT_RATIOS,
   type ChartLayoutType,
@@ -39,7 +40,6 @@ export const TradeWorkstation: React.FC = () => {
     activePanel,
     switchPanel,
     getPanelSnapshot,
-    ensurePanelHistoryDays,
     setVisibleMultiPanelIds,
     setPanelMode,
     settings,
@@ -85,6 +85,7 @@ export const TradeWorkstation: React.FC = () => {
     const handleBottomNavEvent = (e: any) => {
       setIsBottomNavCollapsed(Boolean(e?.detail?.isCollapsed));
       setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+      setTimeout(() => window.dispatchEvent(new Event('resize')), 200);
     };
     window.addEventListener('vortex_bottom_nav_collapsed', handleBottomNavEvent);
     return () => window.removeEventListener('vortex_bottom_nav_collapsed', handleBottomNavEvent);
@@ -1505,14 +1506,6 @@ export const TradeWorkstation: React.FC = () => {
     ? 'bg-[#0d1a38] border-blue-900/60 text-slate-100'
     : 'bg-[#222838] border-slate-700 text-slate-100';
 
-  const wsInputBg = isBlackTheme
-    ? 'bg-black border-zinc-800 text-white'
-    : isSlateTheme || isLightTheme
-    ? 'bg-[#2a3244] border-slate-600 text-slate-100'
-    : isMidnightTheme
-    ? 'bg-[#070e20] border-blue-900/60 text-slate-100'
-    : 'bg-[#2a3244] border-slate-600 text-slate-100';
-
   const wsBtnBg = isBlackTheme
     ? 'bg-[#18181b] border-zinc-800 text-slate-300 hover:text-white'
     : isSlateTheme || isLightTheme
@@ -1520,7 +1513,6 @@ export const TradeWorkstation: React.FC = () => {
     : isMidnightTheme
     ? 'bg-[#152244] border-blue-900/60 text-slate-300 hover:text-white'
     : 'bg-[#2a3244] border-slate-600 text-slate-200 hover:bg-[#38435b] hover:text-white';
-
   const boletaTargetPanel = isBoletaAssetLocked ? activePanel : (focusedPanel || activePanel);
   const boletaSnapshot = getPanelSnapshot ? getPanelSnapshot(boletaTargetPanel?.id || pKey) : null;
   const boletaSymbol = boletaTargetPanel?.name || currentSymbol;
@@ -1537,272 +1529,216 @@ export const TradeWorkstation: React.FC = () => {
       style={isMobile ? {
         paddingTop: 'max(env(safe-area-inset-top, 0px), 36px)',
         paddingBottom: isBottomNavCollapsed
-          ? 'max(env(safe-area-inset-bottom, 0px), 24px)'
-          : 'calc(max(env(safe-area-inset-bottom, 0px), 24px) + 72px)'
+          ? 'max(env(safe-area-inset-bottom, 0px), 0px)'
+          : 'calc(max(env(safe-area-inset-bottom, 0px), 0px) + 64px)'
       } : undefined}
       className={`w-full ${isMobile ? 'h-full' : 'h-[calc(100vh-20px)]'} ${wsRootBg} flex flex-col font-sans overflow-hidden transition-all duration-200`}
     >
       {/* Top Workstation Header Toolbar - Apenas Desktop (No Mobile é substituído pelo botão discreto no gráfico e drawer) */}
       {!isMobile && (
         <div className={`${wsHeaderBg} border-b px-3 py-1.5 h-11 flex items-center justify-between gap-2.5 select-none shrink-0 relative z-50 transition-colors duration-200`}>
-        {/* Left Section: Clean Asset Selector, Timeframe Dropdown & Indicators */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Asset Panel Selector (Atua no gráfico focado) */}
-          <div className={`flex items-center gap-1.5 ${wsInputBg} border px-2.5 py-1 rounded-lg`} title={chartLayout !== 'single' ? `Ativo do Gráfico ${effectiveFocusedIdx + 1} (Focado)` : 'Ativo / Painel'}>
-            <span className="text-sm">📈</span>
-            <select
-              value={focusedSlot.panelId || ''}
-              onChange={(e) => updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, panelId: e.target.value }))}
-              className="bg-transparent text-xs font-black outline-none cursor-pointer"
-            >
-              {panels?.map((p: any) => {
-                const cleanName = p.name ? p.name.replace(/\s*\([^)]*\)/g, '').trim() : 'Painel';
-                return (
-                  <option key={p.id} value={p.id} className="bg-[#181d28]">
-                    {cleanName}
-                  </option>
-                );
-              })}
-            </select>
+          {/* Espaço Central/Esquerdo: Ticker Tape de Futuros e Próxima Notícia de Impacto */}
+          <div className="flex items-center gap-2 overflow-hidden">
+            <MarketPulseTicker />
           </div>
+        {/* Right Section: Action Controls [IA, R, C, S, ROBÔS, F, BOLETA, Standard] */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Grupo de Análise Técnica: Indicadores, Template, Widgets, Cursor, Desenhos, Atualização */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Indicators Modal Trigger */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setIsIndicatorsModalOpen(true)}
+                className="bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer"
+                title="Gerenciar Indicadores e Templates"
+              >
+                <span>📊</span>
+                <span className="bg-blue-900 text-blue-200 px-1.5 py-0.2 rounded-full text-[10px]">
+                  {focusedVisibleIndicators.length}
+                </span>
+              </button>
+              <button
+                onClick={handleApplyDefaultTemplate}
+                className="bg-amber-950/40 hover:bg-amber-900/60 border border-amber-500/40 text-amber-300 hover:text-amber-200 px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer active:scale-95 shadow"
+                title="Carregar Template Padrão do Painel 2"
+              >
+                <span>⭐</span>
+              </button>
+            </div>
 
-          {/* Timeframe Dropdown Selector (Atua no gráfico focado) */}
-          <div className={`flex items-center gap-1 ${wsInputBg} border px-2 py-1 rounded-lg`}>
-            <span className="text-[11px] text-slate-400">⏱️</span>
-            <select
-              value={focusedSlot.timeframe}
-              onChange={(e) => updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, timeframe: Number(e.target.value) }))}
-              className="bg-transparent text-xs font-bold text-blue-400 outline-none cursor-pointer"
-              title="Seletor de Timeframe do Gráfico Focado"
-            >
-              <option value={1} className="bg-[#181d28] text-slate-200">1m</option>
-              <option value={2} className="bg-[#181d28] text-slate-200">2m</option>
-              <option value={3} className="bg-[#181d28] text-slate-200">3m</option>
-              <option value={5} className="bg-[#181d28] text-slate-200">5m</option>
-              <option value={10} className="bg-[#181d28] text-slate-200">10m</option>
-              <option value={15} className="bg-[#181d28] text-slate-200">15m</option>
-              <option value={30} className="bg-[#181d28] text-slate-200">30m</option>
-              <option value={60} className="bg-[#181d28] text-slate-200">1h</option>
-              <option value={240} className="bg-[#181d28] text-slate-200">4h</option>
-              <option value={1440} className="bg-[#181d28] text-slate-200">1D</option>
-            </select>
-          </div>
-
-          {/* Indicators Modal Trigger */}
-          <div className="flex items-center gap-1">
+            {/* Widgets Modal Trigger */}
             <button
-              onClick={() => setIsIndicatorsModalOpen(true)}
-              className="bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer"
-              title="Gerenciar Indicadores e Templates"
+              onClick={() => setIsWidgetsModalOpen(true)}
+              className="bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer shadow"
+              title="Gerenciar Widgets e Cards Flutuantes do Gráfico"
             >
-              <span>📊</span>
-              <span className="bg-blue-900 text-blue-200 px-1.5 py-0.2 rounded-full text-[10px]">
-                {focusedVisibleIndicators.length}
+              <span>🧩</span>
+              <span className="bg-purple-900 text-purple-200 px-1.5 py-0.2 rounded-full text-[10px]">
+                {activeWidgets.filter(w => w.visible).length}
               </span>
             </button>
+
+            {/* Cursor Mode Toggle: Mira (Crosshair) vs Seta (Livre) */}
             <button
-              onClick={handleApplyDefaultTemplate}
-              className="bg-amber-950/40 hover:bg-amber-900/60 border border-amber-500/40 text-amber-300 hover:text-amber-200 px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer active:scale-95 shadow"
-              title="Carregar Template Padrão do Painel 2"
-            >
-              <span>⭐</span>
-            </button>
-          </div>
-
-          {/* Widgets Modal Trigger */}
-          <button
-            onClick={() => setIsWidgetsModalOpen(true)}
-            className="bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer shadow"
-            title="Gerenciar Widgets e Cards Flutuantes do Gráfico"
-          >
-            <span>🧩</span>
-            <span className="bg-purple-900 text-purple-200 px-1.5 py-0.2 rounded-full text-[10px]">
-              {activeWidgets.filter(w => w.visible).length}
-            </span>
-          </button>
-
-          {/* Cursor Mode Toggle: Mira (Crosshair) vs Seta (Livre) */}
-          <button
-            onClick={handleToggleCursorMode}
-            className={`px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer shadow border ${
-              cursorMode === 'arrow'
-                ? 'bg-sky-600 text-white border-sky-400'
-                : 'bg-slate-800/80 hover:bg-slate-700 border-slate-600/60 text-slate-200'
-            }`}
-            title={cursorMode === 'arrow' ? 'Modo Seta (movimento livre) — Clique para voltar ao modo Cursor (Mira)' : 'Modo Cursor (Mira) — Clique para mudar para modo Seta (movimento livre)'}
-          >
-            <span>{cursorMode === 'arrow' ? '↖' : '✛'}</span>
-            <span className="hidden sm:inline">{cursorMode === 'arrow' ? 'Seta' : 'Cursor'}</span>
-          </button>
-
-          {/* Drawings Tool Selector Button / Listbox */}
-          <div className="relative">
-            <button
-              onClick={() => setIsDrawingsMenuOpen(!isDrawingsMenuOpen)}
-              className={`px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer shadow ${
-                activeDrawingTool
-                  ? 'bg-amber-600 text-white border border-amber-400 animate-pulse'
-                  : 'bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300'
+              onClick={handleToggleCursorMode}
+              className={`px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer shadow border ${
+                cursorMode === 'arrow'
+                  ? 'bg-sky-600 text-white border-sky-400'
+                  : 'bg-slate-800/80 hover:bg-slate-700 border-slate-600/60 text-slate-200'
               }`}
-              title="Ferramentas de Desenho Técnico e Automação de Ordens ao Toque"
+              title={cursorMode === 'arrow' ? 'Modo Seta (movimento livre) — Clique para voltar ao modo Cursor (Mira)' : 'Modo Cursor (Mira) — Clique para mudar para modo Seta (movimento livre)'}
             >
-              <span>✏️</span>
-              {drawings.length > 0 && (
-                <span className="bg-emerald-900 text-emerald-200 px-1.5 py-0.2 rounded-full text-[10px]">
-                  {drawings.length}
-                </span>
-              )}
-              <span className="text-[9px]">▼</span>
+              <span>{cursorMode === 'arrow' ? '↖' : '✛'}</span>
+              <span className="hidden sm:inline">{cursorMode === 'arrow' ? 'Seta' : 'Cursor'}</span>
             </button>
 
-            {isDrawingsMenuOpen && (
-              <>
-                {/* Backdrop invisível para fechar ao clicar fora */}
-                <div 
-                  className="fixed inset-0 z-[99990]" 
-                  onClick={() => setIsDrawingsMenuOpen(false)} 
-                />
+            {/* Drawings Tool Selector Button / Listbox */}
+            <div className="relative">
+              <button
+                onClick={() => setIsDrawingsMenuOpen(!isDrawingsMenuOpen)}
+                className={`px-2 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer shadow ${
+                  activeDrawingTool
+                    ? 'bg-amber-600 text-white border border-amber-400 animate-pulse'
+                    : 'bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300'
+                }`}
+                title="Ferramentas de Desenho Técnico e Automação de Ordens ao Toque"
+              >
+                <span>✏️</span>
+                {drawings.length > 0 && (
+                  <span className="bg-emerald-900 text-emerald-200 px-1.5 py-0.2 rounded-full text-[10px]">
+                    {drawings.length}
+                  </span>
+                )}
+                <span className="text-[9px]">▼</span>
+              </button>
 
-                <div className="absolute top-full left-0 mt-1.5 w-60 bg-[#1e2430] border border-slate-700 rounded-xl shadow-2xl z-[99999] p-1.5 space-y-1 font-sans text-xs animate-in fade-in zoom-in-95 duration-100">
-                  <div className="px-2 py-1 text-[10px] font-extrabold uppercase text-slate-400 tracking-wider flex items-center justify-between border-b border-slate-800 pb-1.5 mb-1">
-                    <span>Ferramentas de Desenho</span>
-                    <button
-                      onClick={() => setIsDrawingsMenuOpen(false)}
-                      className="text-slate-400 hover:text-white"
-                    >
-                      ✕
-                    </button>
-                  </div>
+              {isDrawingsMenuOpen && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-[99990]" 
+                    onClick={() => setIsDrawingsMenuOpen(false)} 
+                  />
 
-                  <button
-                    onClick={() => { setActiveDrawingTool('horizontal_line'); setIsDrawingsMenuOpen(false); }}
-                    className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-bold text-left transition cursor-pointer"
-                  >
-                    <span className="text-base">➖</span>
-                    <div>
-                      <div className="text-xs">Linha Horizontal</div>
-                      <div className="text-[9px] text-slate-400 font-normal">Preenche toda a extensão do gráfico</div>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => { setActiveDrawingTool('trend_line'); setIsDrawingsMenuOpen(false); }}
-                    className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-bold text-left transition cursor-pointer"
-                  >
-                    <span className="text-base">📈</span>
-                    <div>
-                      <div className="text-xs">Linha de Tendência (LTA / LTB)</div>
-                      <div className="text-[9px] text-slate-400 font-normal">Conecta dois pontos no gráfico</div>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => { setActiveDrawingTool('rectangle'); setIsDrawingsMenuOpen(false); }}
-                    className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-bold text-left transition cursor-pointer"
-                  >
-                    <span className="text-base">🔲</span>
-                    <div>
-                      <div className="text-xs">Retângulo (Região)</div>
-                      <div className="text-[9px] text-slate-400 font-normal">Zonas de suporte e resistência</div>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => { setActiveDrawingTool('fibonacci'); setIsDrawingsMenuOpen(false); }}
-                    className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-bold text-left transition cursor-pointer"
-                  >
-                    <span className="text-base">📐</span>
-                    <div>
-                      <div className="text-xs">Retração de Fibonacci</div>
-                      <div className="text-[9px] text-slate-400 font-normal">Níveis de 0% a 100% (61.8%)</div>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => { setActiveDrawingTool('channel'); setIsDrawingsMenuOpen(false); }}
-                    className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-bold text-left transition cursor-pointer"
-                  >
-                    <span className="text-base">🛤️</span>
-                    <div>
-                      <div className="text-xs">Canal de Tendência</div>
-                      <div className="text-[9px] text-slate-400 font-normal">Canais paralelos com offset e zonas</div>
-                    </div>
-                  </button>
-
-                  <div className="pt-1 border-t border-slate-800">
-                    <span className="px-2 text-[9px] font-black uppercase text-slate-400 tracking-wider">Anotações & Medições</span>
-                  </div>
-
-                  <button
-                    onClick={() => { setActiveDrawingTool('text'); setIsDrawingsMenuOpen(false); }}
-                    className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-bold text-left transition cursor-pointer"
-                  >
-                    <span className="text-base">💬</span>
-                    <div>
-                      <div className="text-xs">Elemento de Texto</div>
-                      <div className="text-[9px] text-slate-400 font-normal">Inserir anotações e rótulos no gráfico</div>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => { setActiveDrawingTool('arrow'); setIsDrawingsMenuOpen(false); }}
-                    className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-bold text-left transition cursor-pointer"
-                  >
-                    <span className="text-base">⚡</span>
-                    <div>
-                      <div className="text-xs">Zigue-Zague com Flecha</div>
-                      <div className="text-[9px] text-slate-400 font-normal">Linhas contínuas com ponta de seta</div>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => { setActiveDrawingTool('ruler'); setIsDrawingsMenuOpen(false); }}
-                    className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-bold text-left transition cursor-pointer"
-                  >
-                    <span className="text-base">📏</span>
-                    <div>
-                      <div className="text-xs">Régua de Medição</div>
-                      <div className="text-[9px] text-slate-400 font-normal">Conta candles e variação em pontos</div>
-                    </div>
-                  </button>
-
-                  {drawings.length > 0 && (
-                    <div className="pt-1.5 border-t border-slate-800">
+                  <div className="absolute top-full right-0 mt-1.5 w-60 bg-[#1e2430] border border-slate-700 rounded-xl shadow-2xl z-[99999] p-1.5 space-y-1 font-sans text-xs animate-in fade-in zoom-in-95 duration-100">
+                    <div className="px-2 py-1 text-[10px] font-extrabold uppercase text-slate-400 tracking-wider flex items-center justify-between border-b border-slate-800 pb-1.5 mb-1">
+                      <span>Ferramentas de Desenho</span>
                       <button
-                        onClick={() => { handleClearAllDrawings(); setIsDrawingsMenuOpen(false); }}
-                        className="w-full px-2.5 py-1.5 rounded-lg hover:bg-rose-950/80 text-rose-400 font-bold text-left transition flex items-center gap-2 text-[11px] cursor-pointer"
+                        onClick={() => setIsDrawingsMenuOpen(false)}
+                        className="text-slate-400 hover:text-white"
                       >
-                        <span>🗑️</span>
-                        <span>Limpar Todos ({drawings.length})</span>
+                        ✕
                       </button>
                     </div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
 
-          {/* Atualização forçada dos gráficos abertos (e seletor apenas no modo 1 Gráfico) */}
-          <div className={`flex items-center gap-1.5 ${wsInputBg} border px-2 py-1 rounded-lg text-xs shrink-0`}>
-            {chartLayout === 'single' && (
-              <select
-                value={Math.max(3, Number(getEffectiveSlot(0).historyDays || settings?.chart_history_days) || 7)}
-                onChange={(e) => {
-                  const nextDays = Math.max(3, Number(e.target.value));
-                  handleChangeSlotHistoryDays(0, nextDays);
-                  if (ensurePanelHistoryDays && pKey) {
-                    ensurePanelHistoryDays(pKey, nextDays);
-                  }
-                }}
-                className="bg-transparent text-xs font-bold text-blue-400 outline-none cursor-pointer"
-                title="Personalizar dias de histórico deste gráfico (mín. 3 dias, salvo no banco)"
-              >
-                <option value={3} className="bg-[#181d28] text-slate-200">3 Dias</option>
-                <option value={7} className="bg-[#181d28] text-slate-200">7 Dias</option>
-                <option value={15} className="bg-[#181d28] text-slate-200">15 Dias</option>
-                <option value={30} className="bg-[#181d28] text-slate-200">30 Dias</option>
-              </select>
-            )}
+                    <button
+                      onClick={() => { setActiveDrawingTool('horizontal_line'); setIsDrawingsMenuOpen(false); }}
+                      className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-bold text-left transition cursor-pointer"
+                    >
+                      <span className="text-base">➖</span>
+                      <div>
+                        <div className="text-xs">Linha Horizontal</div>
+                        <div className="text-[9px] text-slate-400 font-normal">Preenche toda a extensão do gráfico</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => { setActiveDrawingTool('trend_line'); setIsDrawingsMenuOpen(false); }}
+                      className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-bold text-left transition cursor-pointer"
+                    >
+                      <span className="text-base">📈</span>
+                      <div>
+                        <div className="text-xs">Linha de Tendência (LTA / LTB)</div>
+                        <div className="text-[9px] text-slate-400 font-normal">Conecta dois pontos no gráfico</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => { setActiveDrawingTool('rectangle'); setIsDrawingsMenuOpen(false); }}
+                      className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-bold text-left transition cursor-pointer"
+                    >
+                      <span className="text-base">🔲</span>
+                      <div>
+                        <div className="text-xs">Retângulo (Região)</div>
+                        <div className="text-[9px] text-slate-400 font-normal">Zonas de suporte e resistência</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => { setActiveDrawingTool('fibonacci'); setIsDrawingsMenuOpen(false); }}
+                      className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-bold text-left transition cursor-pointer"
+                    >
+                      <span className="text-base">📐</span>
+                      <div>
+                        <div className="text-xs">Retração de Fibonacci</div>
+                        <div className="text-[9px] text-slate-400 font-normal">Níveis de 0% a 100% (61.8%)</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => { setActiveDrawingTool('channel'); setIsDrawingsMenuOpen(false); }}
+                      className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-bold text-left transition cursor-pointer"
+                    >
+                      <span className="text-base">🛤️</span>
+                      <div>
+                        <div className="text-xs">Canal de Tendência</div>
+                        <div className="text-[9px] text-slate-400 font-normal">Canais paralelos com offset e zonas</div>
+                      </div>
+                    </button>
+
+                    <div className="pt-1 border-t border-slate-800">
+                      <span className="px-2 text-[9px] font-black uppercase text-slate-400 tracking-wider">Anotações & Medições</span>
+                    </div>
+
+                    <button
+                      onClick={() => { setActiveDrawingTool('text'); setIsDrawingsMenuOpen(false); }}
+                      className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-bold text-left transition cursor-pointer"
+                    >
+                      <span className="text-base">💬</span>
+                      <div>
+                        <div className="text-xs">Elemento de Texto</div>
+                        <div className="text-[9px] text-slate-400 font-normal">Inserir anotações e rótulos no gráfico</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => { setActiveDrawingTool('arrow'); setIsDrawingsMenuOpen(false); }}
+                      className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-bold text-left transition cursor-pointer"
+                    >
+                      <span className="text-base">⚡</span>
+                      <div>
+                        <div className="text-xs">Zigue-Zague com Flecha</div>
+                        <div className="text-[9px] text-slate-400 font-normal">Linhas contínuas com ponta de seta</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => { setActiveDrawingTool('ruler'); setIsDrawingsMenuOpen(false); }}
+                      className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-bold text-left transition cursor-pointer"
+                    >
+                      <span className="text-base">📏</span>
+                      <div>
+                        <div className="text-xs">Régua de Medição</div>
+                        <div className="text-[9px] text-slate-400 font-normal">Conta candles e variação em pontos</div>
+                      </div>
+                    </button>
+
+                    {drawings.length > 0 && (
+                      <div className="pt-1.5 border-t border-slate-800">
+                        <button
+                          onClick={() => { handleClearAllDrawings(); setIsDrawingsMenuOpen(false); }}
+                          className="w-full px-2.5 py-1.5 rounded-lg hover:bg-rose-950/80 text-rose-400 font-bold text-left transition flex items-center gap-2 text-[11px] cursor-pointer"
+                        >
+                          <span>🗑️</span>
+                          <span>Limpar Todos ({drawings.length})</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Atualização forçada dos gráficos abertos */}
             <button
               type="button"
               onClick={(e) => {
@@ -1830,18 +1766,18 @@ export const TradeWorkstation: React.FC = () => {
                 const openPanelIds = Object.keys(perPanelDays);
                 refreshMarketData(undefined, openPanelIds.length > 0 ? openPanelIds : undefined, perPanelDays);
               }}
-              className="p-0.5 hover:bg-slate-700/60 rounded text-slate-400 hover:text-cyan-300 transition active:scale-95"
-              title="Atualizar forçadamente o histórico de cada janela conforme configurado"
+              className={`p-1.5 ${wsBtnBg} border rounded-lg text-slate-300 hover:text-cyan-300 transition active:scale-95 flex items-center justify-center shadow cursor-pointer`}
+              title="Atualizar forçadamente o histórico de todos os gráficos abertos"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
             </button>
           </div>
-        </div>
 
-        {/* Right Section: Action Controls [IA, R, C, S, ROBÔS, F, BOLETA, Standard] */}
-        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Separador Visual Vertical */}
+          <div className="h-5 w-[1px] bg-slate-700/80 mx-1 shrink-0" />
+
           {/* Botão IA (Validação IA para ordens manuais) */}
           <button
             onClick={(e) => {
@@ -2443,6 +2379,8 @@ export const TradeWorkstation: React.FC = () => {
                     type="button"
                     onClick={() => {
                       window.dispatchEvent(new CustomEvent('vortex_toggle_bottom_nav'));
+                      setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+                      setTimeout(() => window.dispatchEvent(new Event('resize')), 250);
                       setIsMobileLeftDrawerOpen(false);
                     }}
                     className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
@@ -2454,141 +2392,6 @@ export const TradeWorkstation: React.FC = () => {
                     <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${!isBottomNavCollapsed ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-500'}`}>
                       {!isBottomNavCollapsed ? 'VISÍVEL' : 'OCULTO'}
                     </span>
-                  </button>
-
-                  {/* Validação Inteligente IA [IA] */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = !settings?.chart_manual_ia_validate;
-                      saveSettings({ chart_manual_ia_validate: next });
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="font-mono font-black bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded text-[11px] border border-emerald-500/30">IA</span>
-                      <span>Validação de Entradas com IA</span>
-                    </span>
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${settings?.chart_manual_ia_validate ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-500'}`}>
-                      {settings?.chart_manual_ia_validate ? 'ATIVO' : 'DESL'}
-                    </span>
-                  </button>
-
-                  {/* Legenda de Indicadores [I] */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, showIndicatorsLegend: !s.showIndicatorsLegend }));
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="font-mono font-black bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded text-[11px] border border-indigo-500/30">I</span>
-                      <span>Legenda de Indicadores</span>
-                    </span>
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${focusedSlot.showIndicatorsLegend ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-500'}`}>
-                      {focusedSlot.showIndicatorsLegend ? 'ATIVO' : 'DESL'}
-                    </span>
-                  </button>
-
-                  {/* Marcadores de Trades [S] */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, showTradeMarkers: !s.showTradeMarkers }));
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="font-mono font-black bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded text-[11px] border border-blue-500/30">S</span>
-                      <span>Marcadores & Sinais de Trades</span>
-                    </span>
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${focusedSlot.showTradeMarkers ? 'bg-blue-500/20 text-blue-300' : 'text-slate-500'}`}>
-                      {focusedSlot.showTradeMarkers ? 'ATIVO' : 'DESL'}
-                    </span>
-                  </button>
-
-                  {/* Linhas de Ordens [O] */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, showOrderLines: s.showOrderLines === false ? true : false }));
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="font-mono font-black bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded text-[11px] border border-blue-500/30">O</span>
-                      <span>Linhas de Ordens Abertas</span>
-                    </span>
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${focusedSlot.showOrderLines !== false ? 'bg-blue-500/20 text-blue-300' : 'text-slate-500'}`}>
-                      {focusedSlot.showOrderLines !== false ? 'ATIVO' : 'DESL'}
-                    </span>
-                  </button>
-
-                  {/* Painel Inferior de Ordens & Histórico [H] */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowBottomDock(true);
-                      setIsMobileLeftDrawerOpen(false);
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-cyan-950/30 hover:bg-cyan-950/50 border border-cyan-500/40 text-cyan-300 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="font-mono font-black bg-cyan-500/20 px-1.5 py-0.5 rounded text-[11px] border border-cyan-500/30">H</span>
-                      <span>Histórico & Ordens (Dock)</span>
-                    </span>
-                    <span className="text-slate-500 text-xs">›</span>
-                  </button>
-
-                  {/* Fit Scale [F] */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFitChartTrigger(prev => prev + 1);
-                      setIsMobileLeftDrawerOpen(false);
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-amber-950/30 hover:bg-amber-950/50 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="font-mono font-black bg-amber-500/20 px-1.5 py-0.5 rounded text-[11px] border border-amber-500/30">F</span>
-                      <span>Alinhar Escala (NinjaTrader Fit)</span>
-                    </span>
-                    <span className="text-slate-500 text-xs">›</span>
-                  </button>
-
-                  {/* Centralizar Preço [C] */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, autoCenter: !s.autoCenter }));
-                      setIsMobileLeftDrawerOpen(false);
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="font-mono font-black bg-slate-800 px-1.5 py-0.5 rounded text-[11px]">C</span>
-                      <span>Auto-Center Preço</span>
-                    </span>
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${focusedSlot.autoCenter ? 'bg-yellow-500/20 text-yellow-300' : 'text-slate-500'}`}>
-                      {focusedSlot.autoCenter ? 'ATIVO' : 'DESL'}
-                    </span>
-                  </button>
-
-                  {/* Reenquadrar [R] */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setResetViewTrigger(prev => prev + 1);
-                      setIsMobileLeftDrawerOpen(false);
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold flex items-center justify-between active:scale-95 transition cursor-pointer"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="font-mono font-black bg-slate-800 px-1.5 py-0.5 rounded text-[11px]">R</span>
-                      <span>Reenquadrar Vista (Reset View)</span>
-                    </span>
-                    <span className="text-slate-500 text-xs">›</span>
                   </button>
 
                   {/* Indicadores & Templates */}

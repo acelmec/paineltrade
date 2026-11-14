@@ -50,6 +50,12 @@ extern string   InpLocalJsonPath        = "NinjaPanel_data.json";            // 
 extern string   Group_4                 = "=== 4. DASHBOARD VISUAL ===";
 extern bool     InpShowOnScreenPanel    = true;                              // Mostrar Dashboard no Grafico
 
+extern string   Group_5                 = "=== 5. FOOTPRINT & CLUSTERS INTRA-CANDLE ===";
+extern bool     InpEnableClusters       = true;                              // Habilitar Coleta de Footprint / Clusters M1
+extern double   InpClusterTickSize      = 0.0;                               // Tick Size para Agrupamento (0.0 = Automatico da Corretora)
+extern int      InpMaxClusterLevels     = 250;                               // Limite Maximo de Niveis de Preco por Candle
+extern bool     InpSaveClustersToDb     = false;                             // Salvar Clusters no Supabase (Ativar APOS rodar ALTER TABLE)
+
 //+------------------------------------------------------------------+
 //| ESTRUTURAS E ESTADO                                              |
 //+------------------------------------------------------------------+
@@ -61,6 +67,13 @@ struct TradeInfo
    string   side;
 };
 
+struct PriceCluster
+{
+   double price;
+   long   bidVol;
+   long   askVol;
+};
+
 string   g_symbol               = "";
 int      g_digits               = 2;
 bool     g_isTimeframeValid     = true;
@@ -69,6 +82,14 @@ datetime g_lastBarTime          = 0;
 datetime g_lastSentTime         = 0;
 double   g_lastSentClose        = 0;
 long     g_lastSentVol          = 0;
+
+// Clusters Intra-Candle (Footprint)
+PriceCluster g_barClusters[];
+int          g_clusterTotalLevels     = 0;
+double       g_clusterPocPrice        = 0;
+long         g_clusterPocBid          = 0;
+long         g_clusterPocAsk          = 0;
+string       g_lastClosedClustersJson = "[]";
 
 // Variaveis de Diagnostico
 int      g_histTotalCandles     = 0;
@@ -188,18 +209,138 @@ bool HttpPost(const string targetUrl, const string jsonPayload, bool isSupabase,
 }
 
 //+------------------------------------------------------------------+
+//| ESTRUTURA E GERENCIAMENTO DE CLUSTERS INTRA-CANDLE (FOOTPRINT)   |
+//+------------------------------------------------------------------+
+void AddClusterTick(double price, long vol, string side)
+{
+   if(price <= 0.0 || vol <= 0) return;
+
+   int size = ArraySize(g_barClusters);
+   int targetIdx = -1;
+
+   for(int i = 0; i < size; i++)
+   {
+      if(MathAbs(g_barClusters[i].price - price) < (Point * 0.5))
+      {
+         targetIdx = i;
+         break;
+      }
+   }
+
+   if(targetIdx < 0)
+   {
+      if(size >= InpMaxClusterLevels) return; // Protecao de memoria
+      targetIdx = size;
+      ArrayResize(g_barClusters, size + 1);
+      g_barClusters[targetIdx].price = price;
+      g_barClusters[targetIdx].bidVol = 0;
+      g_barClusters[targetIdx].askVol = 0;
+      g_clusterTotalLevels = size + 1;
+   }
+
+   if(side == "COMPRA")
+      g_barClusters[targetIdx].askVol += vol;
+   else
+      g_barClusters[targetIdx].bidVol += vol;
+
+   long levelTot = g_barClusters[targetIdx].bidVol + g_barClusters[targetIdx].askVol;
+   long currentPocTot = g_clusterPocBid + g_clusterPocAsk;
+   if(levelTot > currentPocTot)
+   {
+      g_clusterPocPrice = price;
+      g_clusterPocBid = g_barClusters[targetIdx].bidVol;
+      g_clusterPocAsk = g_barClusters[targetIdx].askVol;
+   }
+}
+
+string BuildClustersJson(PriceCluster &clusters[])
+{
+   int count = ArraySize(clusters);
+   if(count <= 0) return "[]";
+
+   // Ordenacao rapida por preco crescente (Bubble sort para arrays pequenos de 10-250 itens)
+   for(int i = 0; i < count - 1; i++)
+   {
+      for(int j = 0; j < count - i - 1; j++)
+      {
+         if(clusters[j].price > clusters[j + 1].price)
+         {
+            PriceCluster temp = clusters[j];
+            clusters[j] = clusters[j + 1];
+            clusters[j + 1] = temp;
+         }
+      }
+   }
+
+   string json = "[";
+   for(int k = 0; k < count; k++)
+   {
+      if(k > 0) json += ",";
+      json += StringFormat("{\"p\":%s,\"b\":%d,\"a\":%d}",
+                           F(clusters[k].price, g_digits),
+                           clusters[k].bidVol,
+                           clusters[k].askVol);
+   }
+   json += "]";
+   return json;
+}
+
+string BuildClustersBarFullJson()
+{
+   datetime cTime = iTime(NULL, PERIOD_M1, 0);
+   datetime endDt = cTime + 60;
+   string ts = FormatIsoTimestamp(endDt, InpHoraAjuste);
+   string currClusters = BuildClustersJson(g_barClusters);
+
+   return StringFormat("{\"instance_id\":\"%s\",\"symbol\":\"%s\",\"timestamp\":\"%s\",\"levels\":%d,\"poc\":{\"price\":%s,\"bid\":%d,\"ask\":%d},\"clusters\":%s,\"closed_clusters\":%s}",
+                       InpInstanceId,
+                       g_symbol,
+                       ts,
+                       g_clusterTotalLevels,
+                       F(g_clusterPocPrice, g_digits),
+                       g_clusterPocBid,
+                       g_clusterPocAsk,
+                       currClusters,
+                       g_lastClosedClustersJson);
+}
+
+void WriteClustersJson(string clustersJson)
+{
+   ResetLastError();
+   int fileHandle = FileOpen("NinjaPanel_clusters.json", FILE_WRITE | FILE_TXT | FILE_ANSI);
+   if(fileHandle != INVALID_HANDLE)
+   {
+      FileWriteString(fileHandle, clustersJson);
+      FileClose(fileHandle);
+   }
+}
+
+//+------------------------------------------------------------------+
 //| CONSTRUTOR DE JSON PARA CANDLE UNICO                             |
 //+------------------------------------------------------------------+
-string BuildSingleCandleJson(datetime dt, double open, double high, double low, double close, long volume)
+string BuildSingleCandleJson(datetime dt, double open, double high, double low, double close, long volume, string clustersJson = "")
 {
    // Ajusta para o horário de fechamento do candle M1 (Padrão Vortex / NinjaTrader)
-   // Exemplo: O candle das 01:57 (abertura) fecha às 01:58:00
    datetime endDt = dt + 60;
    string ts = FormatIsoTimestamp(endDt, InpHoraAjuste);
    double adjOpen  = open  + InpPriceOffset;
    double adjHigh  = high  + InpPriceOffset;
    double adjLow   = low   + InpPriceOffset;
    double adjClose = close + InpPriceOffset;
+
+   if(clustersJson != "" && clustersJson != "[]")
+   {
+      return StringFormat("{\"instance_id\":\"%s\",\"symbol\":\"%s\",\"timestamp\":\"%s\",\"open\":%s,\"high\":%s,\"low\":%s,\"close\":%s,\"volume\":%d,\"clusters\":%s}",
+                          InpInstanceId,
+                          g_symbol,
+                          ts,
+                          F(adjOpen, g_digits),
+                          F(adjHigh, g_digits),
+                          F(adjLow, g_digits),
+                          F(adjClose, g_digits),
+                          volume,
+                          clustersJson);
+   }
 
    return StringFormat("{\"instance_id\":\"%s\",\"symbol\":\"%s\",\"timestamp\":\"%s\",\"open\":%s,\"high\":%s,\"low\":%s,\"close\":%s,\"volume\":%d}",
                        InpInstanceId,
@@ -215,7 +356,7 @@ string BuildSingleCandleJson(datetime dt, double open, double high, double low, 
 //+------------------------------------------------------------------+
 //| CONSTRUTOR DE JSON PARA MARKET DATA / TAPE READING               |
 //+------------------------------------------------------------------+
-string BuildMarketDataJson()
+string BuildMarketDataJson(bool includeClusters = false)
 {
    long delta = g_safeBuyVol - g_safeSellVol;
    long totalVol = g_safeBuyVol + g_safeSellVol;
@@ -280,6 +421,21 @@ string BuildMarketDataJson()
       F(g_safeDistSuporte, 2),
       F(g_safeDistResistencia, 2)
    );
+
+   if(includeClusters && InpEnableClusters)
+   {
+      string currClustersJson = BuildClustersJson(g_barClusters);
+      if(StringSubstr(json, StringLen(json) - 1, 1) == "}")
+      {
+         json = StringSubstr(json, 0, StringLen(json) - 1);
+         json += StringFormat(",\"clusters\":%s,\"closed_clusters\":%s,\"poc\":{\"price\":%s,\"bid\":%d,\"ask\":%d}}",
+                              currClustersJson,
+                              g_lastClosedClustersJson,
+                              F(g_clusterPocPrice, g_digits),
+                              g_clusterPocBid,
+                              g_clusterPocAsk);
+      }
+   }
 
    return json;
 }
@@ -532,9 +688,9 @@ void SendHistoricalCandles()
 //+------------------------------------------------------------------+
 //| SALVAR CANDLE FECHADO NO SUPABASE                                |
 //+------------------------------------------------------------------+
-void SaveClosedCandleToSupabase(datetime barTime, double open, double high, double low, double close, long volume)
+void SaveClosedCandleToSupabase(datetime barTime, double open, double high, double low, double close, long volume, string clustersJson = "")
 {
-   string singleJson = BuildSingleCandleJson(barTime, open, high, low, close, volume);
+   string singleJson = BuildSingleCandleJson(barTime, open, high, low, close, volume, clustersJson);
    string payload = "[" + singleJson + "]";
    
    string baseUrl = InpSupabaseUrl;
@@ -567,13 +723,21 @@ void SendRealtimeData()
    {
       g_lastMarketSendTick = nowMs;
       CalculatePhysics();
-      string mJson = BuildMarketDataJson();
-      string resp, err;
+      string mJsonSupabase = BuildMarketDataJson(false); // Rigorosamente sem campos extras para o Supabase
+      string mJsonHub      = BuildMarketDataJson(true);  // Completo com clusters para Hub Local e arquivo
+
+      // Gravação local em arquivo em MQL4/Files
+      WriteLocalJson(mJsonHub);
+      if(InpEnableClusters)
+      {
+         WriteClustersJson(BuildClustersBarFullJson());
+      }
 
       // Se configurado para Hub Local ou Dual
       if(InpDestinationMode == DEST_LOCAL_HUB || InpDestinationMode == DEST_DUAL_STREAM)
       {
-         HttpPost(InpLocalHubUrl + "/market_data", mJson, false, resp, err);
+         string resp, err;
+         HttpPost(InpLocalHubUrl + "/market_data", mJsonHub, false, resp, err);
       }
       
       // Se configurado para Supabase Direto
@@ -584,7 +748,8 @@ void SendRealtimeData()
          while(StringLen(baseUrl) > 0 && StringSubstr(baseUrl, StringLen(baseUrl) - 1, 1) == "/")
             baseUrl = StringSubstr(baseUrl, 0, StringLen(baseUrl) - 1);
          string url = baseUrl + "/rest/v1/market_data";
-         HttpPost(url, "[" + mJson + "]", true, resp, err);
+         string resp, err;
+         HttpPost(url, "[" + mJsonSupabase + "]", true, resp, err);
       }
    }
 
@@ -607,6 +772,20 @@ void SendRealtimeData()
       {
          HttpPost(InpLocalHubUrl + "/candles", cJson, false, resp, err);
       }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| GRAVACAO DO JSON LOCAL                                           |
+//+------------------------------------------------------------------+
+void WriteLocalJson(string json)
+{
+   ResetLastError();
+   int fileHandle = FileOpen(InpLocalJsonPath, FILE_WRITE | FILE_TXT | FILE_ANSI);
+   if(fileHandle != INVALID_HANDLE)
+   {
+      FileWriteString(fileHandle, json);
+      FileClose(fileHandle);
    }
 }
 
@@ -638,6 +817,11 @@ void UpdateDashboard()
       g_lastLatencyMs, (g_lastErrorMsg == "" ? "Conectado" : g_lastErrorMsg)
    );
 
+   if(InpEnableClusters)
+      txt += StringFormat("\nFootprint M1: %d niveis | POC: %s (ON)", g_clusterTotalLevels, F(g_clusterPocPrice, g_digits));
+   else
+      txt += "\nFootprint M1: DESATIVADO";
+
    Comment(txt);
 }
 
@@ -664,6 +848,13 @@ int OnInit()
    g_lastSide = "COMPRA";
    g_lastBarVolume = (long)iVolume(NULL, PERIOD_M1, 0);
    g_lastBarTime = iTime(NULL, PERIOD_M1, 0);
+
+   ArrayResize(g_barClusters, 0);
+   g_clusterTotalLevels = 0;
+   g_clusterPocPrice = 0;
+   g_clusterPocBid = 0;
+   g_clusterPocAsk = 0;
+   g_lastClosedClustersJson = "[]";
 
    if(InpDaysToLoad > 0 && !g_historicalSent)
    {
@@ -790,6 +981,18 @@ void OnTick()
    g_lastBid = bid;
    g_lastAsk = ask;
 
+   if(InpEnableClusters)
+   {
+      double tSize = InpClusterTickSize;
+      if(tSize <= 0.0)
+      {
+         tSize = MarketInfo(Symbol(), MODE_TICKSIZE);
+         if(tSize <= 0.0) tSize = Point;
+      }
+      double roundedClusterPrice = NormalizeDouble(MathRound(currentPrice / tSize) * tSize, g_digits);
+      AddClusterTick(roundedClusterPrice, volumeDiff, side);
+   }
+
    // Verificacao de Block Trade Individual
    if(volumeDiff >= InpLargeTradeThreshold)
    {
@@ -821,9 +1024,20 @@ void OnTick()
       double   closedClose = iClose(NULL, PERIOD_M1, 1);
       long     closedVol   = (long)iVolume(NULL, PERIOD_M1, 1);
 
+      if(InpEnableClusters)
+      {
+         g_lastClosedClustersJson = BuildClustersJson(g_barClusters);
+         ArrayResize(g_barClusters, 0);
+         g_clusterTotalLevels = 0;
+         g_clusterPocPrice = 0;
+         g_clusterPocBid = 0;
+         g_clusterPocAsk = 0;
+      }
+
       if(InpAutoSaveClosedToDb)
       {
-         SaveClosedCandleToSupabase(closedTime, closedOpen, closedHigh, closedLow, closedClose, closedVol);
+         string clustersToSend = (InpEnableClusters && InpSaveClustersToDb) ? g_lastClosedClustersJson : "";
+         SaveClosedCandleToSupabase(closedTime, closedOpen, closedHigh, closedLow, closedClose, closedVol, clustersToSend);
       }
 
       g_lastBarTime = curBarTime;

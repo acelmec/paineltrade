@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { getStreamerInfoForPanel, type StreamerItem } from '../services/vortexStreamer';
 
@@ -26,9 +26,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setAiEnabled,
     isAnalyzing,
     marketData,
-    panels,
     activePanel,
-    switchPanel,
     isRestrictedSession,
     setIsCopilotModalOpen,
     planDetails,
@@ -142,14 +140,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     ? '!bg-[#070e20] !border-blue-900/60'
     : '!bg-[#1e2430] !border-slate-700';
 
-  const sidebarSelectBg = isBlackTheme
-    ? 'bg-black border-zinc-800 text-white'
-    : isSlateTheme || isLightTheme
-    ? 'bg-[#181d28] border-slate-700 text-slate-100'
-    : isMidnightTheme
-    ? 'bg-[#070e20] border-blue-900/60 text-slate-100'
-    : 'bg-[#181d28] border-slate-700 text-slate-100';
-
   return (
     <div className={`side-menu ${sidebarBg} ${collapsed ? 'collapsed' : ''} transition-colors duration-200`} id="sideMenu">
       {/* Menu Toggle */}
@@ -161,71 +151,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* Seletor de Painel e Feed de Dados (Ocultado no Produto Copy Trader 9286) */}
+      {/* Status da Conexão / Feed de Mercado */}
       {!isCopyOnly && (
-        <div className="px-4 py-2.5 border-b border-slate-800/80 flex flex-col gap-2">
-          {!collapsed && (
-            <div className="flex items-center justify-between">
-              <div className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
-                📈 Ativo Selecionado
-              </div>
-              {activePanel && (
-                <button
-                  onClick={() => switchPanel(activePanel.id)}
-                  title="Atualizar dados do ativo selecionado"
-                  className="text-slate-400 hover:text-blue-400 text-xs font-bold transition flex items-center gap-1 active:scale-95 px-1 py-0.5 rounded hover:bg-slate-800/50"
+        <div className="px-4 py-2 border-b border-slate-800/80 flex flex-col gap-1.5">
+          {!collapsed ? (
+            <div>
+              {streamerInfo.isLocal ? (
+                <div 
+                  className="flex items-center justify-between px-2.5 py-1.5 bg-emerald-950/40 border border-emerald-500/30 rounded text-[10px] text-emerald-300 font-medium"
+                  title={'NinjaTrader 8 conectado na porta 8002 | Streamer ativo (' + (streamerInfo.stream?.symbol || 'Multi-Asset') + ')'}
                 >
-                  🔄
-                </button>
+                  <div className="flex items-center gap-1.5 truncate">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+                    <span className="truncate">Feed NT8 Local {streamerInfo.stream?.symbol ? '(' + streamerInfo.stream.symbol + ')' : ''}</span>
+                  </div>
+                  <span className="text-[9px] text-emerald-400/80 font-mono shrink-0 ml-1">1m</span>
+                </div>
+              ) : (
+                <div 
+                  className="flex items-center justify-between px-2.5 py-1.5 bg-slate-800/40 border border-slate-700/40 rounded text-[10px] text-slate-400 font-medium"
+                  title="Consumindo cotações e histórico via Feed Axion. Abra o NinjaTrader 8 com o AxionStreamer para alternar para Local."
+                >
+                  <div className="flex items-center gap-1.5 truncate">
+                    <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0"></span>
+                    <span className="truncate">Feed Axion Cloud</span>
+                  </div>
+                </div>
               )}
             </div>
-          )}
-          {!collapsed ? (
-            <>
-              <select
-                value={activePanel?.id || ''}
-                onChange={(e) => switchPanel(e.target.value)}
-                className={`${sidebarSelectBg} border p-2 rounded text-xs font-bold text-blue-300 w-full focus:outline-none focus:border-blue-500/50`}
-              >
-                {panels.map((p) => (
-                  <option key={p.id} value={p.id} className="bg-[#181d28] text-slate-200">
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              <div className="mt-1">
-                {streamerInfo.isLocal ? (
-                  <div 
-                    className="flex items-center justify-between px-2 py-1 bg-emerald-950/40 border border-emerald-500/30 rounded text-[10px] text-emerald-300 font-medium"
-                    title={`NinjaTrader 8 conectado na porta 8002 | Ativo: ${streamerInfo.stream?.symbol} (${streamerInfo.stream?.bars_count || 0} velas de 1m)`}
-                  >
-                    <div className="flex items-center gap-1.5 truncate">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
-                      <span className="truncate">Feed NT8 Local ({streamerInfo.stream?.symbol})</span>
-                    </div>
-                    <span className="text-[9px] text-emerald-400/80 font-mono shrink-0 ml-1">1m</span>
-                  </div>
-                ) : (
-                  <div 
-                    className="flex items-center justify-between px-2 py-1 bg-slate-800/40 border border-slate-700/40 rounded text-[10px] text-slate-400 font-medium"
-                    title="Consumindo cotações e histórico via Feed Axion. Abra o NinjaTrader 8 com o AxionStreamer para alternar para Local."
-                  >
-                    <div className="flex items-center gap-1.5 truncate">
-                      <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0"></span>
-                      <span className="truncate">Feed Axion</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </>
           ) : (
             <div className="flex justify-center">
               <div 
                 onClick={() => setCollapsed(false)}
-                className="w-8 h-8 rounded-full bg-blue-900/20 border border-blue-500/30 flex items-center justify-center text-[10px] font-black text-blue-300 cursor-pointer hover:bg-blue-900/40 transition active:scale-95"
-                title={`Ativo: ${activePanel?.name || '--'}`}
+                className="w-7 h-7 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-300 cursor-pointer hover:bg-slate-800 transition active:scale-95"
+                title={streamerInfo.isLocal ? 'NT8 Local Ativo' : 'Feed Axion'}
               >
-                {activePanel?.instance_id === 'nasdaq' ? 'NQ' : activePanel?.instance_id === 'sp500' ? 'ES' : activePanel?.instance_id === 'gold' ? 'GC' : '⚡'}
+                {streamerInfo.isLocal ? '🟢' : '☁️'}
               </div>
             </div>
           )}

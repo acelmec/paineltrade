@@ -183,98 +183,101 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
           : ''
       }`}
     >
-      {/* Mini-Header por Gráfico (Visível apenas no modo Multi-Gráfico) */}
-      {isMultiChart && (
-        <div
-          className={`h-7 px-2 border-b flex items-center justify-between gap-2 shrink-0 select-none z-30 text-[11px] ${headerBg}`}
-        >
-          <div className="flex items-center gap-1.5 min-w-0">
-            {/* Indicador de Foco */}
+      {/* Header do Gráfico (Ativo, Timeframe, Dias de Histórico e Cotação) */}
+      <div
+        className={`h-7 px-2 border-b flex items-center justify-between gap-2 shrink-0 select-none z-30 text-[11px] ${headerBg}`}
+      >
+        <div className="flex items-center gap-1.5 min-w-0">
+          {/* Indicador de Foco (visível apenas no modo Multi-Gráficos para destacar a janela ativa) */}
+          {isMultiChart && (
             <span
               className={`w-2 h-2 rounded-full shrink-0 transition-colors ${
                 isFocused ? 'bg-blue-500 shadow-[0_0_6px_rgba(59,130,246,0.9)]' : 'bg-slate-600'
               }`}
               title={isFocused ? 'Gráfico em Foco (Barra superior controla este gráfico)' : 'Clique para focar neste gráfico'}
             />
+          )}
 
-            {/* Seletor de Ativo do Slot */}
-            <select
-              value={effectivePanelId || ''}
-              onChange={(e) => {
-                e.stopPropagation();
-                onChangePanel(e.target.value);
-              }}
-              onClick={(e) => e.stopPropagation()}
-              className={`px-1.5 py-0.5 rounded border text-[11px] font-extrabold outline-none cursor-pointer max-w-[130px] truncate ${selectBg}`}
-              title="Ativo / Painel deste gráfico"
-            >
-              {(panels || []).map((p: any) => {
-                const cleanName = p.name ? p.name.replace(/\s*\([^)]*\)/g, '').trim() : 'Painel';
-                return (
-                  <option key={p.id} value={p.id} className="bg-[#181d28] text-slate-100">
-                    {cleanName}
-                  </option>
-                );
-              })}
-            </select>
+          {/* Seletor de Ativo do Slot */}
+          <select
+            value={effectivePanelId || ''}
+            onChange={(e) => {
+              e.stopPropagation();
+              onChangePanel(e.target.value);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className={`px-1.5 py-0.5 rounded border text-[11px] font-extrabold outline-none cursor-pointer max-w-[130px] truncate ${selectBg}`}
+            title="Ativo / Painel deste gráfico"
+          >
+            {(panels || []).map((p: any) => {
+              const cleanName = p.name ? p.name.replace(/\s*\([^)]*\)/g, '').trim() : 'Painel';
+              return (
+                <option key={p.id} value={p.id} className="bg-[#181d28] text-slate-100">
+                  {cleanName}
+                </option>
+              );
+            })}
+          </select>
 
-            {/* Seletor de Timeframe do Slot */}
-            <select
-              value={slot.timeframe}
-              onChange={(e) => {
-                e.stopPropagation();
-                onChangeTimeframe(Number(e.target.value));
-              }}
-              onClick={(e) => e.stopPropagation()}
-              className={`px-1.5 py-0.5 rounded border text-[11px] font-bold text-blue-400 outline-none cursor-pointer ${selectBg}`}
-              title="Timeframe deste gráfico"
-            >
-              <option value={1} className="bg-[#181d28] text-slate-200">1m</option>
-              <option value={2} className="bg-[#181d28] text-slate-200">2m</option>
-              <option value={3} className="bg-[#181d28] text-slate-200">3m</option>
-              <option value={5} className="bg-[#181d28] text-slate-200">5m</option>
-              <option value={10} className="bg-[#181d28] text-slate-200">10m</option>
-              <option value={15} className="bg-[#181d28] text-slate-200">15m</option>
-              <option value={30} className="bg-[#181d28] text-slate-200">30m</option>
-              <option value={60} className="bg-[#181d28] text-slate-200">1h</option>
-              <option value={240} className="bg-[#181d28] text-slate-200">4h</option>
-              <option value={1440} className="bg-[#181d28] text-slate-200">1D</option>
-            </select>
+          {/* Seletor de Timeframe do Slot */}
+          <select
+            value={slot.timeframe}
+            onChange={(e) => {
+              e.stopPropagation();
+              onChangeTimeframe(Number(e.target.value));
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className={`px-1.5 py-0.5 rounded border text-[11px] font-bold text-blue-400 outline-none cursor-pointer ${selectBg}`}
+            title="Timeframe deste gráfico"
+          >
+            <option value={1} className="bg-[#181d28] text-slate-200">1m</option>
+            <option value={2} className="bg-[#181d28] text-slate-200">2m</option>
+            <option value={3} className="bg-[#181d28] text-slate-200">3m</option>
+            <option value={5} className="bg-[#181d28] text-slate-200">5m</option>
+            <option value={10} className="bg-[#181d28] text-slate-200">10m</option>
+            <option value={15} className="bg-[#181d28] text-slate-200">15m</option>
+            <option value={30} className="bg-[#181d28] text-slate-200">30m</option>
+            <option value={60} className="bg-[#181d28] text-slate-200">1h</option>
+            <option value={240} className="bg-[#181d28] text-slate-200">4h</option>
+            <option value={1440} className="bg-[#181d28] text-slate-200">1D</option>
+          </select>
 
-            {/* Seletor Individual de Dias de Histórico (Isolado por gráfico, salvo no banco) */}
-            <select
-              value={slotHistoryDays}
-              onChange={(e) => {
-                e.stopPropagation();
-                onFocus();
-                const nextDays = Math.max(3, Number(e.target.value));
-                if (onChangeHistoryDays) {
-                  onChangeHistoryDays(nextDays);
-                } else if (saveSettings && effectivePanelId) {
-                  saveSettings({ chart_history_days: nextDays }, effectivePanelId);
-                }
-                if (ensurePanelHistoryDays && effectivePanelId) {
-                  ensurePanelHistoryDays(effectivePanelId, nextDays);
-                }
-              }}
-              onClick={(e) => e.stopPropagation()}
-              className={`px-1 py-0.5 rounded border text-[10px] font-bold text-cyan-400 outline-none cursor-pointer ${selectBg}`}
-              title="Personalizar dias de histórico somente deste gráfico (salvo no banco)"
-            >
-              <option value={3} className="bg-[#181d28] text-slate-200">3d</option>
-              <option value={7} className="bg-[#181d28] text-slate-200">7d</option>
-              <option value={15} className="bg-[#181d28] text-slate-200">15d</option>
-              <option value={30} className="bg-[#181d28] text-slate-200">30d</option>
-            </select>
-          </div>
+          {/* Seletor Individual de Dias de Histórico (Isolado por gráfico, salvo no banco) */}
+          <select
+            value={slotHistoryDays}
+            onChange={(e) => {
+              e.stopPropagation();
+              onFocus();
+              const nextDays = Math.max(3, Number(e.target.value));
+              if (onChangeHistoryDays) {
+                onChangeHistoryDays(nextDays);
+              } else if (saveSettings && effectivePanelId) {
+                saveSettings({ chart_history_days: nextDays }, effectivePanelId);
+              }
+              if (ensurePanelHistoryDays && effectivePanelId) {
+                ensurePanelHistoryDays(effectivePanelId, nextDays);
+              }
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className={`px-1 py-0.5 rounded border text-[10px] font-bold text-cyan-400 outline-none cursor-pointer ${selectBg}`}
+            title="Personalizar dias de histórico somente deste gráfico (salvo no banco)"
+          >
+            <option value={3} className="bg-[#181d28] text-slate-200">3d</option>
+            <option value={7} className="bg-[#181d28] text-slate-200">7d</option>
+            <option value={15} className="bg-[#181d28] text-slate-200">15d</option>
+            <option value={30} className="bg-[#181d28] text-slate-200">30d</option>
+          </select>
+        </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            {displayPrice > 0 && (
-              <span className="font-mono text-[11px] font-bold text-emerald-400">
-                {displayPrice.toFixed(2)}
-              </span>
-            )}
+        <div className="flex items-center gap-2 shrink-0">
+          {displayPrice > 0 && (
+            <span className="font-mono text-[11px] font-bold text-emerald-400">
+              {displayPrice.toFixed(2)}
+            </span>
+          )}
 
+          {/* Botão de Maximizar visível apenas no modo Multi-Gráficos */}
+          {isMultiChart && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -290,12 +293,12 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
             >
               {isMaximized ? '🗗' : '⛶'}
             </button>
-          </div>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Área do Gráfico */}
-      <div className="flex-1 relative overflow-hidden">
+      <div className="flex-1 w-full h-full min-h-0 relative overflow-hidden flex flex-col">
         {/* Legenda de Indicadores */}
         {slot.showIndicatorsLegend && (
           <div className={`absolute ${isMobile ? 'top-12 left-2.5' : 'top-1.5 left-2'} z-20 flex flex-col gap-0.5 pointer-events-auto select-none`}>
