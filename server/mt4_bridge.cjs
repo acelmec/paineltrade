@@ -11,6 +11,7 @@ const PORT = process.env.MT4_PORT || 8003;
 // Cache em memória de cotações recebidas dos EAs MT4/MT5
 const quotesCache = new Map(); // symbol -> { price, bid, ask, volume, updated_at }
 const accountsConnected = new Map(); // accountNumber -> { lastSeen: Date, symbol: string }
+const accountsPositions = new Map(); // accountNumber -> Array<{ ticket, symbol, side, lots, entry_price, sl, tp, profit, open_time }>
 
 // Fila de comandos pendentes por conta
 // accountId/number -> Array<{ id, action, symbol, direction, side, lots, stop_loss, take_profit, ticket }>
@@ -87,41 +88,97 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 3. COMMANDS: MT4/MT5 consulta ordens para executar e sincroniza telemetria de conta real
-  if (req.method === 'GET' && pathname === '/commands') {
-    const accNum = String(query.account || '').trim();
-    if (accNum) {
-      const rawSymbols = query.symbols || query.market_watch || '';
-      const parsedSymbols = rawSymbols ? rawSymbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : (existing.symbols || []);
+  // 3. COMMANDS: MT4/MT5 consulta ordens para executar e sincroniza telemetria e posições de conta real
+  if ((req.method === 'GET' || req.method === 'POST') && (pathname === '/commands' || pathname === '/mt4/commands')) {
+    let body = '';
+    const handleCommandsReq = () => {
+      let bodyData = {};
+      try { bodyData = JSON.parse(body || '{}'); } catch {}
 
-      const existing = accountsConnected.get(accNum) || {};
-      accountsConnected.set(accNum, {
-        ...existing,
-        account_name: query.account_name || existing.account_name || `MT4/MT5 #${accNum}`,
-        lastSeen: new Date().toISOString(),
-        symbol: query.symbol || existing.symbol || 'ACTIVE',
-        symbols: parsedSymbols.length > 0 ? parsedSymbols : (existing.symbols || []),
-        balance: query.balance ? Number(query.balance) : (existing.balance || 0),
-        equity: query.equity ? Number(query.equity) : (existing.equity || 0),
-        broker: query.broker || existing.broker || 'MetaTrader Server',
-        currency: query.currency || existing.currency || 'USD',
-        is_demo: query.demo !== undefined ? (String(query.demo) === '1' || String(query.demo) === 'true') : (existing.is_demo ?? true),
-        leverage: query.leverage ? Number(query.leverage) : (existing.leverage || 100),
-        platform: query.platform || existing.platform || 'mt4'
-      });
-    }
+      const accNum = String(bodyData.account || query.account || '').trim();
+      if (accNum) {
+        const rawSymbols = query.symbols || query.market_watch || '';
+        const existing = accountsConnected.get(accNum) || {};
+        const parsedSymbols = rawSymbols ? rawSymbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : (existing.symbols || []);
 
-    // Busca próximo comando pendente para a conta ou comando global
-    const queue = pendingCommands.get(accNum) || pendingCommands.get('all') || [];
-    if (queue.length > 0) {
-      const nextCmd = queue[0]; // Mantém na fila até que MT4 mande ack
+        accountsConnected.set(accNum, {
+          ...existing,
+          account_name: query.account_name || bodyData.account_name || existing.account_name || `MT4/MT5 #${accNum}`,
+          lastSeen: new Date().toISOString(),
+          symbol: query.symbol || existing.symbol || 'ACTIVE',
+          symbols: parsedSymbols.length > 0 ? parsedSymbols : (existing.symbols || []),
+          balance: query.balance ? Number(query.balance) : (bodyData.balance ? Number(bodyData.balance) : (existing.balance || 0)),
+          equity: query.equity ? Number(query.equity) : (bodyData.equity ? Number(bodyData.equity) : (existing.equity || 0)),
+          broker: query.broker || bodyData.broker || existing.broker || 'MetaTrader Server',
+          currency: query.currency || bodyData.currency || existing.currency || 'USD',
+          is_demo: query.demo !== undefined ? (String(query.demo) === '1' || String(query.demo) === 'true') : (existing.is_demo ?? true),
+          leverage: query.leverage ? Number(query.leverage) : (existing.leverage || 100),
+          platform: query.platform || existing.platform || 'mt4'
+        });
+
+        if (Array.isArray(bodyData.positions)) {
+          accountsPositions.set(accNum, bodyData.positions);
+        }
+      }
+
+      // Busca próximo comando pendente para a conta ou comando global
+      const queue = pendingCommands.get(accNum) || pendingCommands.get('all') || [];
+      if (queue.length > 0) {
+        const nextCmd = queue[0]; // Mantém na fila até que MT4 mande ack
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(nextCmd));
+        return;
+      }
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(nextCmd));
+      res.end(JSON.stringify({})); // Sem comandos pendentes
+    };
+
+    if (req.method === 'POST') {
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', handleCommandsReq);
+    } else {
+      handleCommandsReq();
+    }
+    return;
+  }
+
+  // 3.01 GET ou POST /positions: Retorna ou salva posições ativas da conta
+  if (pathname === '/positions' || pathname === '/mt4/positions') {
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const pData = JSON.parse(body || '{}');
+          const accNum = String(pData.account || query.account || '').trim();
+          if (accNum && Array.isArray(pData.positions)) {
+            accountsPositions.set(accNum, pData.positions);
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, count: (pData.positions || []).length }));
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
       return;
     }
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({})); // Sem comandos pendentes
+    const accNum = String(query.account || '').trim().replace(/\D/g, '') || String(query.account || '').trim();
+    let posList = [];
+    if (accNum && accountsPositions.has(accNum)) {
+      posList = accountsPositions.get(accNum);
+    } else if (accountsPositions.size > 0) {
+      posList = Array.from(accountsPositions.values())[0] || [];
+    }
+    res.end(JSON.stringify({
+      success: true,
+      account: accNum,
+      positions: posList,
+      total: posList.length
+    }));
     return;
   }
 

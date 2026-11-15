@@ -199,6 +199,35 @@ string GetMarketWatchSymbols()
 }
 
 //+------------------------------------------------------------------+
+//| SERIALIZAR POSIÇÕES ABERTAS (ORDENS ATIVAS) EM JSON              |
+//+------------------------------------------------------------------+
+string GetOpenPositionsJson()
+{
+   int total = OrdersTotal();
+   string json = "[";
+   int count = 0;
+   for(int i = 0; i < total; i++)
+   {
+      if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+      {
+         int type = OrderType();
+         if(type == OP_BUY || type == OP_SELL)
+         {
+            if(count > 0) json += ",";
+            string side = (type == OP_BUY) ? "COMPRA" : "VENDA";
+            json += StringFormat(
+               "{\"ticket\":%d,\"symbol\":\"%s\",\"side\":\"%s\",\"lots\":%.2f,\"entry_price\":%.5f,\"sl\":%.5f,\"tp\":%.5f,\"profit\":%.2f,\"magic\":%d,\"open_time\":\"%s\"}",
+               OrderTicket(), OrderSymbol(), side, OrderLots(), OrderOpenPrice(), OrderStopLoss(), OrderTakeProfit(), OrderProfit(), OrderMagicNumber(), FormatIsoTimestamp(OrderOpenTime())
+            );
+            count++;
+         }
+      }
+   }
+   json += "]";
+   return json;
+}
+
+//+------------------------------------------------------------------+
 //| PROCESSAR COMANDOS DO AXION (ORDENS, SL/TP, FECHAMENTOS)          |
 //+------------------------------------------------------------------+
 void PollAndProcessCommands()
@@ -225,11 +254,19 @@ void PollAndProcessCommands()
       if(mw != "") url += "&symbols=" + mw;
    }
 
+   string posJson = GetOpenPositionsJson();
+   string reqBody = StringFormat("{\"account\":\"%d\",\"positions\":%s}", AccountNumber(), posJson);
    char data[];
+   StringToCharArray(reqBody, data, 0, StringLen(reqBody));
    char result[];
    string resultHeaders;
    ResetLastError();
-   int res = WebRequest("GET", url, "Content-Type: application/json\r\n", 500, data, result, resultHeaders);
+   int res = WebRequest("POST", url, "Content-Type: application/json\r\n", 500, data, result, resultHeaders);
+   if(res == -1)
+   {
+      ArrayResize(data, 0);
+      res = WebRequest("GET", url, "Content-Type: application/json\r\n", 500, data, result, resultHeaders);
+   }
    if(res == -1)
    {
       int err = GetLastError();

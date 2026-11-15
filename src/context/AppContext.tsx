@@ -24,6 +24,7 @@ import {
   fetchGeneralAnalysesSupabase,
   deleteGeneralAnalysisSupabase,
   fetchCandlesSupabase,
+  getLocalCandles,
   detectInternalCandleGap,
   fetchCustomStrategies,
   fetchPublicCustomStrategies,
@@ -4099,26 +4100,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setScreenshot(cache.screenshot);
     const targetDays = Math.max(3, Number(targetSettings?.chart_history_days) || 3);
     const loadedDays = Number((cache as any).loadedHistoryDays || 0);
-    const hasCachedCandles = Boolean(cache.candles && cache.candles.length >= 10);
-    const isPanelReady = hasCachedCandles && (initialLoadedPanelsRef.current.has(panelId) || loadedDays >= targetDays);
-    if (isPanelReady) {
+
+    // OTIMIZAÇÃO DE VELOCIDADE: Se já temos velas em memória ou localmente, plota na hora (0ms)!
+    const hasCachedCandles = Boolean(cache.candles && cache.candles.length > 0);
+    if (hasCachedCandles) {
       setCandles(cache.candles || []);
       setIsCandlesLoading(false);
     } else {
-      setCandles([]);
-      setCandlesLoadingProgress({
-        isLoading: true,
-        percent: 15,
-        loaded: 0,
-        total: Math.min(50000, targetDays * 1440),
-        days: targetDays,
-        isExplicitDaysChange: true
-      });
-      setIsCandlesLoading(true);
+      const stored = getLocalCandles(panelId) || (targetPanel.instance_id ? getLocalCandles(targetPanel.instance_id) : null);
+      if (stored && stored.length > 0) {
+        cache.candles = stored;
+        setCandles(stored);
+        setIsCandlesLoading(false);
+      } else {
+        setCandles([]);
+        setCandlesLoadingProgress({
+          isLoading: true,
+          percent: 15,
+          loaded: 0,
+          total: Math.min(50000, targetDays * 1440),
+          days: targetDays,
+          isExplicitDaysChange: true
+        });
+        setIsCandlesLoading(true);
+      }
     }
     setAiResult(cache.aiResult || null);
 
-    // Só busca histórico no servidor se o painel ainda não tiver o histórico solicitado em cache
+    // Busca histórico no servidor em segundo plano apenas se ainda não cobrir os dias requisitados
+    const isPanelReady = hasCachedCandles && (initialLoadedPanelsRef.current.has(panelId) || loadedDays >= targetDays);
     if (!isPanelReady) {
       cache.lastCandlesFetch = 0;
       cache.lastGammaFetch = 0;
@@ -10212,13 +10222,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       // 🔒 Bloqueio de Mercado Fechado (Fim de semana / Sexta após fechamento / Domingo antes da abertura)
-      const cycleEnd = settings?.global_cycle_end || '18:00:00';
-      const cycleStart = settings?.global_cycle_start || '19:00:00';
-      const marketStatus = isMarketClosed(cycleEnd, cycleStart);
-      if (marketStatus.closed) {
-        addLog('AVISO', `🔒 Ordem bloqueada: ${marketStatus.reason}`, 'alerta');
-        alert(`🔒 Operação bloqueada:\n${marketStatus.reason}`);
-        return null;
+      // Criptoativos operam 24/7/365 (Binance, MT4 BTC/ETH) e NÃO sofrem bloqueio de fim de semana!
+      const panelSym = (report.symbol || targetAcc?.execution_symbol || activePanel?.name || '').toUpperCase();
+      const isCryptoAsset = /USDT|BUSD|USDC/i.test(panelSym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(panelSym) || targetAcc?.platform === 'binance';
+
+      if (!isCryptoAsset) {
+        const cycleEnd = settings?.global_cycle_end || '18:00:00';
+        const cycleStart = settings?.global_cycle_start || '19:00:00';
+        const marketStatus = isMarketClosed(cycleEnd, cycleStart);
+        if (marketStatus.closed) {
+          addLog('AVISO', `🔒 Ordem bloqueada: ${marketStatus.reason}`, 'alerta');
+          alert(`🔒 Operação bloqueada:\n${marketStatus.reason}`);
+          return null;
+        }
       }
 
       const targetPanelForReport = report.panel_id
@@ -10951,35 +10967,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // 0.0.1. 🔒 Bloqueio de Mercado Fechado (Fim de semana / Sexta após fechamento / Domingo antes da abertura)
-    const mktCycleEnd = customSettings?.global_cycle_end || settings?.global_cycle_end || '18:00:00';
-    const mktCycleStart = customSettings?.global_cycle_start || settings?.global_cycle_start || '19:00:00';
-    const mktStatus = isMarketClosed(mktCycleEnd, mktCycleStart);
-    if (mktStatus.closed) {
-      return {
-        allowed: false,
-        reason: mktStatus.reason
-      };
-    }
+    // Criptoativos operam 24/7/365 e NÃO sofrem bloqueio de mercado fechado nem pausa de sessão
+    const checkSym = (panelId ? (allPanelsRef.current?.find(p => p.id === panelId)?.name || panelId) : (activePanel?.name || '')).toUpperCase();
+    const isCrypto = /USDT|BUSD|USDC/i.test(checkSym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(checkSym) || (accToCheck as any)?.platform === 'binance';
 
-    // 0.1. Verificação de Mercado Parado (Sem novos preços)
-    const timeoutSec = Number(customSettings?.stale_market_timeout_sec || settings?.stale_market_timeout_sec) || 15;
-    if (panelId && isMarketDataStaleForPanel(panelId, timeoutSec)) {
-      return {
-        allowed: false,
-        reason: `Mercado parado ou sessão encerrada (sem alteração de preço nos últimos ${timeoutSec}s). Operações bloqueadas.`
-      };
-    }
+    if (!isCrypto) {
+      const mktCycleEnd = customSettings?.global_cycle_end || settings?.global_cycle_end || '18:00:00';
+      const mktCycleStart = customSettings?.global_cycle_start || settings?.global_cycle_start || '19:00:00';
+      const mktStatus = isMarketClosed(mktCycleEnd, mktCycleStart);
+      if (mktStatus.closed) {
+        return {
+          allowed: false,
+          reason: mktStatus.reason
+        };
+      }
 
-    // 0.2. Verificação de Parada de Sessão do Mercado (das 18:00 às 19:00 por padrão)
-    const nowSP = getSaoPauloDate();
-    const pad = (num: number) => String(num).padStart(2, '0');
-    const currentTimeStr = `${pad(nowSP.getHours())}:${pad(nowSP.getMinutes())}:${pad(nowSP.getSeconds())}`;
+      // 0.2. Verificação de Parada de Sessão do Mercado (das 18:00 às 19:00 por padrão)
+      const nowSP = getSaoPauloDate();
+      const pad = (num: number) => String(num).padStart(2, '0');
+      const currentTimeStr = `${pad(nowSP.getHours())}:${pad(nowSP.getMinutes())}:${pad(nowSP.getSeconds())}`;
 
-    if (isMarketSessionPaused(currentTimeStr, mktCycleEnd, mktCycleStart)) {
-      return {
-        allowed: false,
-        reason: `Parada da sessão operacional do mercado (${mktCycleEnd} às ${mktCycleStart}). Operações, robôs e alertas pausados.`
-      };
+      if (isMarketSessionPaused(currentTimeStr, mktCycleEnd, mktCycleStart)) {
+        return {
+          allowed: false,
+          reason: `Horário de parada técnica do mercado (${mktCycleEnd.substring(0, 5)} às ${mktCycleStart.substring(0, 5)}). Operações bloqueadas neste intervalo.`
+        };
+      }
     }
 
     const matchedPanel = (panels || []).find((p: any) => p.id === panelId);
@@ -13178,12 +13191,82 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
     };
   }, [isAuthenticated, user]);
 
-  // 5.0.0.1 Loop de Cotações em Tempo Real para Conexões Remotas MT4 / MT5 via Túnel VPS
+  // 5.0.0.1 Loop de Cotações e Posições em Tempo Real para Conexões Remotas MT4 / MT5 via Túnel VPS
   useEffect(() => {
     if (!isAuthenticated || !user) return;
 
     let mtQuotesTimer: any = null;
     let isFetchingQuotes = false;
+
+    const syncRemoteMtPositions = (acc: BrokerAccount, mtPositions: any[]) => {
+      if (!acc || !user) return;
+      const accId = acc.id;
+      const existingReports = reportsRef.current || [];
+
+      if (mtPositions.length > 0) {
+        let changed = false;
+        const updatedReports = [...existingReports];
+
+        mtPositions.forEach((pos: any) => {
+          const ticketId = `mt_${pos.ticket}`;
+          const existingIdx = updatedReports.findIndex(r => r.id === ticketId || (r.account_id === accId && (r as any).ticket === pos.ticket));
+          const pSym = String(pos.symbol || '').toUpperCase();
+          const matchedPanel = (allPanelsRef.current || []).find(p => 
+            (p.name || '').toUpperCase().includes(pSym) || 
+            (p.symbol || '').toUpperCase() === pSym || 
+            (p.instance_id || '').toUpperCase() === pSym
+          );
+
+          const posPayload: any = {
+            id: ticketId,
+            ticket: pos.ticket,
+            user_id: user.id,
+            account_id: accId,
+            panel_id: matchedPanel?.id || 'default',
+            instance_id: matchedPanel?.instance_id || pSym.toLowerCase(),
+            strategy_name: `MT4 #${pos.ticket}`,
+            side: pos.side === 'COMPRA' ? 'COMPRA' : 'VENDA',
+            contrato: Number(pos.lots || 1),
+            quantity: Number(pos.lots || 1),
+            entry_price: Number(pos.entry_price || 0),
+            stop_loss: Number(pos.sl || 0),
+            take_profit: Number(pos.tp || 0),
+            status: 'Em Andamento',
+            pnl_liquido: Number(pos.profit || 0),
+            created_at: pos.open_time || new Date().toISOString(),
+            already_dispatched: true
+          };
+
+          if (existingIdx >= 0) {
+            const current = updatedReports[existingIdx];
+            if (current.status !== 'Em Andamento' || current.pnl_liquido !== posPayload.pnl_liquido || current.stop_loss !== posPayload.stop_loss || current.take_profit !== posPayload.take_profit) {
+              updatedReports[existingIdx] = { ...current, ...posPayload };
+              changed = true;
+            }
+          } else {
+            updatedReports.unshift(posPayload);
+            changed = true;
+          }
+        });
+
+        if (changed) {
+          reportsRef.current = updatedReports;
+          setReports(updatedReports);
+        }
+      } else {
+        const mtOpen = existingReports.filter(r => r.account_id === accId && (r.id.startsWith('mt_') || (r as any).ticket) && r.status === 'Em Andamento');
+        if (mtOpen.length > 0) {
+          const updated = existingReports.map(r => {
+            if (r.account_id === accId && (r.id.startsWith('mt_') || (r as any).ticket) && r.status === 'Em Andamento') {
+              return { ...r, status: 'Gain' as const, closed_at: new Date().toISOString() };
+            }
+            return r;
+          });
+          reportsRef.current = updated;
+          setReports(updated);
+        }
+      }
+    };
 
     const fetchRemoteMtQuotes = async () => {
       const acc = activeAccountRef.current;
@@ -13196,6 +13279,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         const activeConn = mtConns.find(c => c.status === 'online') || mtConns[0];
         const host = (activeConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
 
+        // 1. Cotações Bid/Ask em tempo real
         const res = await fetch(`${host}/quotes`, { signal: AbortSignal.timeout(2500) });
         if (res.ok) {
           const quotes = await res.json();
@@ -13220,6 +13304,16 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                 }));
               }
             }
+          }
+        }
+
+        // 2. Sincronização de posições ativas abertas no MT4
+        const accNum = (acc?.account_name || '').replace(/\D/g, '') || acc?.id;
+        const posRes = await fetch(`${host}/positions?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+        if (posRes && posRes.ok) {
+          const posData = await posRes.json().catch(() => null);
+          if (posData && Array.isArray(posData.positions)) {
+            syncRemoteMtPositions(acc, posData.positions);
           }
         }
       } catch (_) {
@@ -14858,10 +14952,17 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       const cache = panelDataCache.current[matchedPanel.id];
       if (!cache) return;
 
+      const numBid = Number(detail.bid || numPrice);
+      const numAsk = Number(detail.ask || numPrice);
+      const numSpread = Number(Math.max(0, numAsk - numBid).toFixed(5));
+
       // 2. Atualização imediata do cache de MarketData
       const mData: MarketData = {
         symbol: sym,
         price: String(numPrice),
+        bid: numBid,
+        ask: numAsk,
+        spread: numSpread,
         zScore: 0,
         atrRatio: 1.0,
         estado: 'ONLINE',

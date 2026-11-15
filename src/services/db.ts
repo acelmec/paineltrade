@@ -171,6 +171,9 @@ export interface BlockTrade {
 export interface MarketData {
   symbol: string;
   price: string;
+  bid?: number;
+  ask?: number;
+  spread?: number;
   zScore: number;
   atrRatio: number;
   estado: string;
@@ -2105,6 +2108,9 @@ export interface StrategyReport {
   symbol?: string | null;
   realized_pnl?: number | null;
   profit_points?: number | null;
+  pnl_liquido?: number | null;
+  ticket?: number | null;
+  quantity?: number;
 }
 
 export const ALLOWED_REPORT_DB_COLUMNS = new Set([

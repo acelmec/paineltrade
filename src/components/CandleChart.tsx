@@ -32,7 +32,7 @@ import { ChartDrawingsOverlay } from './ChartDrawingsOverlay';
 import { playPatternSound } from '../utils/soundEffects';
 import { recordChartError } from '../utils/chartErrorLogger';
 import { scanHistoricalIndicatorSignals, type HistoricalIndicatorSignal } from '../utils/replayEngine';
-import { getStreamerBlockTrades, fetchStreamerBlockTrades } from '../services/vortexStreamer';
+import { getStreamerBlockTrades, fetchStreamerBlockTrades, isStreamerWsConnected } from '../services/vortexStreamer';
 import {
   fetchMarketMatrixData,
   subscribeMarketMatrix,
@@ -2792,7 +2792,63 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   }, []);
 
   const activePriceLinesRef = useRef<any[]>([]);
+  const askPriceLineRef = useRef<any>(null);
+  const bidPriceLineRef = useRef<any>(null);
   const updateTradePriceLinesRef = useRef<(() => void) | null>(null);
+
+  // Sincronização em tempo real das Linhas de ASK e BID na escala do gráfico
+  useEffect(() => {
+    if (!candleSeriesRef.current) return;
+    const bidVal = Number(marketData?.bid || 0);
+    const askVal = Number(marketData?.ask || 0);
+
+    if (bidVal > 0 && askVal > 0 && askVal > bidVal) {
+      // 1. Linha de ASK (Rosa/Vermelho tracejado)
+      if (!askPriceLineRef.current) {
+        try {
+          askPriceLineRef.current = candleSeriesRef.current.createPriceLine({
+            price: askVal,
+            color: '#f43f5e',
+            lineWidth: 1,
+            lineStyle: 2, // Dashed
+            axisLabelVisible: true,
+            title: 'ASK'
+          });
+        } catch (_) {}
+      } else {
+        try {
+          askPriceLineRef.current.applyOptions({ price: askVal });
+        } catch (_) {}
+      }
+
+      // 2. Linha de BID (Azul claro pontilhado)
+      if (!bidPriceLineRef.current) {
+        try {
+          bidPriceLineRef.current = candleSeriesRef.current.createPriceLine({
+            price: bidVal,
+            color: '#38bdf8',
+            lineWidth: 1,
+            lineStyle: 1, // Dotted
+            axisLabelVisible: true,
+            title: 'BID'
+          });
+        } catch (_) {}
+      } else {
+        try {
+          bidPriceLineRef.current.applyOptions({ price: bidVal });
+        } catch (_) {}
+      }
+    } else {
+      if (askPriceLineRef.current) {
+        try { candleSeriesRef.current.removePriceLine(askPriceLineRef.current); } catch (_) {}
+        askPriceLineRef.current = null;
+      }
+      if (bidPriceLineRef.current) {
+        try { candleSeriesRef.current.removePriceLine(bidPriceLineRef.current); } catch (_) {}
+        bidPriceLineRef.current = null;
+      }
+    }
+  }, [marketData?.bid, marketData?.ask]);
   const isFocusedRef = useRef<boolean>(isFocused);
   isFocusedRef.current = isFocused;
   const activePanelIdRef = useRef<string | null>(activePanel?.id || null);
@@ -7741,6 +7797,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       mainChart.remove();
       mainChartRef.current = null;
       candleSeriesRef.current = null;
+      askPriceLineRef.current = null;
+      bidPriceLineRef.current = null;
       lastChartDataLengthRef.current = 0;
       lastChartDataTimeRef.current = 0;
       markersPluginRef.current = null;
@@ -9511,6 +9569,75 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                 </select>
               </div>
             )}
+
+            {/* Badge de Conexão e Spread Dedicados no Topo de Cada Gráfico */}
+            {(() => {
+              const sym = (activePanel?.symbol || activePanel?.name || '').toUpperCase();
+              const isCrypto = /USDT|BUSD|USDC/i.test(sym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(sym);
+              const isMt = activeAccount?.platform === 'mt4' || activeAccount?.platform === 'mt5' || (activePanel as any)?.platform === 'mt4' || (activePanel as any)?.source === 'mt4' || (activePanel?.instance_id || '').startsWith('mt4_') || /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(sym);
+              const isNt8 = activeAccount?.platform === 'ninjatrader' || isStreamerWsConnected();
+
+              let badge = {
+                shortLabel: 'Axion Feed',
+                dotColor: 'bg-sky-400',
+                title: 'Consumindo cotações e histórico via Feed Axion Cloud'
+              };
+              if (isMt) {
+                const broker = (activeAccount as any)?.broker && !['MetaTrader 4', 'MetaTrader 5', 'MetaTrader Server'].includes((activeAccount as any)?.broker)
+                  ? (activeAccount as any)?.broker
+                  : 'ActivTrades';
+                badge = {
+                  shortLabel: `MT4 ${broker}`,
+                  dotColor: 'bg-emerald-400 animate-pulse',
+                  title: `Conexão Remota MT4 (${broker}) via Túnel VPS`
+                };
+              } else if (isNt8) {
+                badge = {
+                  shortLabel: 'NT8 Local',
+                  dotColor: 'bg-emerald-400 animate-pulse',
+                  title: 'Transmissão em tempo real do NinjaTrader 8 Local (:8002)'
+                };
+              } else if (activeAccount?.platform === 'binance' || isCrypto) {
+                badge = {
+                  shortLabel: 'Binance Spot',
+                  dotColor: 'bg-amber-400',
+                  title: 'Cotações de Cripto em tempo real direto da Binance Spot'
+                };
+              } else if (activeAccount?.platform === 'ctrader') {
+                badge = {
+                  shortLabel: 'cTrader',
+                  dotColor: 'bg-purple-400',
+                  title: 'Conexão cTrader Spotware Open API / FIX'
+                };
+              }
+
+              const bVal = Number(marketData?.bid || 0);
+              const aVal = Number(marketData?.ask || 0);
+              const spr = (aVal > 0 && bVal > 0 && aVal >= bVal) ? (aVal - bVal) : 0;
+              const sprFormatted = spr > 0 ? (spr < 0.1 ? spr.toFixed(4) : spr.toFixed(2)) : null;
+
+              return (
+                <>
+                  <div
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-slate-700/80 bg-[#121622] text-[9px] font-bold text-slate-200 shadow-sm shrink-0 cursor-default select-none"
+                    title={badge.title}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${badge.dotColor}`} />
+                    <span className="truncate max-w-[120px]">{badge.shortLabel}</span>
+                  </div>
+
+                  {sprFormatted && (
+                    <div
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-500/40 bg-amber-950/40 text-[9px] font-mono font-bold text-amber-300 shadow-sm shrink-0 select-none"
+                      title={`BID: ${bVal} | ASK: ${aVal} | SPREAD: ${sprFormatted}`}
+                    >
+                      <span className="text-[8px] uppercase text-amber-400/80 font-sans">Spread:</span>
+                      <span>{sprFormatted}</span>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
 
             {/* Quick Action Pills */}
             <div className="flex items-center gap-0.5 shrink-0">

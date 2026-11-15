@@ -218,6 +218,42 @@ string GetMarketWatchSymbols()
 }
 
 //+------------------------------------------------------------------+
+//| SERIALIZAR POSIÇÕES ABERTAS (ORDENS ATIVAS) EM JSON              |
+//+------------------------------------------------------------------+
+string GetOpenPositionsJson()
+{
+   int total = PositionsTotal();
+   string json = "[";
+   int count = 0;
+   for(int i = 0; i < total; i++)
+   {
+      string sym = PositionGetSymbol(i);
+      if(sym != "")
+      {
+         ulong ticket = PositionGetInteger(POSITION_TICKET);
+         long type = PositionGetInteger(POSITION_TYPE);
+         string side = (type == POSITION_TYPE_BUY) ? "COMPRA" : "VENDA";
+         double lots = PositionGetDouble(POSITION_VOLUME);
+         double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+         double sl = PositionGetDouble(POSITION_SL);
+         double tp = PositionGetDouble(POSITION_TP);
+         double profit = PositionGetDouble(POSITION_PROFIT);
+         long magic = PositionGetInteger(POSITION_MAGIC);
+         datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
+
+         if(count > 0) json += ",";
+         json += StringFormat(
+            "{\"ticket\":%I64u,\"symbol\":\"%s\",\"side\":\"%s\",\"lots\":%.2f,\"entry_price\":%.5f,\"sl\":%.5f,\"tp\":%.5f,\"profit\":%.2f,\"magic\":%I64d,\"open_time\":\"%s\"}",
+            ticket, sym, side, lots, entry, sl, tp, profit, magic, FormatIsoTimestamp(openTime)
+         );
+         count++;
+      }
+   }
+   json += "]";
+   return json;
+}
+
+//+------------------------------------------------------------------+
 //| PROCESSAR COMANDOS DO AXION (ORDENS, SL/TP, FECHAMENTOS)          |
 //+------------------------------------------------------------------+
 void PollAndProcessCommands()
@@ -252,11 +288,19 @@ void PollAndProcessCommands()
       if(mw != "") url += "&symbols=" + mw;
    }
 
+   string posJson = GetOpenPositionsJson();
+   string reqBody = StringFormat("{\"account\":\"%I64d\",\"positions\":%s}", accLogin, posJson);
    char data[];
+   StringToCharArray(reqBody, data, 0, StringLen(reqBody));
    char result[];
    string resultHeaders;
    ResetLastError();
-   int res = WebRequest("GET", url, "Content-Type: application/json\r\n", 500, data, result, resultHeaders);
+   int res = WebRequest("POST", url, "Content-Type: application/json\r\n", 500, data, result, resultHeaders);
+   if(res == -1)
+   {
+      ArrayResize(data, 0);
+      res = WebRequest("GET", url, "Content-Type: application/json\r\n", 500, data, result, resultHeaders);
+   }
    if(res == -1)
    {
       int err = GetLastError();

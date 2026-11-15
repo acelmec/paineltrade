@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { PRESET_ATM_STRATEGIES, type ATMStrategy, type ATMBracket } from '../utils/atmRegistry';
 import { ATMStrategyModal } from './ATMStrategyModal';
 import { ImportAssetsModal } from './ImportAssetsModal';
-import { getAccountManualStrategyId, updateStrategyReportLevelsSupabase, updateStrategyReportStatusSupabase, isNinjaExecutionAccount, mirrorToLocalServer, resolveAccountExecutionSymbol, resolvePanelTickSize, resolvePanelPointValue, isSameAsset, roundToTick, fetchAtmStrategiesSupabase } from '../services/db';
+import { getAccountManualStrategyId, updateStrategyReportLevelsSupabase, updateStrategyReportStatusSupabase, isNinjaExecutionAccount, mirrorToLocalServer, resolveAccountExecutionSymbol, resolvePanelTickSize, resolvePanelPointValue, isSameAsset, roundToTick, getTickDecimals, fetchAtmStrategiesSupabase } from '../services/db';
 import { resolveLevelPrice, calculateRangeHlLevels } from '../utils/levelPriceResolver';
 import { checkNinjaStatus, fetchNinjaPositionsAndOrders } from '../services/ninjaGateway';
 import { getLocalPlatformConnections } from '../services/connectionsService';
@@ -79,6 +79,12 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
     : ((rawMarketPrice && !isNaN(rawMarketPrice) && rawMarketPrice > 0) ? rawMarketPrice : 0);
 
   const tickSize = resolvePanelTickSize(effectivePanel, effectiveSettings);
+  const boletaDecimals = tickSize < 1 ? Math.max(2, getTickDecimals(tickSize)) : 2;
+  const liveBid = Number(effectiveMarketData?.bid || livePrice);
+  const liveAsk = Number(effectiveMarketData?.ask || livePrice);
+  const liveSpread = (liveAsk > 0 && liveBid > 0 && liveAsk >= liveBid)
+    ? Number((liveAsk - liveBid).toFixed(boletaDecimals))
+    : 0;
 
   // Tabs: LOTE vs FINANCEIRO (derivado diretamente de sizingMode para evitar dessincronia)
 
@@ -845,8 +851,8 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
         }
       }
 
-      const tickSize = resolvePanelTickSize(effectivePanel, effectiveSettings);
-      const effectiveEntry = roundToTick(livePrice, tickSize);
+      const targetPrice = side === 'COMPRA' ? (liveAsk > 0 ? liveAsk : livePrice) : (liveBid > 0 ? liveBid : livePrice);
+      const effectiveEntry = roundToTick(targetPrice, tickSize);
       const initialStatus = 'Em Andamento';
 
       // Confirmation dialog if enabled
@@ -2415,6 +2421,22 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
           )}
         </div>
 
+        {/* 5.1 PAINEL DE SPREAD, BID & ASK EM TEMPO REAL */}
+        <div className="flex items-center justify-between px-2 py-1 bg-[#0b0e17] border border-slate-700/60 rounded-md text-[10px] font-mono shadow-inner select-none">
+          <div className="flex items-center gap-1 text-rose-400">
+            <span className="text-[8px] uppercase font-bold text-slate-500">BID</span>
+            <span className="font-extrabold">{liveBid > 0 ? liveBid.toFixed(boletaDecimals) : '--'}</span>
+          </div>
+          <div className="flex items-center gap-1 px-1.5 py-0.5 bg-amber-950/40 rounded border border-amber-600/30 text-amber-300">
+            <span className="text-[8px] uppercase tracking-wider text-amber-400/80">SPREAD</span>
+            <span className="font-black">{liveSpread > 0 ? liveSpread.toFixed(boletaDecimals) : '--'}</span>
+          </div>
+          <div className="flex items-center gap-1 text-emerald-400">
+            <span className="text-[8px] uppercase font-bold text-slate-500">ASK</span>
+            <span className="font-extrabold">{liveAsk > 0 ? liveAsk.toFixed(boletaDecimals) : '--'}</span>
+          </div>
+        </div>
+
         {/* 6. PRIMARY EXECUTION BUTTONS (COMPRA & VENDA) */}
         <div className="grid grid-cols-2 gap-1.5 pt-0.5">
           {/* COMPRA */}
@@ -2429,9 +2451,9 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 ? "Operação em andamento: Zere a posição atual para abrir nova ordem"
                 : isSubmitting
                 ? "Enviando ordem a mercado..."
-                : "Executar ordem de Compra a Mercado"
+                : `Executar ordem de Compra a Mercado (Ask: ${liveAsk > 0 ? liveAsk.toFixed(boletaDecimals) : '--'})`
             }
-            className={`font-black py-2.5 px-2 rounded-lg shadow transition flex items-center justify-center gap-1.5 border text-xs tracking-wider uppercase ${
+            className={`font-black py-2 px-2 rounded-lg shadow transition flex items-center justify-center border text-xs tracking-wider uppercase ${
               isNinjaAccount || hasOpenPosition
                 ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed opacity-50'
                 : isSubmitting
@@ -2439,7 +2461,14 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 : 'bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white cursor-pointer border-emerald-500/40'
             }`}
           >
-            <span>{isSubmitting ? 'ENVIANDO...' : 'COMPRA'}</span>
+            <div className="flex flex-col items-center leading-tight">
+              <span>{isSubmitting ? 'ENVIANDO...' : 'COMPRA'}</span>
+              {liveAsk > 0 && (
+                <span className="text-[9px] font-mono font-medium opacity-85">
+                  ASK: {liveAsk.toFixed(boletaDecimals)}
+                </span>
+              )}
+            </div>
           </button>
 
           {/* VENDA */}
@@ -2454,9 +2483,9 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 ? "Operação em andamento: Zere a posição atual para abrir nova ordem"
                 : isSubmitting
                 ? "Enviando ordem a mercado..."
-                : "Executar ordem de Venda a Mercado"
+                : `Executar ordem de Venda a Mercado (Bid: ${liveBid > 0 ? liveBid.toFixed(boletaDecimals) : '--'})`
             }
-            className={`font-black py-2.5 px-2 rounded-lg shadow transition flex items-center justify-center gap-1.5 border text-xs tracking-wider uppercase ${
+            className={`font-black py-2 px-2 rounded-lg shadow transition flex items-center justify-center border text-xs tracking-wider uppercase ${
               isNinjaAccount || hasOpenPosition
                 ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed opacity-50'
                 : isSubmitting
@@ -2464,7 +2493,14 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 : 'bg-rose-600 hover:bg-rose-500 active:scale-95 text-white cursor-pointer border-rose-500/40'
             }`}
           >
-            <span>{isSubmitting ? 'ENVIANDO...' : 'VENDA'}</span>
+            <div className="flex flex-col items-center leading-tight">
+              <span>{isSubmitting ? 'ENVIANDO...' : 'VENDA'}</span>
+              {liveBid > 0 && (
+                <span className="text-[9px] font-mono font-medium opacity-85">
+                  BID: {liveBid.toFixed(boletaDecimals)}
+                </span>
+              )}
+            </div>
           </button>
         </div>
 
