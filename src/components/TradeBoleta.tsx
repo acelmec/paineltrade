@@ -662,7 +662,8 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
 
   const resolveReportMetrics = (r: any) => {
     const entry = Number(r?.entry_price || 0);
-    const qty = Math.max(1, Number(r?.contrato || r?.quantity || 1));
+    const rawQty = Number(r?.contrato ?? r?.quantity ?? 1);
+    const qty = (!isNaN(rawQty) && rawQty > 0) ? rawQty : 1;
     const curPrice = resolveReportLivePrice(r);
     const matchedPanel = resolveReportMatchedPanel(r) || (isReportForThisAsset(r) ? effectivePanel : null);
     const panelSettings = matchedPanel ? allSettings?.[matchedPanel.id] : effectiveSettings;
@@ -672,10 +673,20 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
     const pts = (curPrice > 0 && entry > 0 && r?.status === 'Em Andamento')
       ? (r.side === 'COMPRA' ? (curPrice - entry) : (entry - curPrice))
       : 0;
-    const brokerProfit = (r?.is_mt_real || r?.ticket || (r?.id && String(r.id).startsWith('mt_'))) && r?.pnl_liquido !== undefined
+    const isMtOrder = Boolean(r?.is_mt_real || r?.ticket || (r?.id && String(r.id).startsWith('mt_')));
+    const brokerProfit = isMtOrder && r?.pnl_liquido !== undefined && !isNaN(Number(r.pnl_liquido))
       ? Number(r.pnl_liquido)
       : undefined;
-    const pnl = brokerProfit !== undefined ? brokerProfit : (pts * qty * ptVal);
+    const syncRefPrice = Number((r as any)?._mt_sync_price || 0);
+    let pnl = pts * qty * ptVal;
+    if (brokerProfit !== undefined) {
+      if (curPrice > 0 && syncRefPrice > 0 && Math.abs(curPrice - syncRefPrice) > 0.00001) {
+        const tickDeltaPts = r.side === 'COMPRA' ? (curPrice - syncRefPrice) : (syncRefPrice - curPrice);
+        pnl = brokerProfit + (tickDeltaPts * qty * ptVal);
+      } else if (Math.abs(brokerProfit) > 0.0001 || Math.abs(pts) < 0.00001) {
+        pnl = brokerProfit;
+      }
+    }
     return { entry, qty, curPrice, ptVal, pts, pnl };
   };
 
@@ -700,18 +711,22 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
 
   const activeReport = activeReportsList[0] || null;
 
-  // Sum contracts, points, and PnL across ALL open positions of the account (ATM brackets + all assets)
-  const totalOpenContracts = inProgressAccountReports.reduce(
-    (sum: number, r: any) => sum + Math.max(1, Number(r.contrato || r.quantity || 1)),
-    0
-  );
-  const netOpenContracts = inProgressAccountReports.reduce(
+  // Sum contracts, points, and PnL across ALL open positions of the account (ATM brackets + all assets, supporting fractional MT4/MT5 lots like 0.01)
+  const totalOpenContracts = Number(inProgressAccountReports.reduce(
     (sum: number, r: any) => {
-      const q = Math.max(1, Number(r.contrato || r.quantity || 1));
+      const rq = Number(r.contrato ?? r.quantity ?? 1);
+      return sum + ((!isNaN(rq) && rq > 0) ? rq : 1);
+    },
+    0
+  ).toFixed(4));
+  const netOpenContracts = Number(inProgressAccountReports.reduce(
+    (sum: number, r: any) => {
+      const rq = Number(r.contrato ?? r.quantity ?? 1);
+      const q = (!isNaN(rq) && rq > 0) ? rq : 1;
       return sum + (r.side === 'COMPRA' ? q : -q);
     },
     0
-  );
+  ).toFixed(4));
 
   // Position calculation (Supports real NinjaTrader position, simulator activePosition, or all live account reports)
   const posQty = isNinjaAccount && activeNinjaPosition
@@ -813,7 +828,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
       groups.set(asset, existing);
     });
     return Array.from(groups.values());
-  }, [allAccountActiveReports, livePrice, currentPrice, panels, effectivePanel, effectiveSettings, allSettings]);
+  }, [allAccountActiveReports, livePrice, currentPrice, panels, effectivePanel, effectiveSettings, allSettings, getPanelPrice]);
 
   // Execute Market Order (+ ATM or Manual Gestão)
   const handleExecuteOrder = async (side: 'COMPRA' | 'VENDA', isReverse = false) => {
@@ -858,7 +873,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
         }
       }
 
-      const targetPrice = side === 'COMPRA' ? (liveAsk > 0 ? liveAsk : livePrice) : (liveBid > 0 ? liveBid : livePrice);
+      const targetPrice = side === 'COMPRA' ? (liveBid > 0 ? liveBid : livePrice) : (liveAsk > 0 ? liveAsk : livePrice);
       const effectiveEntry = roundToTick(targetPrice, tickSize);
       const isMtAcc = Boolean(activeAccount && (activeAccount.platform === 'mt4' || activeAccount.platform === 'mt5'));
       const initialStatus = isMtAcc ? 'Pendente' : 'Em Andamento';
@@ -2432,9 +2447,9 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
           )}
         </div>
 
-        {/* 5.1 PAINEL DE SPREAD, BID & ASK EM TEMPO REAL */}
+        {/* 5.1 PAINEL DE SPREAD, BID & ASK EM TEMPO REAL (BID = COMPRA | ASK = VENDA) */}
         <div className="flex items-center justify-between px-2 py-1 bg-[#0b0e17] border border-slate-700/60 rounded-md text-[10px] font-mono shadow-inner select-none">
-          <div className="flex items-center gap-1 text-rose-400">
+          <div className="flex items-center gap-1 text-emerald-400">
             <span className="text-[8px] uppercase font-bold text-slate-500">BID</span>
             <span className="font-extrabold">{liveBid > 0 ? liveBid.toFixed(boletaDecimals) : '--'}</span>
           </div>
@@ -2442,7 +2457,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
             <span className="text-[8px] uppercase tracking-wider text-amber-400/80">SPREAD</span>
             <span className="font-black">{liveSpread > 0 ? liveSpread.toFixed(boletaDecimals) : '--'}</span>
           </div>
-          <div className="flex items-center gap-1 text-emerald-400">
+          <div className="flex items-center gap-1 text-rose-400">
             <span className="text-[8px] uppercase font-bold text-slate-500">ASK</span>
             <span className="font-extrabold">{liveAsk > 0 ? liveAsk.toFixed(boletaDecimals) : '--'}</span>
           </div>
@@ -2462,7 +2477,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 ? "Operação em andamento: Zere a posição atual para abrir nova ordem"
                 : isSubmitting
                 ? "Enviando ordem a mercado..."
-                : `Executar ordem de Compra a Mercado (Ask: ${liveAsk > 0 ? liveAsk.toFixed(boletaDecimals) : '--'})`
+                : `Executar ordem de Compra a Mercado (Bid: ${liveBid > 0 ? liveBid.toFixed(boletaDecimals) : '--'})`
             }
             className={`font-black py-2 px-2 rounded-lg shadow transition flex items-center justify-center border text-xs tracking-wider uppercase ${
               isNinjaAccount || hasOpenPosition
@@ -2474,9 +2489,9 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
           >
             <div className="flex flex-col items-center leading-tight">
               <span>{isSubmitting ? 'ENVIANDO...' : 'COMPRA'}</span>
-              {liveAsk > 0 && (
+              {liveBid > 0 && (
                 <span className="text-[9px] font-mono font-medium opacity-85">
-                  ASK: {liveAsk.toFixed(boletaDecimals)}
+                  BID: {liveBid.toFixed(boletaDecimals)}
                 </span>
               )}
             </div>
@@ -2494,7 +2509,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 ? "Operação em andamento: Zere a posição atual para abrir nova ordem"
                 : isSubmitting
                 ? "Enviando ordem a mercado..."
-                : `Executar ordem de Venda a Mercado (Bid: ${liveBid > 0 ? liveBid.toFixed(boletaDecimals) : '--'})`
+                : `Executar ordem de Venda a Mercado (Ask: ${liveAsk > 0 ? liveAsk.toFixed(boletaDecimals) : '--'})`
             }
             className={`font-black py-2 px-2 rounded-lg shadow transition flex items-center justify-center border text-xs tracking-wider uppercase ${
               isNinjaAccount || hasOpenPosition
@@ -2506,9 +2521,9 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
           >
             <div className="flex flex-col items-center leading-tight">
               <span>{isSubmitting ? 'ENVIANDO...' : 'VENDA'}</span>
-              {liveBid > 0 && (
+              {liveAsk > 0 && (
                 <span className="text-[9px] font-mono font-medium opacity-85">
-                  BID: {liveBid.toFixed(boletaDecimals)}
+                  ASK: {liveAsk.toFixed(boletaDecimals)}
                 </span>
               )}
             </div>

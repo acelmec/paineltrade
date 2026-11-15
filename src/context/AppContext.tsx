@@ -2647,7 +2647,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const pendingPanelCacheTimerRef = useRef<any>(null);
   const bumpPanelCacheVersion = useCallback(() => {
     const now = Date.now();
-    if (now - lastPanelCacheBumpRef.current >= 200) {
+    if (now - lastPanelCacheBumpRef.current >= 80) {
       lastPanelCacheBumpRef.current = now;
       setPanelCacheVersion(v => (v + 1) % 1000000);
     } else if (!pendingPanelCacheTimerRef.current) {
@@ -2655,7 +2655,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         pendingPanelCacheTimerRef.current = null;
         lastPanelCacheBumpRef.current = Date.now();
         setPanelCacheVersion(v => (v + 1) % 1000000);
-      }, 200);
+      }, 80);
     }
   }, []);
 
@@ -4758,7 +4758,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const applyRealtimePriceToCandles = (
     existingCandles: Candle[],
     price: number,
-    tickTimeStrOrMs?: string | number | null
+    tickTimeStrOrMs?: string | number | null,
+    targetPanel?: any
   ): { updatedCandles: Candle[]; hasChanged: boolean; isNewBar: boolean } => {
     if (!price || isNaN(price) || price <= 0 || !existingCandles || existingCandles.length === 0) {
       return { updatedCandles: existingCandles || [], hasChanged: false, isNewBar: false };
@@ -4786,8 +4787,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // 2. Minuto corrente do tick (início da barra de 1m)
-    const tickBucketMs = Math.floor(tickMs / 60000) * 60000;
+    // 2. Convenção de Timestamp de Barra por Plataforma/Conexão:
+    // - MT4 / MT5 / Binance: 13:40:01 pertence ao candle das 13:40 (horário de abertura do minuto)
+    // - NT8 (NinjaTrader 8): 13:40:01 pertence ao candle das 13:41 (horário de fechamento do minuto)
+    const activePlat = (
+      activeAccountRef.current?.platform ||
+      (typeof window !== 'undefined' ? localStorage.getItem('vortex_active_account_platform') : '') ||
+      ''
+    ).toLowerCase();
+    const effPanel = targetPanel || activePanelRef.current;
+    const pInst = String(effPanel?.instance_id || '').toLowerCase();
+    const pName = String(effPanel?.name || '').toUpperCase();
+    const isExplicitMtOrBinance =
+      pInst.startsWith('mt4_') ||
+      pInst.startsWith('mt5_') ||
+      pName.includes('ACTIVTRADES') ||
+      pName.includes(' - MT4') ||
+      pName.includes(' - MT5') ||
+      activePlat === 'mt4' ||
+      activePlat === 'mt5' ||
+      activePlat === 'binance';
+    const isExplicitNt8 =
+      !isExplicitMtOrBinance &&
+      (pInst.startsWith('nt8_') || pName.includes(' - NT8') || activePlat === 'nt8');
+
+    const baseFloorBucketMs = Math.floor(tickMs / 60000) * 60000;
 
     // 3. Informações da última vela consolidada / em formação no array
     const lastIdx = candles.length - 1;
@@ -4798,11 +4822,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       syncServerClock(lastCandleMs);
     }
 
-    const lastCandleBucketMs = !isNaN(lastCandleMs) ? Math.floor(lastCandleMs / 60000) * 60000 : tickBucketMs;
+    const lastCandleBucketMs = !isNaN(lastCandleMs) ? Math.floor(lastCandleMs / 60000) * 60000 : baseFloorBucketMs;
+
+    // Se a conexão for NT8 (ou se a última vela do feed NT8 já estiver estampada no minuto de fechamento baseFloorBucketMs + 60000),
+    // alinha o bucket ao minuto de fechamento (ex: 13:40:01 -> 13:41:00). Para MT4/MT5, mantém estritamente 13:40:00.
+    const tickBucketMs = isExplicitMtOrBinance
+      ? baseFloorBucketMs
+      : (isExplicitNt8 || lastCandleBucketMs === baseFloorBucketMs + 60000)
+      ? ((tickMs % 60000 > 0) ? baseFloorBucketMs + 60000 : baseFloorBucketMs)
+      : baseFloorBucketMs;
 
     // Cotação defasada (tick de um minuto anterior à última vela): NÃO altera e JAMAIS apaga velas reais do histórico.
-    // (A antiga "autocura" removia velas legítimas quando o horário do tick atrasava em relação ao feed de candles,
-    // causando o sumiço de 5-6 velas recentes.)
     if (lastCandleBucketMs > tickBucketMs) {
       return { updatedCandles: candles, hasChanged: false, isNewBar: false };
     }
@@ -4818,9 +4848,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { updatedCandles: candles, hasChanged: candles.length !== existingCandles.length, isNewBar: false };
     }
 
-    // Se houver um GAP de dados (> 3 minutos) entre a última vela carregada e o novo tick,
+    // Se houver um GAP de dados (> 5 minutos) entre a última vela carregada e o novo tick,
     // NÃO criar vela sintética isolada (aguarda o fetch do histórico completo do banco para preencher a lacuna)
-    if (tickBucketMs - curLastBucketMs > 3 * 60000) {
+    if (tickBucketMs - curLastBucketMs > 5 * 60000) {
       return { updatedCandles: candles, hasChanged: candles.length !== existingCandles.length, isNewBar: false };
     }
 
@@ -4847,17 +4877,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
-    // Caso 1: O tick pertence a um NOVO minuto subsequente (exatamente o próximo minuto)
+    // Caso 1: O tick pertence a um NOVO minuto subsequente
     if (shouldCreateNewBar) {
+      const updated = [...candles];
+      const newOpen = refPrice > 0 ? refPrice : price;
+      // Preenche eventuais minutos intermediários (1 a 4 min sem ticks) com continuidade plana para nunca deixar buracos
+      for (let m = curLastBucketMs + 60000; m < tickBucketMs; m += 60000) {
+        updated.push({
+          timestamp: new Date(m).toISOString(),
+          open: newOpen,
+          high: newOpen,
+          low: newOpen,
+          close: newOpen,
+          volume: 0
+        });
+      }
       const newCandle: Candle = {
         timestamp: new Date(tickBucketMs).toISOString(),
-        open: price,
-        high: price,
-        low: price,
+        open: newOpen,
+        high: Math.max(newOpen, price),
+        low: Math.min(newOpen, price),
         close: price,
-        volume: 0
+        volume: 1
       };
-      const updated = [...candles, newCandle];
+      updated.push(newCandle);
       return { updatedCandles: updated, hasChanged: true, isNewBar: true };
     }
 
@@ -4879,15 +4922,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { updatedCandles: candles, hasChanged: false, isNewBar: false };
     }
 
-    // Atualiza in-place na memória do cache (0ms, zero alocação para velocidade máxima)
-    candles[curLastIdx] = {
+    // Cria nova referência de array para notificar o CandleChart instantaneamente via candleSeries.update()
+    const updated = candles.slice();
+    updated[curLastIdx] = {
       ...curLastCandle,
       close: price,
       high: newHigh,
       low: newLow
     };
 
-    return { updatedCandles: candles, hasChanged: true, isNewBar: false };
+    return { updatedCandles: updated, hasChanged: true, isNewBar: false };
   };
 
   // 5. Loops de Atualização de Dados (Preço, Níveis, Força)
@@ -8979,14 +9023,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Atualização imediata do preço em tempo real no candle em formação (somente se a cotação for recente <= 45s)
       const isMDataTimestampFresh = mData?.updated_at ? (Date.now() - (parseInputToDate(mData.updated_at)?.getTime() || 0) <= 45000) : false;
       if (mData && isMDataTimestampFresh && mData.price && mData.price !== '--' && cache.candles && cache.candles.length > 0) {
-        const numPrice = parseNumericValue(mData.price);
+        const mBid = parseNumericValue((mData as any).bid);
+        const mAsk = parseNumericValue((mData as any).ask);
+        const rawPrice = parseNumericValue(mData.price);
+        // No MT4/MT5 o candle é formado e referenciado pelo menor preço (BID)
+        const numPrice = (mBid && mAsk && mBid > 0 && mAsk > 0) ? Math.min(mBid, mAsk) : (mBid && mBid > 0 ? mBid : rawPrice);
         if (numPrice && !isNaN(numPrice) && numPrice > 0) {
-          const { updatedCandles, hasChanged, isNewBar } = applyRealtimePriceToCandles(cache.candles, numPrice, mData.updated_at);
+          const { updatedCandles, hasChanged } = applyRealtimePriceToCandles(cache.candles, numPrice, mData.updated_at, targetPanel);
           if (hasChanged) {
             cache.candles = updatedCandles;
-            if (isNewBar && checkIsActive()) {
-              setCandles([...updatedCandles]);
-            } else if (!checkIsActive()) {
+            if (checkIsActive()) {
+              setCandles(updatedCandles);
+            } else {
               bumpPanelCacheVersion();
             }
           }
@@ -9116,11 +9164,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const canCheckGap = (now - lastGapCheck) >= 30000; // Cooldown de 30s para checagens de gap
       const hasGap = canCheckGap && (hasTailGap || hasInternalGap || isMissingHistory);
 
-      // Em modo WebSocket, o streaming atende o tempo real, mas SE HOUVER GAP verificado, recarga forçada ou ausência de velas,
+      // Em modo WebSocket ou MT4/MT5, o streaming atende o tempo real, mas SE HOUVER GAP verificado, recarga forçada ou ausência de velas,
       // DEVE buscar dados para preencher lacunas de quando o PC esteve desligado/suspenso!
+      const pInstLow = String(targetPanel?.instance_id || '').toLowerCase();
+      const pNameUp = String(targetPanel?.name || '').toUpperCase();
+      const activePlatNow = (activeAccountRef.current?.platform || '').toLowerCase();
+      const isMtPanel = pInstLow.startsWith('mt4_') || pInstLow.startsWith('mt5_') || pNameUp.includes('ACTIVTRADES') || pNameUp.includes(' - MT4') || pNameUp.includes(' - MT5') || activePlatNow === 'mt4' || activePlatNow === 'mt5';
+
       const isInitialForPanel = !initialLoadedPanelsRef.current.has(targetPanel.id);
       const canFetchNoExisting = !hasExisting && (now - lastCandles >= 20000 || isInitialForPanel);
-      const shouldFetchCandles = isWs
+      const shouldFetchCandles = (isWs || isMtPanel)
         ? (isForced || hasGap || canFetchNoExisting)
         : (isForced || hasGap || now - lastCandles >= effectiveCandlesInterval || canFetchNoExisting);
 
@@ -9195,6 +9248,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (isPanelDisplayed || candlesData.length >= maxCandleLimit) {
               initialLoadedPanelsRef.current.add(targetPanel.id);
             }
+
+            // Se for painel MT4/MT5 e o histórico veio de backfill externo (ex: Binance), alinha o histórico ao preço BID real do MT4 para evitar degrau/gap visual
+            let alignedCandlesData = candlesData;
+            if (isMtPanel && candlesData.length > 0) {
+              const liveMData = mData || cache.marketData;
+              const liveBidVal = parseNumericValue((liveMData as any)?.bid);
+              const liveAskVal = parseNumericValue((liveMData as any)?.ask);
+              const liveRawVal = parseNumericValue(liveMData?.price);
+              const mtRefBid = (liveBidVal && liveAskVal && liveBidVal > 0 && liveAskVal > 0)
+                ? Math.min(liveBidVal, liveAskVal)
+                : (liveBidVal && liveBidVal > 0 ? liveBidVal : liveRawVal);
+              const lastBackfillClose = Number(candlesData[candlesData.length - 1]?.close || 0);
+              if (mtRefBid && mtRefBid > 0 && lastBackfillClose > 0) {
+                const diffOffset = mtRefBid - lastBackfillClose;
+                const relDiff = Math.abs(diffOffset) / lastBackfillClose;
+                // Se houver diferença de spread/corretora (ex: Binance 1815.36 vs ActivTrades Bid 1812.25) dentro de 3.5%, translada o backfill para casar exatamente com o Bid do MT4
+                if (Math.abs(diffOffset) > 0.00001 && relDiff <= 0.035) {
+                  alignedCandlesData = candlesData.map((c: Candle) => ({
+                    ...c,
+                    open: Number((Number(c.open) + diffOffset).toFixed(6)),
+                    high: Number((Number(c.high) + diffOffset).toFixed(6)),
+                    low: Number((Number(c.low) + diffOffset).toFixed(6)),
+                    close: Number((Number(c.close) + diffOffset).toFixed(6))
+                  }));
+                }
+              }
+            }
+
             // O histórico retornado por fetchCandlesSupabase é a fonte canônica higienizada
             const minuteMap = new Map<number, Candle>();
 
@@ -9209,30 +9290,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               });
             }
 
-            // 2. Popula e sobrepõe com os dados históricos oficiais
-            candlesData.forEach((c: Candle) => {
+            // 2. Popula e sobrepõe com os dados históricos oficiais (exceto velas recentes já construídas pelo tick real do MT4)
+            const existingLastMs = (cache.candles && cache.candles.length > 0)
+              ? new Date(cache.candles[cache.candles.length - 1].timestamp).getTime()
+              : 0;
+            alignedCandlesData.forEach((c: Candle) => {
               if (!c || !c.timestamp) return;
               const t = new Date(c.timestamp).getTime();
               if (isNaN(t) || t <= 0) return;
-              minuteMap.set(Math.floor(t / 60000), c);
+              const key = Math.floor(t / 60000);
+              // Em painel MT4/MT5, preserva as últimas 5 velas construídas pelos ticks reais do MetaTrader
+              if (isMtPanel && existingLastMs > 0 && minuteMap.has(key) && t >= existingLastMs - 5 * 60000) {
+                return;
+              }
+              minuteMap.set(key, c);
             });
 
-            // 2.1 SELAGEM DE VELAS FECHADAS: na consulta periódica (últimas 50 barras) só a vela corrente
-            // (e a que acabou de fechar, durante 5s de tolerância para receber o fechamento final) pode ser alterada.
-            // Toda vela com minuto já encerrado e consolidado em memória é imutável e NÃO é replotada pelo feed.
-            if (queryLimit <= 50 && cache.candles && cache.candles.length > 0) {
-              const sealBeforeMinute = Math.floor((getSyncedNowMs() - 5000) / 60000);
-              cache.candles.forEach((c: Candle) => {
-                if (!c || !c.timestamp) return;
-                const t = new Date(c.timestamp).getTime();
-                if (isNaN(t) || t <= 0) return;
-                const key = Math.floor(t / 60000);
-                if (key < sealBeforeMinute) minuteMap.set(key, c);
-              });
-            }
-
             // 2. Preserva apenas velas locais contíguas (no máximo 1 minuto após o histórico) e com preço coerente
-            const lastHistCandle = candlesData[candlesData.length - 1];
+            const lastHistCandle = alignedCandlesData[alignedCandlesData.length - 1];
             const lastHistMs = new Date(lastHistCandle.timestamp).getTime();
             const lastHistClose = Number(lastHistCandle.close) || 0;
 
@@ -9258,11 +9333,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             let finalCandlesList = cleanAndSanitizeCandles(sortedCandles).slice(-maxCandleLimit);
 
             // 3. Aplicar o preço em tempo real imediatamente sobre o histórico recém baixado (apenas se a cotação for recente <= 45s)
-            const isMDataRecent = mData?.updated_at ? (Date.now() - (parseInputToDate(mData.updated_at)?.getTime() || 0) <= 45000) : false;
-            if (mData && isMDataRecent && mData.price && mData.price !== '--') {
-              const numPrice = parseNumericValue(mData.price);
+            const liveMDataNow = mData || cache.marketData;
+            const isMDataRecent = liveMDataNow?.updated_at ? (Date.now() - (parseInputToDate(liveMDataNow.updated_at)?.getTime() || 0) <= 45000) : false;
+            if (liveMDataNow && isMDataRecent && liveMDataNow.price && liveMDataNow.price !== '--') {
+              const mBid = parseNumericValue((liveMDataNow as any).bid);
+              const mAsk = parseNumericValue((liveMDataNow as any).ask);
+              const rawPrice = parseNumericValue(liveMDataNow.price);
+              const numPrice = (mBid && mAsk && mBid > 0 && mAsk > 0) ? Math.min(mBid, mAsk) : (mBid && mBid > 0 ? mBid : rawPrice);
               if (numPrice && !isNaN(numPrice) && numPrice > 0) {
-                const { updatedCandles } = applyRealtimePriceToCandles(finalCandlesList, numPrice, mData.updated_at);
+                const { updatedCandles } = applyRealtimePriceToCandles(finalCandlesList, numPrice, liveMDataNow.updated_at, targetPanel);
                 finalCandlesList = cleanAndSanitizeCandles(updatedCandles).slice(-maxCandleLimit);
               }
             }
@@ -10130,13 +10209,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           };
         }
 
-        // Preserva metadados em tempo real de ordens MT4/MT5 (ticket, is_mt_real, pnl_liquido)
-        if (((memReport as any).is_mt_real || (memReport as any).ticket) && serverReport.status === 'Em Andamento') {
+        // Preserva metadados em tempo real de ordens MT4/MT5 (ticket, is_mt_real, pnl_liquido, _mt_sync_price)
+        if (((memReport as any).is_mt_real || (memReport as any).ticket || (memReport as any).pnl_liquido !== undefined) && serverReport.status === 'Em Andamento') {
           serverReport = {
             ...serverReport,
             ticket: (memReport as any).ticket ?? (serverReport as any).ticket,
             is_mt_real: (memReport as any).is_mt_real ?? (serverReport as any).is_mt_real,
-            pnl_liquido: (memReport as any).pnl_liquido ?? (serverReport as any).pnl_liquido
+            pnl_liquido: (memReport as any).pnl_liquido ?? (serverReport as any).pnl_liquido,
+            realized_pnl: (memReport as any).realized_pnl ?? (serverReport as any).realized_pnl,
+            _mt_sync_price: (memReport as any)._mt_sync_price ?? (serverReport as any)._mt_sync_price
           } as StrategyReport;
         }
 
@@ -10652,19 +10733,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    let matchedPanel = panelId ? (panels || []).find(p => p.id === panelId || p.instance_id === panelId) : null;
-    if (!matchedPanel && symbol) {
+    const candidates: any[] = [];
+    if (panelId) {
+      const byId = (panels || []).filter(p => p.id === panelId || p.instance_id === panelId);
+      candidates.push(...byId);
+    }
+    if (symbol) {
       const cleanSym = symbol.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-      matchedPanel = (panels || []).find(p => {
+      const bySym = (panels || []).filter(p => {
         const pSym = (p.symbol || '').toLowerCase().replace(/[^a-z0-9]/g, '');
         const pGamma = (p.gamma_symbol || '').toLowerCase().replace(/[^a-z0-9]/g, '');
         const pName = (p.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
         const pInst = (p.instance_id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        return pSym === cleanSym || pGamma === cleanSym || pName.includes(cleanSym) || pInst.includes(cleanSym);
+        return (
+          pSym === cleanSym ||
+          pGamma === cleanSym ||
+          pName.includes(cleanSym) ||
+          pInst.includes(cleanSym) ||
+          isSameAsset(p.symbol || p.name, symbol)
+        );
       });
+      for (const p of bySym) {
+        if (!candidates.some(c => c.id === p.id)) candidates.push(p);
+      }
     }
 
-    if (matchedPanel) {
+    for (const matchedPanel of candidates) {
       const cache = panelDataCache.current[matchedPanel.id];
       if (cache?.marketData?.price && Number(cache.marketData.price) > 0) {
         return Number(cache.marketData.price);
@@ -10677,7 +10771,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    if (activePanel) {
+    const isForActivePanel =
+      (!panelId && !symbol) ||
+      (panelId && activePanel?.id === panelId) ||
+      (symbol && activePanel && isSameAsset(activePanel.symbol || activePanel.name, symbol));
+
+    if (isForActivePanel && activePanel) {
       const cache = panelDataCache.current[activePanel.id];
       if (cache?.marketData?.price && Number(cache.marketData.price) > 0) {
         return Number(cache.marketData.price);
@@ -10688,20 +10787,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return Number(lastCandle.close);
         }
       }
-    }
-
-    if (marketData?.price && Number(marketData.price) > 0) {
-      return Number(marketData.price);
-    }
-    if (candles && candles.length > 0) {
-      const lastCandle = candles[candles.length - 1];
-      if (lastCandle?.close && Number(lastCandle.close) > 0) {
-        return Number(lastCandle.close);
+      if (marketData?.price && Number(marketData.price) > 0) {
+        return Number(marketData.price);
+      }
+      if (candles && candles.length > 0) {
+        const lastCandle = candles[candles.length - 1];
+        if (lastCandle?.close && Number(lastCandle.close) > 0) {
+          return Number(lastCandle.close);
+        }
       }
     }
 
     return 0;
-  }, [panels, activePanel, marketData, candles]);
+  }, [panels, activePanel, marketData, candles, panelCacheVersion]);
 
   const getPanelSnapshot = useCallback((panelId: string) => {
     if (!panelId || panelId === activePanel?.id) {
@@ -13424,7 +13522,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       }
     };
 
-    const syncRemoteMtPositions = (acc: BrokerAccount, mtPositions: any[], mtTrades?: any[]) => {
+    const syncRemoteMtPositions = (acc: BrokerAccount, mtPositions: any[], mtTrades?: any[], snapQuotes?: any[]) => {
       if (!acc || !user) return;
       const accId = acc.id;
       const existingReports = [...(reportsRef.current || [])];
@@ -13471,13 +13569,21 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
           );
         }
 
+        const brokerProfitVal = Number(pos.net_profit ?? pos.profit ?? 0);
+        const matchedQuote = Array.isArray(snapQuotes)
+          ? snapQuotes.find((q: any) => isSameAsset(q.symbol, pSym))
+          : null;
+        const syncRefPrice = matchedQuote
+          ? Number(posSide === 'COMPRA' ? (matchedQuote.bid || matchedQuote.price || 0) : (matchedQuote.ask || matchedQuote.price || 0))
+          : 0;
+
         const posPayload: any = {
           ticket: ticketNum,
           user_id: user.id,
           account_id: accId,
           panel_id: matchedPanel?.id || activePanelRef.current?.id || 'default',
           instance_id: matchedPanel?.instance_id || pSym.toLowerCase(),
-          symbol: matchedPanel?.symbol || pos.symbol || pSym,
+          symbol: matchedPanel?.name || matchedPanel?.symbol || pos.symbol || pSym,
           side: posSide,
           contrato: Number(pos.lots || 1),
           quantity: Number(pos.lots || 1),
@@ -13485,8 +13591,9 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
           stop_loss: Number(pos.sl || 0),
           take_profit: Number(pos.tp || 0),
           status: 'Em Andamento',
-          pnl_liquido: Number(pos.profit || 0),
-          realized_pnl: Number(pos.profit || 0),
+          pnl_liquido: brokerProfitVal,
+          realized_pnl: brokerProfitVal,
+          _mt_sync_price: syncRefPrice > 0 ? syncRefPrice : undefined,
           already_dispatched: true,
           is_mt_real: true
         };
@@ -13497,7 +13604,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
           const wasPending = (current.status as any) === 'Pendente' || current.status !== 'Em Andamento';
           const slChanged = Math.abs(Number(current.stop_loss || 0) - posPayload.stop_loss) > 0.0001;
           const tpChanged = Math.abs(Number(current.take_profit || 0) - posPayload.take_profit) > 0.0001;
-          const pnlChanged = Number((current as any).pnl_liquido || 0) !== posPayload.pnl_liquido;
+          const pnlChanged = Math.abs(Number((current as any).pnl_liquido ?? NaN) - posPayload.pnl_liquido) > 0.001 || (current as any).pnl_liquido === undefined;
           const ticketAssigned = Number((current as any).ticket || 0) !== ticketNum;
 
           // Respeita proteção de níveis recém-modificados pelo usuário no Axion (< 10s)
@@ -13511,6 +13618,9 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
               ...current,
               ...posPayload,
               id: current.id, // Preserva o UUID original caso tenha nascido no Axion
+              panel_id: current.panel_id || posPayload.panel_id,
+              instance_id: current.instance_id || posPayload.instance_id,
+              symbol: current.symbol || posPayload.symbol,
               strategy_name: current.strategy_name || `MT4 #${ticketNum}`,
               description: current.description || `[${pos.symbol || pSym}] Ordem MT4 #${ticketNum} (${pos.lots} lotes)`,
               stop_loss: nextSl,
@@ -13638,11 +13748,33 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
     const processMtSyncSnapshot = (acc: BrokerAccount, snap: any) => {
       if (!acc || !snap || typeof snap !== 'object') return;
 
-      // 1. Cotações de todos os ativos do Market Watch embutidas no snapshot
+      // 1. Cotações de todos os ativos do Market Watch embutidas no snapshot + ativo do gráfico EA
+      if (snap.symbol && (Number(snap.bid || 0) > 0 || Number(snap.price || 0) > 0)) {
+        const symMain = String(snap.symbol).toUpperCase();
+        const bidMain = Number(snap.bid || snap.price || 0);
+        const askMain = Number(snap.ask || bidMain);
+        const lowRefMain = (bidMain > 0 && askMain > 0) ? Math.min(bidMain, askMain) : bidMain;
+        if (typeof window !== 'undefined' && lowRefMain > 0) {
+          window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
+            detail: {
+              symbol: symMain,
+              panel: symMain.toLowerCase(),
+              price: lowRefMain,
+              bid: bidMain,
+              ask: askMain,
+              volume: 1,
+              updated_at: snap.updated_at || new Date().toISOString()
+            }
+          }));
+        }
+      }
+
       if (Array.isArray(snap.quotes)) {
         snap.quotes.forEach((qData: any) => {
           const sym = String(qData.symbol || '').toUpperCase();
-          const numPrice = Number(qData.price || qData.bid || 0);
+          const qBid = Number(qData.bid || qData.price || 0);
+          const qAsk = Number(qData.ask || qBid);
+          const numPrice = (qBid > 0 && qAsk > 0) ? Math.min(qBid, qAsk) : qBid;
           if (!sym || numPrice <= 0) return;
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
@@ -13650,12 +13782,76 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                 symbol: sym,
                 panel: sym.toLowerCase(),
                 price: numPrice,
-                bid: Number(qData.bid || numPrice),
-                ask: Number(qData.ask || numPrice),
+                bid: qBid > 0 ? qBid : numPrice,
+                ask: qAsk > 0 ? qAsk : numPrice,
                 volume: Number(qData.volume || 1),
                 updated_at: snap.updated_at || new Date().toISOString()
               }
             }));
+          }
+        });
+      }
+
+      // 1.1 Candles M1 autênticos enviados pelo EA do MT4/MT5 (formados pelo menor preço = BID e abertura de minuto)
+      if (Array.isArray(snap.candles) && snap.candles.length > 0 && snap.symbol) {
+        const snapSym = String(snap.symbol).toUpperCase();
+        const matchingPanels = (allPanelsRef.current || []).filter(p =>
+          isSameAsset(p.id, snapSym) ||
+          isSameAsset(p.name, snapSym) ||
+          isSameAsset(p.instance_id, snapSym)
+        );
+        matchingPanels.forEach(mp => {
+          if (!panelDataCache.current[mp.id]) {
+            panelDataCache.current[mp.id] = {
+              marketData: null,
+              forces: [],
+              gammaLevels: null,
+              screenshot: null,
+              candles: [],
+              lastGammaFetch: 0,
+              lastGammaSymbol: ''
+            };
+          }
+          const cache = panelDataCache.current[mp.id];
+          const minuteMap = new Map<number, Candle>();
+          if (cache.candles && cache.candles.length > 0) {
+            cache.candles.forEach((c: Candle) => {
+              const t = new Date(c.timestamp).getTime();
+              if (!isNaN(t) && t > 0) minuteMap.set(Math.floor(t / 60000), c);
+            });
+          }
+          snap.candles.forEach((rc: any) => {
+            const tsStr = rc.timestamp || rc.time;
+            if (!tsStr) return;
+            const parsedD = parseInputToDate(tsStr);
+            if (!parsedD || isNaN(parsedD.getTime())) return;
+            const barKey = Math.floor(parsedD.getTime() / 60000);
+            const barIso = new Date(barKey * 60000).toISOString();
+            const o = Number(rc.open || 0);
+            const h = Number(rc.high || o);
+            const l = Number(rc.low || o);
+            const cl = Number(rc.close || o);
+            if (o > 0 && cl > 0) {
+              minuteMap.set(barKey, {
+                timestamp: barIso,
+                open: o,
+                high: Math.max(o, h, cl),
+                low: Math.min(o, l, cl),
+                close: cl,
+                volume: Number(rc.volume || 1)
+              });
+            }
+          });
+          const merged = cleanAndSanitizeCandles(
+            Array.from(minuteMap.values()).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+          );
+          if (merged.length > 0) {
+            cache.candles = merged;
+            if (activePanelRef.current?.id === mp.id) {
+              setCandles(merged);
+            } else {
+              bumpPanelCacheVersion();
+            }
           }
         });
       }
@@ -13684,7 +13880,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
 
       // 4. Posições abertas em tempo real
       if (Array.isArray(snap.positions)) {
-        syncRemoteMtPositions(acc, snap.positions, histList || undefined);
+        syncRemoteMtPositions(acc, snap.positions, histList || undefined, snap.quotes);
       }
     };
 
@@ -13718,10 +13914,16 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         const isLocalHost = host.includes('localhost') || host.includes('127.0.0.1');
         const accNum = extractMtAccountNumber(primaryAcc);
 
+        // Executa em PARALELO (/quotes + mt4_sync_all + mt4_sync_<accNum>) para latência ultrabaixa (<100ms-250ms)
+        const [quotesRes, syncAllRes, syncAccRes] = await Promise.all([
+          fetch(`${host}/quotes`, { signal: AbortSignal.timeout(1500) }).catch(() => null),
+          fetch(`${host}/market_data?instance_id=mt4_sync_all`, { signal: AbortSignal.timeout(1500) }).catch(() => null),
+          accNum ? fetch(`${host}/market_data?instance_id=mt4_sync_${accNum}`, { signal: AbortSignal.timeout(1500) }).catch(() => null) : Promise.resolve(null)
+        ]);
+
         // 1. Cotações Bid/Ask em tempo real de todos os ativos do Market Watch (/quotes)
-        const res = await fetch(`${host}/quotes`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
-        if (res && res.ok) {
-          const quotes = await res.json().catch(() => null);
+        if (quotesRes && quotesRes.ok) {
+          const quotes = await quotesRes.json().catch(() => null);
           if (quotes && typeof quotes === 'object') {
             for (const [rawSym, qData] of Object.entries<any>(quotes)) {
               const sym = String(rawSym).toUpperCase();
@@ -13745,27 +13947,39 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
           }
         }
 
-        // 2. Snapshot Unificado Bypass via /market_data?instance_id=mt4_sync_<accNum> ou mt4_sync_all
-        // Funciona nativamente tanto no Hub VPS em produção quanto no Bridge local!
+        // 2. Snapshot Unificado Bypass: seleciona SEMPRE o snapshot mais recente entre mt4_sync_all e mt4_sync_<accNum>
+        // (O EA atualiza mt4_sync_all a cada ciclo do timer, evitando travamento de PnL no snapshot inicial mt4_sync_<accNum>)
         let syncHandled = false;
-        const syncRes = await fetch(`${host}/market_data?instance_id=mt4_sync_${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
-        let syncData = (syncRes && syncRes.ok) ? await syncRes.json().catch(() => null) : null;
-        if (!syncData || (!Array.isArray(syncData.positions) && !Array.isArray(syncData.history))) {
-          const fallbackSyncRes = await fetch(`${host}/market_data?instance_id=mt4_sync_all`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
-          if (fallbackSyncRes && fallbackSyncRes.ok) {
-            syncData = await fallbackSyncRes.json().catch(() => null);
+        const syncAllData = (syncAllRes && syncAllRes.ok) ? await syncAllRes.json().catch(() => null) : null;
+        const syncAccData = (syncAccRes && syncAccRes.ok) ? await syncAccRes.json().catch(() => null) : null;
+
+        const isValidSync = (d: any) => d && (Array.isArray(d.positions) || Array.isArray(d.history));
+        let chosenSync: any = null;
+
+        if (isValidSync(syncAllData) && isValidSync(syncAccData)) {
+          const allMatchesAcc = !accNum || !syncAllData.account || String(syncAllData.account).replace(/\D/g, '') === String(accNum);
+          if (allMatchesAcc) {
+            const tAll = new Date(syncAllData.updated_at || 0).getTime() || 0;
+            const tAcc = new Date(syncAccData.updated_at || 0).getTime() || 0;
+            chosenSync = tAll >= tAcc ? syncAllData : syncAccData;
+          } else {
+            chosenSync = syncAccData;
           }
+        } else if (isValidSync(syncAllData)) {
+          chosenSync = syncAllData;
+        } else if (isValidSync(syncAccData)) {
+          chosenSync = syncAccData;
         }
 
-        if (syncData && (Array.isArray(syncData.positions) || Array.isArray(syncData.history))) {
-          processMtSyncSnapshot(primaryAcc, syncData);
+        if (chosenSync) {
+          processMtSyncSnapshot(primaryAcc, chosenSync);
           syncHandled = true;
         }
 
         // 3. Endpoints dedicados (/accounts, /positions, /trades) caso o servidor suporte ou não tenha snapshot mt4_sync_* ainda
         if (!syncHandled) {
           let mtAccInfo: any = null;
-          const accRes = await fetch(`${host}/accounts?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+          const accRes = await fetch(`${host}/accounts?account=${accNum}`, { signal: AbortSignal.timeout(1500) }).catch(() => null);
           if (accRes && accRes.ok) {
             const accData = await accRes.json().catch(() => null);
             mtAccInfo = (accData?.accounts || []).find((a: any) =>
@@ -13789,9 +14003,9 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
           }
 
           let mtTradesData: any[] | null = null;
-          let tradesRes = await fetch(`${host}/trades?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+          let tradesRes = await fetch(`${host}/trades?account=${accNum}`, { signal: AbortSignal.timeout(1500) }).catch(() => null);
           if ((!tradesRes || !tradesRes.ok) && isLocalHost) {
-            tradesRes = await fetch(`http://localhost:8003/trades?account=${accNum}`, { signal: AbortSignal.timeout(2000) }).catch(() => null);
+            tradesRes = await fetch(`http://localhost:8003/trades?account=${accNum}`, { signal: AbortSignal.timeout(1500) }).catch(() => null);
           }
           if (tradesRes && tradesRes.ok) {
             const tradesData = await tradesRes.json().catch(() => null);
@@ -13806,12 +14020,10 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
             syncRemoteMtTrades(primaryAcc, mtTradesData);
           }
 
-          // IMPORTANTE: Nunca fazer fallback para localhost:8003/positions quando o host configurado é uma VPS remota!
-          // O fallback para localhost:8003 retornava {"positions":[]} vazio e cancelava indevidamente ordens abertas na VPS!
           let mtPositionsData: any[] | null = null;
-          let posRes = await fetch(`${host}/positions?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+          let posRes = await fetch(`${host}/positions?account=${accNum}`, { signal: AbortSignal.timeout(1500) }).catch(() => null);
           if ((!posRes || !posRes.ok) && isLocalHost) {
-            posRes = await fetch(`http://localhost:8003/positions?account=${accNum}`, { signal: AbortSignal.timeout(2000) }).catch(() => null);
+            posRes = await fetch(`http://localhost:8003/positions?account=${accNum}`, { signal: AbortSignal.timeout(1500) }).catch(() => null);
           }
           if (posRes && posRes.ok) {
             const posData = await posRes.json().catch(() => null);
@@ -13833,7 +14045,9 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       }
     };
 
-    mtQuotesTimer = createWorkerInterval(fetchRemoteMtQuotes, 1500);
+    // Ciclo acelerado via Web Worker (250ms) para atualização rápida de preços Bid/Ask e PnL
+    fetchRemoteMtQuotes();
+    mtQuotesTimer = createWorkerInterval(fetchRemoteMtQuotes, 250);
 
     return () => {
       if (mtQuotesTimer) clearWorkerTimer(mtQuotesTimer);
@@ -14957,7 +15171,9 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
     const isSystemAdmin = user?.email?.toLowerCase() === 'admin@vortex.com';
     const adminSet = !isSystemAdmin ? getAdminSetForPanel(activePanel) : null;
 
-    const isWsMode = (adminSet?.transmission_mode || panelSettings.transmission_mode) === 'websocket';
+    const hasMtConn = getLocalPlatformConnections().some(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
+    const anyPanelWs = Object.values(allSettingsRef.current || {}).some((s: any) => s?.transmission_mode === 'websocket');
+    const isWsMode = (adminSet?.transmission_mode || panelSettings.transmission_mode) === 'websocket' || anyPanelWs || hasMtConn;
     if (!isWsMode) {
       if (wsHubSocketRef.current) {
         try { wsHubSocketRef.current.close(); } catch (_) {}
@@ -14972,13 +15188,11 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
     // Auto-ajuste transparente para HTTPS (Proxy Reverso NGINX em wss://) e Executável Desktop (.NET 8 WebView2 / axion.station)
     if (typeof window !== 'undefined') {
       const host = (window.location.host || '').toLowerCase();
-      const isVirtualOrLocalHost =
+      const isVirtualHost =
         host.includes('axion.station') ||
-        host.startsWith('localhost') ||
-        host.startsWith('127.0.0.1') ||
         window.location.protocol === 'file:';
 
-      if (isVirtualOrLocalHost) {
+      if (isVirtualHost) {
         if (wsUrl.startsWith('/ws') || wsUrl.includes('144.126.141.254') || wsUrl.includes('axion.station')) {
           wsUrl = 'wss://painel.vemviraramesa.com.br/ws';
         }
@@ -15034,6 +15248,26 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
             if (typeof incomingInst === 'string' && incomingInst.startsWith('mt4_sync') && msg.data && typeof window !== 'undefined') {
               window.dispatchEvent(new CustomEvent('vortex_mt_sync_snapshot', { detail: msg.data }));
               return;
+            }
+
+            // Disparo instantâneo (<5ms) de ticks de preço e Bid/Ask recebidos via WebSocket para todos os componentes (Boleta, Gráfico, Ordens Ativas)
+            if (msg.type === 'market_data' && msg.data && typeof window !== 'undefined') {
+              const d = msg.data;
+              const dSym = String(d.symbol || incomingInst || '').toUpperCase();
+              const dPrice = Number(d.price || d.bid || 0);
+              if (dSym && !dSym.startsWith('MT4_SYNC') && dPrice > 0) {
+                window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
+                  detail: {
+                    symbol: dSym,
+                    panel: String(incomingInst || dSym).toLowerCase(),
+                    price: dPrice,
+                    bid: Number(d.bid || dPrice),
+                    ask: Number(d.ask || dPrice),
+                    volume: Number(d.volume || 1),
+                    updated_at: d.updated_at || new Date().toISOString()
+                  }
+                }));
+              }
             }
             let targetPanel = activePanelRef.current || activePanel;
             if (incomingInst && allPanelsRef.current.length > 0) {
@@ -15114,16 +15348,19 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                 bumpPanelCacheVersion();
               }
 
-              // Atualiza candle em formação com proteção de sanidade
+              // Atualiza candle em formação com proteção de sanidade (no MT4/MT5 usa o menor preço = BID)
               if (mData.price && mData.price !== '--' && cache.candles && cache.candles.length > 0 && mData.updated_at && (Date.now() - (parseInputToDate(mData.updated_at)?.getTime() || 0) <= 45000)) {
-                const numPrice = parseNumericValue(mData.price);
+                const mBid = parseNumericValue((mData as any).bid);
+                const mAsk = parseNumericValue((mData as any).ask);
+                const rawPrice = parseNumericValue(mData.price);
+                const numPrice = (mBid && mAsk && mBid > 0 && mAsk > 0) ? Math.min(mBid, mAsk) : (mBid && mBid > 0 ? mBid : rawPrice);
                 if (numPrice && !isNaN(numPrice) && numPrice > 0) {
-                  const { updatedCandles, hasChanged, isNewBar } = applyRealtimePriceToCandles(cache.candles, numPrice, mData.updated_at);
+                  const { updatedCandles, hasChanged } = applyRealtimePriceToCandles(cache.candles, numPrice, mData.updated_at, targetPanel);
                   if (hasChanged) {
                     cache.candles = updatedCandles;
-                    if (isNewBar && activePanelRef.current?.id === targetPanel.id) {
-                      setCandles([...updatedCandles]);
-                    } else if (activePanelRef.current?.id !== targetPanel.id) {
+                    if (activePanelRef.current?.id === targetPanel.id) {
+                      setCandles(updatedCandles);
+                    } else {
                       bumpPanelCacheVersion();
                     }
                   }
@@ -15517,9 +15754,9 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       const pan = (detail.panel || '').toUpperCase();
       const numPrice = Number(detail.price);
 
-      // 1. Identificar o painel correspondente no cache de forma estrita (sem contaminação cruzada)
+      // 1. Identificar todos os painéis correspondentes no cache (incluindo ativos sincronizados ex: ETHUSD e ETHUSD - ActivTrades)
       const currentPanels = allPanelsRef.current || [];
-      const matchedPanel = currentPanels.find((p: any) => {
+      const matchedPanels = currentPanels.filter((p: any) => {
         const pName = (p.name || p.id || '').toUpperCase();
         const pSym = (p.symbol || '').toUpperCase();
         const pInst = (p.instance_id || '').toUpperCase();
@@ -15532,112 +15769,116 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         return false;
       });
 
-      if (!matchedPanel) return;
+      if (matchedPanels.length === 0) return;
 
-      if (!panelDataCache.current[matchedPanel.id]) {
-        panelDataCache.current[matchedPanel.id] = {
-          marketData: null,
-          forces: [],
-          gammaLevels: null,
-          screenshot: null,
-          candles: [],
-          lastGammaFetch: 0,
-          lastGammaSymbol: ''
-        };
-      }
-      const cache = panelDataCache.current[matchedPanel.id];
-
-      const numBid = Number(detail.bid || numPrice);
-      const numAsk = Number(detail.ask || numPrice);
-      const numSpread = Number(Math.max(0, numAsk - numBid).toFixed(5));
-      const prevM = cache.marketData;
-      const bidAskChanged = !prevM || prevM.bid !== numBid || prevM.ask !== numAsk || Number(prevM.price) !== numPrice;
-      const liveMetrics = computeLiveCandleMetrics(cache.candles || [], numPrice);
-
-      // 2. Atualização imediata do cache de MarketData com métricas dinâmicas
-      const mData: MarketData = {
-        symbol: sym,
-        price: String(numPrice),
-        bid: numBid,
-        ask: numAsk,
-        spread: numSpread,
-        zScore: liveMetrics.zScore,
-        atrRatio: liveMetrics.atrRatio,
-        estado: liveMetrics.estado,
-        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        sentiment: cache.marketData?.sentiment || 50,
-        originalSentiment: cache.marketData?.originalSentiment || 50,
-        delta: 0,
-        deltaRatio: 1.0,
-        buyVolume: 0,
-        sellVolume: 0,
-        printsPerSecond: 0,
-        blockTrades: cache.marketData?.blockTrades || [],
-        updated_at: detail.updated_at || new Date().toISOString()
-      };
-      cache.marketData = mData;
-      cache.lastMarketUpdateAt = Date.now();
-
-      // 3. Atualização imediata do candle em formação (<1ms) e do Bid/Ask na UI e no Multi-Chart Grid
-      if (!cache.candles || cache.candles.length === 0) {
-        const nowIso = detail.updated_at || new Date().toISOString();
-        const firstCandle: Candle = {
-          timestamp: nowIso,
-          open: numPrice,
-          high: numPrice,
-          low: numPrice,
-          close: numPrice,
-          volume: Number(detail.volume || 1)
-        };
-        cache.candles = [firstCandle];
-        const isActive = activePanelRef.current?.id === matchedPanel.id;
-        if (isActive) {
-          setMarketData(mData);
-          setCandles([firstCandle]);
-        } else {
-          bumpPanelCacheVersion();
+      for (const matchedPanel of matchedPanels) {
+        if (!panelDataCache.current[matchedPanel.id]) {
+          panelDataCache.current[matchedPanel.id] = {
+            marketData: null,
+            forces: [],
+            gammaLevels: null,
+            screenshot: null,
+            candles: [],
+            lastGammaFetch: 0,
+            lastGammaSymbol: ''
+          };
         }
-      } else {
-        const { updatedCandles, hasChanged, isNewBar } = applyRealtimePriceToCandles(cache.candles, numPrice, detail.updated_at);
-        if (hasChanged) {
-          cache.candles = updatedCandles;
-        }
-        if (hasChanged || bidAskChanged) {
+        const cache = panelDataCache.current[matchedPanel.id];
+
+        const numBid = Number(detail.bid || numPrice);
+        const numAsk = Number(detail.ask || numPrice);
+        const numSpread = Number(Math.max(0, numAsk - numBid).toFixed(5));
+        const prevM = cache.marketData;
+        const bidAskChanged = !prevM || prevM.bid !== numBid || prevM.ask !== numAsk || Number(prevM.price) !== numPrice;
+        const liveMetrics = computeLiveCandleMetrics(cache.candles || [], numPrice);
+
+        // 2. Atualização imediata do cache de MarketData com métricas dinâmicas
+        const mData: MarketData = {
+          symbol: sym,
+          price: String(numPrice),
+          bid: numBid,
+          ask: numAsk,
+          spread: numSpread,
+          zScore: liveMetrics.zScore,
+          atrRatio: liveMetrics.atrRatio,
+          estado: liveMetrics.estado,
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          sentiment: cache.marketData?.sentiment || 50,
+          originalSentiment: cache.marketData?.originalSentiment || 50,
+          delta: 0,
+          deltaRatio: 1.0,
+          buyVolume: 0,
+          sellVolume: 0,
+          printsPerSecond: 0,
+          blockTrades: cache.marketData?.blockTrades || [],
+          updated_at: detail.updated_at || new Date().toISOString()
+        };
+        cache.marketData = mData;
+        cache.lastMarketUpdateAt = Date.now();
+
+        // 3. Atualização imediata do candle em formação (<1ms) e do Bid/Ask na UI e no Multi-Chart Grid
+        // No MT4/MT5 o candle é formado pelo menor preço (BID), garantindo que o fechamento da vela atual acompanhe exatamente a linha BID
+        const candleRefPrice = (numBid > 0 && numAsk > 0) ? Math.min(numBid, numAsk) : (numBid > 0 ? numBid : numPrice);
+        if (!cache.candles || cache.candles.length === 0) {
+          const nowIso = detail.updated_at || new Date().toISOString();
+          const firstCandle: Candle = {
+            timestamp: nowIso,
+            open: candleRefPrice,
+            high: candleRefPrice,
+            low: candleRefPrice,
+            close: candleRefPrice,
+            volume: Number(detail.volume || 1)
+          };
+          cache.candles = [firstCandle];
           const isActive = activePanelRef.current?.id === matchedPanel.id;
           if (isActive) {
-            pendingUiAction = () => {
-              setMarketData(mData);
-              if (hasChanged && isNewBar) setCandles([...updatedCandles]);
-            };
-            if (!rafId) {
-              rafId = requestAnimationFrame(() => {
-                if (pendingUiAction) {
-                  pendingUiAction();
-                  pendingUiAction = null;
-                }
-                rafId = null;
-              });
-            }
+            setMarketData(mData);
+            setCandles([firstCandle]);
           } else {
-            const nowT = Date.now();
-            if (!(cache as any)._lastTickBumpAt || nowT - (cache as any)._lastTickBumpAt > 250) {
-              (cache as any)._lastTickBumpAt = nowT;
-              bumpPanelCacheVersion();
+            bumpPanelCacheVersion();
+          }
+        } else {
+          const { updatedCandles, hasChanged } = applyRealtimePriceToCandles(cache.candles, candleRefPrice, detail.updated_at, matchedPanel);
+          if (hasChanged) {
+            cache.candles = updatedCandles;
+          }
+          if (hasChanged || bidAskChanged) {
+            const isActive = activePanelRef.current?.id === matchedPanel.id;
+            if (isActive) {
+              pendingUiAction = () => {
+                setMarketData(mData);
+                if (hasChanged) setCandles(updatedCandles);
+              };
+              if (!rafId) {
+                rafId = requestAnimationFrame(() => {
+                  if (pendingUiAction) {
+                    pendingUiAction();
+                    pendingUiAction = null;
+                  }
+                  rafId = null;
+                });
+              }
+            } else {
+              const nowT = Date.now();
+              if (!(cache as any)._lastTickBumpAt || nowT - (cache as any)._lastTickBumpAt > 80) {
+                (cache as any)._lastTickBumpAt = nowT;
+                bumpPanelCacheVersion();
+              }
             }
           }
         }
-      }
 
-      // 4. Execução IMEDIATA de proteção de ordens (Stop Loss, Take Profit, Trailing Stop) no exato milissegundo do tick!
-      const hasOpenOps = reportsRef.current.some(r => r.status === 'Em Andamento' && (
-        r.panel_id === matchedPanel.id ||
-        (!r.panel_id && r.instance_id && r.instance_id === matchedPanel.instance_id) ||
-        (!r.panel_id && !r.instance_id && matchedPanel.id === 'default')
-      ));
+        // 4. Execução IMEDIATA de proteção de ordens (Stop Loss, Take Profit, Trailing Stop) no exato milissegundo do tick!
+        const hasOpenOps = reportsRef.current.some(r => r.status === 'Em Andamento' && (
+          r.panel_id === matchedPanel.id ||
+          (!r.panel_id && r.instance_id && r.instance_id === matchedPanel.instance_id) ||
+          (!r.panel_id && !r.instance_id && matchedPanel.id === 'default')
+        ));
 
-      if (hasOpenOps) {
-        const pSettings = allSettingsRef.current[matchedPanel.id] || {};
-        runMarketLogicForPanel(matchedPanel, pSettings, cache, mData, cache.forces || [], cache.gammaLevels || null);
+        if (hasOpenOps) {
+          const pSettings = allSettingsRef.current[matchedPanel.id] || {};
+          runMarketLogicForPanel(matchedPanel, pSettings, cache, mData, cache.forces || [], cache.gammaLevels || null);
+        }
       }
     };
 

@@ -29,7 +29,7 @@ input string                  Group_Conexao        = "=== 1. CONEXÃO AXION GATE
 input ENUM_GATEWAY_TRANSPORT  InpTransportMode     = TRANSPORT_CLOUD_RELAY;    // Modo de Transporte
 input string                  InpGatewayUrl        = "http://144.126.141.254"; // URL Gateway Local / VPS (Porta 80 Padrão)
 input string                  InpPairingToken      = "vps_mt5";                // Token de Pareamento de Nuvem
-input int                     InpPollIntervalMs    = 250;                      // Intervalo de Consulta de Ordens (ms)
+input int                     InpPollIntervalMs    = 150;                      // Intervalo de Consulta de Ordens (ms)
 input int                     InpMagicNumber       = 888999;                   // Magic Number das Ordens
 
 input string                  Group_Streamer       = "=== 2. DATA STREAMER (CANDLES & TICKS) ===";
@@ -52,6 +52,19 @@ ulong             lastTickTimeMs = 0;
 ulong             lastSyncSnapshotMs = 0;
 int               mwRoundRobinIdx = 0;
 string            lastExecutedCommandId = "";
+
+//+------------------------------------------------------------------+
+//| CONVERTER HORÁRIO DO SERVIDOR DA CORRETORA PARA UTC REAL         |
+//+------------------------------------------------------------------+
+datetime ServerTimeToUtc(datetime srvTime)
+{
+   datetime curSrv = TimeCurrent();
+   datetime curGmt = TimeGMT();
+   if(curSrv <= 0 || curGmt <= 0) return srvTime;
+   long diffSec = (long)curSrv - (long)curGmt;
+   long offsetRounded = (long)MathRound((double)diffSec / 900.0) * 900;
+   return (datetime)((long)srvTime - offsetRounded);
+}
 
 //+------------------------------------------------------------------+
 //| FUNÇÃO AUXILIAR: FORMATAR DATA ISO 8601 (UTC)                   |
@@ -271,8 +284,8 @@ void BroadcastMarketData()
    string panel = InpTargetPanel != "" ? InpTargetPanel : _Symbol;
    datetime nowUtc = TimeGMT();
 
-   // 1. Enviar Ticks de Preço / Market Data
-   double refPrice = lastTick.last > 0 ? lastTick.last : lastTick.bid;
+   // 1. Enviar Ticks de Preço / Market Data (referência MT5 de candle = menor preço / Bid)
+   double refPrice = lastTick.bid > 0 ? lastTick.bid : lastTick.last;
    string jsonTick = StringFormat(
       "{\"type\":\"market_data\",\"symbol\":\"%s\",\"panel\":\"%s\",\"price\":%s,\"bid\":%s,\"ask\":%s,\"volume\":%I64u,\"updated_at\":\"%s\"}",
       EscapeJsonString(_Symbol), EscapeJsonString(panel),
@@ -290,13 +303,14 @@ void BroadcastMarketData()
       if(barTime != lastCandleMinute)
       {
          lastCandleMinute = barTime;
+         datetime barUtc = ServerTimeToUtc(rates[0].time);
          string jsonBar = StringFormat(
             "{\"type\":\"bar\",\"symbol\":\"%s\",\"panel\":\"%s\",\"price\":%s,\"open\":%s,\"high\":%s,\"low\":%s,\"close\":%s,\"volume\":%I64u,\"timestamp\":\"%s\",\"updated_at\":\"%s\"}",
             EscapeJsonString(_Symbol), EscapeJsonString(panel),
             DoubleToString(rates[0].close, _Digits), DoubleToString(rates[0].open, _Digits),
             DoubleToString(rates[0].high, _Digits), DoubleToString(rates[0].low, _Digits),
             DoubleToString(rates[0].close, _Digits), rates[0].tick_volume,
-            FormatIsoTimestamp(rates[0].time), FormatIsoTimestamp(nowUtc)
+            FormatIsoTimestamp(barUtc), FormatIsoTimestamp(nowUtc)
          );
          SendStreamerPayload(jsonBar);
       }
@@ -316,11 +330,11 @@ void OnTimer()
    PollAndProcessCommands();
 
    ulong nowMs = GetMicrosecondCount() / 1000;
-   if(nowMs - lastSyncSnapshotMs >= 450)
+   if(nowMs - lastSyncSnapshotMs >= 200)
    {
       lastSyncSnapshotMs = nowMs;
       SyncAccountStateToGateway(false);
-      BroadcastNextMarketWatchQuotes(3);
+      BroadcastNextMarketWatchQuotes(5);
    }
 }
 
@@ -465,6 +479,47 @@ string GetClosedOrdersHistoryJson()
 }
 
 //+------------------------------------------------------------------+
+//| SERIALIZAR ÚLTIMOS CANDLES M1 DO ATIVO (REFERÊNCIA BID / UTC)    |
+//+------------------------------------------------------------------+
+string GetRecentM1CandlesJson(int maxBars = 30)
+{
+   MqlRates rates[];
+   ArraySetAsSeries(rates, true);
+   int copied = CopyRates(_Symbol, PERIOD_M1, 0, maxBars, rates);
+   if(copied <= 0) return "[]";
+   double curBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   string json = "[";
+   int written = 0;
+   for(int i = copied - 1; i >= 0; i--)
+   {
+      datetime tUtc = ServerTimeToUtc(rates[i].time);
+      double o = rates[i].open;
+      double h = rates[i].high;
+      double l = rates[i].low;
+      double c = (i == 0 && curBid > 0) ? curBid : rates[i].close;
+      if(i == 0 && curBid > 0)
+      {
+         if(curBid > h) h = curBid;
+         if(curBid < l) l = curBid;
+      }
+      if(o <= 0 || c <= 0) continue;
+      if(written > 0) json += ",";
+      json += StringFormat(
+         "{\"timestamp\":\"%s\",\"open\":%s,\"high\":%s,\"low\":%s,\"close\":%s,\"volume\":%I64u}",
+         FormatIsoTimestamp(tUtc),
+         DoubleToString(o, _Digits),
+         DoubleToString(h, _Digits),
+         DoubleToString(l, _Digits),
+         DoubleToString(c, _Digits),
+         rates[i].tick_volume
+      );
+      written++;
+   }
+   json += "]";
+   return json;
+}
+
+//+------------------------------------------------------------------+
 //| SINCRONIZAR ESTADO COMPLETO DA CONTA COM O GATEWAY (/MARKET_DATA)|
 //+------------------------------------------------------------------+
 void SyncAccountStateToGateway(bool forceAccountSpecific = false)
@@ -484,23 +539,24 @@ void SyncAccountStateToGateway(bool forceAccountSpecific = false)
    string posJson = GetOpenPositionsJson();
    string histJson = GetClosedOrdersHistoryJson();
    string quotesJson = GetMarketWatchQuotesJson();
+   string candlesJson = GetRecentM1CandlesJson(30);
    string nowIso = FormatIsoTimestamp(TimeGMT());
 
    string syncAllPayload = StringFormat(
-      "{\"instance_id\":\"mt4_sync_all\",\"account\":\"%s\",\"platform\":\"mt5\",\"symbol\":\"%s\",\"bid\":%s,\"ask\":%s,\"price\":%s,\"balance\":%.2f,\"equity\":%.2f,\"currency\":\"%s\",\"broker\":\"%s\",\"positions\":%s,\"history\":%s,\"quotes\":%s,\"updated_at\":\"%s\"}",
+      "{\"instance_id\":\"mt4_sync_all\",\"account\":\"%s\",\"platform\":\"mt5\",\"symbol\":\"%s\",\"bid\":%s,\"ask\":%s,\"price\":%s,\"balance\":%.2f,\"equity\":%.2f,\"currency\":\"%s\",\"broker\":\"%s\",\"positions\":%s,\"history\":%s,\"quotes\":%s,\"candles\":%s,\"updated_at\":\"%s\"}",
       accStr, EscapeJsonString(_Symbol),
       DoubleToString(curBid, _Digits), DoubleToString(curAsk, _Digits), DoubleToString(curBid, _Digits),
-      accBal, accEq, accCurr, brokerSafe, posJson, histJson, quotesJson, nowIso
+      accBal, accEq, accCurr, brokerSafe, posJson, histJson, quotesJson, candlesJson, nowIso
    );
    SendHttpPostJson("/market_data", syncAllPayload, 350);
 
    if(forceAccountSpecific)
    {
       string syncAccPayload = StringFormat(
-         "{\"instance_id\":\"mt4_sync_%s\",\"account\":\"%s\",\"platform\":\"mt5\",\"symbol\":\"%s\",\"bid\":%s,\"ask\":%s,\"price\":%s,\"balance\":%.2f,\"equity\":%.2f,\"currency\":\"%s\",\"broker\":\"%s\",\"positions\":%s,\"history\":%s,\"quotes\":%s,\"updated_at\":\"%s\"}",
+         "{\"instance_id\":\"mt4_sync_%s\",\"account\":\"%s\",\"platform\":\"mt5\",\"symbol\":\"%s\",\"bid\":%s,\"ask\":%s,\"price\":%s,\"balance\":%.2f,\"equity\":%.2f,\"currency\":\"%s\",\"broker\":\"%s\",\"positions\":%s,\"history\":%s,\"quotes\":%s,\"candles\":%s,\"updated_at\":\"%s\"}",
          accStr, accStr, EscapeJsonString(_Symbol),
          DoubleToString(curBid, _Digits), DoubleToString(curAsk, _Digits), DoubleToString(curBid, _Digits),
-         accBal, accEq, accCurr, brokerSafe, posJson, histJson, quotesJson, nowIso
+         accBal, accEq, accCurr, brokerSafe, posJson, histJson, quotesJson, candlesJson, nowIso
       );
       SendHttpPostJson("/market_data", syncAccPayload, 350);
    }

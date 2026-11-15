@@ -188,7 +188,8 @@ export const TradeDock: React.FC = () => {
       return Boolean((r.id && r.id.startsWith('mt_')) || (r as any).ticket || (r as any).is_mt_real);
     }).map((r: any) => {
       const entry = Number(r.entry_price || 0);
-      const contracts = Number(r.contrato || r.quantity || 1);
+      const rawContracts = Number(r.contrato ?? r.quantity ?? 1);
+      const contracts = (!isNaN(rawContracts) && rawContracts > 0) ? rawContracts : 1;
       const acc = accounts?.find((a: any) => a.id === r.account_id);
 
       let matchedPanel = panels?.find((p: any) => p.id === r.panel_id || p.instance_id === r.instance_id);
@@ -204,10 +205,21 @@ export const TradeDock: React.FC = () => {
         curPrice = Number(marketData?.price || 0);
       }
 
-      const brokerProfit = r.pnl_liquido !== undefined ? Number(r.pnl_liquido) : undefined;
+      const brokerProfit = r.pnl_liquido !== undefined && !isNaN(Number(r.pnl_liquido)) ? Number(r.pnl_liquido) : undefined;
       const pts = (curPrice > 0 && entry > 0) ? (r.side === 'COMPRA' ? (curPrice - entry) : (entry - curPrice)) : 0;
       const panelSettings = matchedPanel ? allSettings?.[matchedPanel.id] : settings;
       const pointVal = resolvePanelPointValue(matchedPanel, panelSettings || settings);
+      const syncRefPrice = Number((r as any)._mt_sync_price || 0);
+
+      let unrealizedPnl = pts * contracts * pointVal;
+      if (brokerProfit !== undefined) {
+        if (curPrice > 0 && syncRefPrice > 0 && Math.abs(curPrice - syncRefPrice) > 0.00001) {
+          const tickDeltaPts = r.side === 'COMPRA' ? (curPrice - syncRefPrice) : (syncRefPrice - curPrice);
+          unrealizedPnl = brokerProfit + (tickDeltaPts * contracts * pointVal);
+        } else if (Math.abs(brokerProfit) > 0.0001 || Math.abs(pts) < 0.00001) {
+          unrealizedPnl = brokerProfit;
+        }
+      }
 
       return {
         ...r,
@@ -215,7 +227,7 @@ export const TradeDock: React.FC = () => {
         account_name: acc?.account_name || `MT4 #${(r as any).ticket || r.account_id}`,
         current_price: curPrice > 0 ? curPrice : undefined,
         unrealized_points: pts,
-        unrealized_pnl: brokerProfit !== undefined ? brokerProfit : (pts * contracts * pointVal)
+        unrealized_pnl: unrealizedPnl
       };
     });
 

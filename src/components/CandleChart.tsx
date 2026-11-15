@@ -2808,7 +2808,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         candleSeriesRef.current.applyOptions({ lastValueVisible: false });
       } catch (_) {}
 
-      // 1. Linha de ASK (Vermelho tracejado, estendendo-se horizontalmente por todo o gráfico)
+      // 1. Linha de ASK / Venda (Vermelho tracejado, estendendo-se horizontalmente por todo o gráfico)
       if (!askPriceLineRef.current) {
         try {
           askPriceLineRef.current = candleSeriesRef.current.createPriceLine({
@@ -2823,16 +2823,16 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         } catch (_) {}
       } else {
         try {
-          askPriceLineRef.current.applyOptions({ price: askVal, lineVisible: true });
+          askPriceLineRef.current.applyOptions({ price: askVal, color: '#f43f5e', lineVisible: true });
         } catch (_) {}
       }
 
-      // 2. Linha de BID (Azul sólido contínuo, padrão MT4/NT8)
+      // 2. Linha de BID / Compra / Referência do Candle no MT4-MT5 (Verde sólido contínuo)
       if (!bidPriceLineRef.current) {
         try {
           bidPriceLineRef.current = candleSeriesRef.current.createPriceLine({
             price: bidVal,
-            color: '#38bdf8',
+            color: '#10b981',
             lineWidth: 1,
             lineStyle: 0, // Solid
             lineVisible: true,
@@ -2842,7 +2842,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         } catch (_) {}
       } else {
         try {
-          bidPriceLineRef.current.applyOptions({ price: bidVal, lineVisible: true });
+          bidPriceLineRef.current.applyOptions({ price: bidVal, color: '#10b981', lineVisible: true });
         } catch (_) {}
       }
     } else {
