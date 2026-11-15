@@ -2426,11 +2426,15 @@ export async function insertStrategyReportSupabase(
 // ─────────────────────────────────────────────────────────────────────────────
 export function isNinjaExecutionAccount(acc: any): boolean {
   if (!acc) return false;
-  // 1. Flag explícita de envio local
-  if (acc.send_localhost === true) return true;
-
   const platform = (acc.platform || '').toLowerCase();
-  if (platform === 'nt8' || platform === 'mt5') return true;
+  // Contas MT4, MT5, cTrader, Binance ou Axion NUNCA são tratadas como NinjaTrader
+  if (['mt4', 'mt5', 'ctrader', 'binance', 'axion'].includes(platform)) {
+    return false;
+  }
+  // 1. Flag explícita de envio local APENAS para contas NT8 ou sem plataforma definida
+  if (acc.send_localhost === true && (platform === 'nt8' || !platform)) return true;
+
+  if (platform === 'nt8') return true;
 
   // 2. Auto-detecção inteligente por padrão de nome de conta NinjaTrader
   const name = (acc.account_name || acc.name || '').trim().toUpperCase();
@@ -2446,8 +2450,6 @@ export function isNinjaExecutionAccount(acc: any): boolean {
     return true;
   }
 
-  // Contas axion puras sem flag local
-  if (platform === 'axion' && !acc.send_localhost) return false;
   return false;
 }
 

@@ -89,9 +89,13 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   const syncedNinjaAccountsCount = panelNinjaAccounts.length;
 
   // Contas operacionais disponíveis na Boleta: Demo Axion, MT4, MT5, Binance e cTrader (exceto Contas Execução NT8)
-  const boletaAccounts = (accounts || []).filter((acc: any) =>
-    acc.platform !== 'nt8' && !isNinjaExecutionAccount(acc)
-  );
+  const boletaAccounts = (accounts || []).filter((acc: any) => {
+    const plat = (acc.platform || '').toLowerCase();
+    // Se for explicitamente MT4, MT5, cTrader, Binance ou Axion, SEMPRE é permitida na Boleta!
+    if (['mt4', 'mt5', 'ctrader', 'binance', 'axion'].includes(plat)) return true;
+    if (plat === 'nt8' || isNinjaExecutionAccount(acc)) return false;
+    return true;
+  });
 
   // Garante que a boleta selecione sempre uma Conta Operacional válida
   useEffect(() => {

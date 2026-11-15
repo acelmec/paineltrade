@@ -75,7 +75,7 @@ export const AccountsDashboard: React.FC = () => {
   }, [planDetails]);
   
   const demoAccounts = accounts.filter(a => a.platform === 'axion' || a.id?.startsWith('acc_sim_') || a.account_type === 'internal_demo' || (!a.send_localhost && a.platform !== 'nt8'));
-  const syncAccounts = accounts.filter(a => a.platform === 'nt8' || a.send_localhost === true);
+  const syncAccounts = accounts.filter(a => a.platform === 'nt8' || (a.send_localhost === true && !['mt4', 'mt5', 'ctrader', 'binance', 'axion'].includes(a.platform || '')));
   const displayAccounts = isCopyOnly ? syncAccounts : accounts;
 
   const demoAccountsCount = demoAccounts.length;

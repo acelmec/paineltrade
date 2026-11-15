@@ -194,7 +194,7 @@ export const ConnectionsHub: React.FC<ConnectionsHubProps> = ({ onSelectConnecti
         (a.account_name.includes(acc.account_number) || (a as any).account_number === acc.account_number)
       );
 
-      const isLocalHostPlatform = conn.platform === 'nt8' || conn.platform === 'mt4' || conn.platform === 'mt5' || conn.platform === 'ctrader';
+      const isLocalHostPlatform = conn.platform === 'nt8';
 
       if (existing) {
         // Atualiza o saldo real da conta existente!
@@ -264,7 +264,7 @@ export const ConnectionsHub: React.FC<ConnectionsHubProps> = ({ onSelectConnecti
     switch (platform) {
       case 'mt4': return { href: '/AxionGatewayEA.mq4', label: '📥 Baixar Robô MT4 (.mq4)' };
       case 'mt5': return { href: '/AxionGatewayEA.mq5', label: '📥 Baixar Robô MT5 (.mq5)' };
-      case 'ctrader': return { href: '/AxionGatewaycBot.cs', label: '📥 Baixar cBot (.cs)' };
+      case 'ctrader': return null;
       case 'nt8': return { href: '/AxionGatewayAddOn.zip', label: '📥 Baixar Add-on NT8 (.zip)' };
       default: return null;
     }
@@ -641,8 +641,8 @@ export const ConnectionsHub: React.FC<ConnectionsHubProps> = ({ onSelectConnecti
                 />
               </div>
 
-              {/* Token de Pareamento (se aplicável) */}
-              {selectedPresetType !== 'binance_api' && (
+              {/* Token de Pareamento (se aplicável para MT4/MT5/NT8) */}
+              {selectedPresetType !== 'binance_api' && selectedPresetType !== 'ctrader_vps' && (
                 <div>
                   <label className="text-xs font-bold text-slate-300 block mb-1">
                     Token de Pareamento de Nuvem (Pairing Token):
@@ -657,6 +657,32 @@ export const ConnectionsHub: React.FC<ConnectionsHubProps> = ({ onSelectConnecti
                   <p className="text-[10px] text-slate-500 mt-0.5">
                     Informe o mesmo token configurado no parâmetro <code>InpPairingToken</code> do robô.
                   </p>
+                </div>
+              )}
+
+              {/* cTrader Open API Keys (se aplicável) */}
+              {selectedPresetType === 'ctrader_vps' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">Account ID cTrader:</label>
+                    <input
+                      type="text"
+                      value={formApiKey}
+                      onChange={e => setFormApiKey(e.target.value)}
+                      placeholder="Ex: 1234567"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">Access Token Spotware:</label>
+                    <input
+                      type="password"
+                      value={formApiSecret}
+                      onChange={e => setFormApiSecret(e.target.value)}
+                      placeholder="Token Open API Spotware"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono"
+                    />
+                  </div>
                 </div>
               )}
 

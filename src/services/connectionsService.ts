@@ -5,6 +5,7 @@
 
 import { supabase } from '../supabaseClient';
 import { getAuthUser } from './db';
+import { fetchCTraderAccount } from './ctraderService';
 
 export interface DetectedAccountDetail {
   id: string;
@@ -86,11 +87,11 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
   {
     type: 'ctrader_vps',
     platform: 'ctrader',
-    name: 'Conexão cTrader (VPS - Porta 80)',
-    host_url: 'http://144.126.141.254',
-    pairing_token: 'vps_ctrader',
+    name: 'Conexão cTrader (Spotware Open API)',
+    host_url: 'https://api.spotware.com',
+    pairing_token: '',
     icon: '🟪',
-    description: 'Comunicação oficial na VPS porta 80 com o cBot AxionGatewaycBot no cTrader Automate.'
+    description: 'Integração 100% direta com a cTrader Cloud via Spotware Open API (sem necessidade de robô ou VPS).'
   },
   {
     type: 'binance_api',
@@ -376,7 +377,49 @@ export async function testConnectionPing(conn: PlatformConnection): Promise<{
     }
   }
 
-  // MetaTrader 4, MetaTrader 5 ou cTrader
+  // 2.5 cTrader Spotware Open API (Nuvem Direta)
+  if (conn.platform === 'ctrader') {
+    const accountId = (conn.api_key || conn.pairing_token || '').trim();
+    const token = (conn.api_secret || '').trim();
+
+    if (!token || !accountId) {
+      return {
+        online: false,
+        latencyMs: 0,
+        message: 'Preencha o Account ID e o Access Token da Spotware cTrader Open API'
+      };
+    }
+
+    try {
+      const cTraderInfo = await fetchCTraderAccount(token, accountId);
+      const latency = Date.now() - start;
+      if (cTraderInfo) {
+        const detectedDetail: DetectedAccountDetail[] = [{
+          id: `ctrader_${cTraderInfo.accountId}`,
+          account_number: String(cTraderInfo.accountId),
+          name: `cTrader #${cTraderInfo.accountId}`,
+          balance: Number(cTraderInfo.balance || 0),
+          equity: Number(cTraderInfo.equity || cTraderInfo.balance || 0),
+          broker: cTraderInfo.brokerName || 'Spotware cTrader',
+          currency: cTraderInfo.currency || 'USD',
+          platform: 'ctrader'
+        }];
+
+        return {
+          online: true,
+          latencyMs: latency,
+          message: `cTrader Open API Conectada • Conta #${cTraderInfo.accountId} • Saldo: ${cTraderInfo.currency} ${Number(cTraderInfo.balance || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${latency}ms)`,
+          detectedAccounts: [String(cTraderInfo.accountId)],
+          detectedAccountsDetail: detectedDetail
+        };
+      }
+      return { online: false, latencyMs: latency, message: 'cTrader API: Falha ao validar Token ou Account ID' };
+    } catch (err: any) {
+      return { online: false, latencyMs: 0, message: `Erro cTrader API: ${err.message}` };
+    }
+  }
+
+  // MetaTrader 4 ou MetaTrader 5 (Gateway VPS)
   try {
     const target = (conn.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
     const res = await fetch(`${target}/status`, { signal: AbortSignal.timeout(3500) });

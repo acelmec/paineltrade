@@ -105,6 +105,7 @@ import {
 } from '../services/ninjaGateway';
 import { fetchStreamerMarketData, isStreamerWsConnected } from '../services/vortexStreamer';
 import { getLocalPlatformConnections } from '../services/connectionsService';
+import { executeCTraderOrder } from '../services/ctraderService';
 import { PRESET_ATM_STRATEGIES, resolveAlgorithmAtm, type ATMStrategy, type ATMBracket } from '../utils/atmRegistry';
 
 function extractPriceActionFromCandles(candles: Candle[]) {
@@ -10424,6 +10425,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         } catch (e: any) {
           console.warn('[MT-ORDER] Erro ao enviar ordem para MT4/MT5:', e.message);
+        }
+      }
+
+      // ⚡ DISPARO INSTANTÂNEO DE ORDENS CTRADER OPEN API (NUVEM DIRETA)
+      const isCTraderAcc = localAcc?.platform === 'ctrader' && !payload.already_dispatched && finalStatus === 'Em Andamento';
+      if (isCTraderAcc && localAcc) {
+        payload.already_dispatched = true;
+        try {
+          const cConn = getLocalPlatformConnections().find(c => c.platform === 'ctrader' && c.is_active);
+          const accountId = String(localAcc.api_key || cConn?.api_key || cConn?.pairing_token || '').trim();
+          const token = String(localAcc.api_secret || cConn?.api_secret || '').trim();
+
+          if (accountId && token) {
+            executeCTraderOrder(token, accountId, {
+              symbol: resolvedSymbol,
+              side: payload.side === 'COMPRA' || payload.side === 'BUY' ? 'BUY' : 'SELL',
+              type: 'MARKET',
+              lots: Number(payload.contrato || (payload as any).quantity || 0.01),
+              slPoints: payload.stop_loss ? Math.abs(Number(payload.entry_price || 0) - Number(payload.stop_loss)) : undefined,
+              tpPoints: payload.take_profit ? Math.abs(Number(payload.take_profit) - Number(payload.entry_price || 0)) : undefined
+            }).then(res => {
+              console.log(`🚀 [CTRADER-ORDER] Ordem cTrader despachada:`, res);
+            }).catch(err => {
+              console.warn(`⚠️ [CTRADER-ORDER] Falha ao enviar ordem cTrader:`, err.message);
+            });
+          }
+        } catch (e: any) {
+          console.warn('[CTRADER-ORDER] Erro:', e.message);
         }
       }
 
