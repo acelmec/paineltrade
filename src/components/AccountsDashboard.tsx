@@ -362,7 +362,8 @@ export const AccountsDashboard: React.FC = () => {
     if (formPlatform === 'binance' && formApiKey.trim() && formApiSecret.trim()) {
       try {
         const { fetchBinanceAccount } = await import('../services/binanceService');
-        const bInfo = await fetchBinanceAccount(formApiKey.trim(), formApiSecret.trim(), false);
+        const isFutures = (formConnectionHost && (formConnectionHost.includes('future') || formConnectionHost.includes('fapi'))) || accountNameTrimmed.toLowerCase().includes('futuro');
+        const bInfo = await fetchBinanceAccount(formApiKey.trim(), formApiSecret.trim(), Boolean(isFutures), formConnectionHost);
         if (bInfo && bInfo.totalBalanceUsd !== undefined) {
           const realB = bInfo.totalBalanceUsd;
           effectiveInitialBalance = realB;
@@ -601,7 +602,8 @@ export const AccountsDashboard: React.FC = () => {
     addLog('SISTEMA', `🔄 Consultando saldo real na Binance para a conta "${acc.account_name}"...`, 'sistema');
     try {
       const { fetchBinanceAccount } = await import('../services/binanceService');
-      const info = await fetchBinanceAccount(acc.api_key, acc.api_secret, false);
+      const isFutures = (acc.connection_host && (acc.connection_host.includes('future') || acc.connection_host.includes('fapi'))) || acc.account_name.toLowerCase().includes('futuro');
+      const info = await fetchBinanceAccount(acc.api_key, acc.api_secret, Boolean(isFutures), acc.connection_host);
       if (info && info.totalBalanceUsd !== undefined) {
         const realBal = info.totalBalanceUsd;
         await updateAccountSupabase(acc.id, {
@@ -2073,6 +2075,19 @@ export const AccountsDashboard: React.FC = () => {
                         <span>🟨</span> Credenciais Binance Cloud API
                       </span>
                       <div className="space-y-2 text-xs">
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-0.5">Tipo de Ambiente / Servidor</label>
+                          <select
+                            value={formConnectionHost || 'https://testnet.binancefuture.com'}
+                            onChange={(e) => setFormConnectionHost(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs"
+                          >
+                            <option value="https://testnet.binancefuture.com">🟡 Binance Futuros Testnet (Demo)</option>
+                            <option value="https://testnet.binance.vision">🟡 Binance Spot Testnet (Demo)</option>
+                            <option value="https://fapi.binance.com">🟡 Binance Futuros USDT-M (Real)</option>
+                            <option value="https://api.binance.com">🟡 Binance Spot (Real)</option>
+                          </select>
+                        </div>
                         <div>
                           <label className="text-[10px] text-slate-400 block mb-0.5">API Key</label>
                           <input

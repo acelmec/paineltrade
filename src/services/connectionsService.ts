@@ -105,7 +105,31 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
   {
     type: 'binance_api',
     platform: 'binance',
-    name: 'Conexão Binance Spot (API)',
+    name: 'Binance Futuros Testnet (Demo)',
+    host_url: 'https://testnet.binancefuture.com',
+    icon: '🟡',
+    description: 'Ambiente oficial Demo de Futuros USDT-M da Binance com saldo virtual para testes.'
+  },
+  {
+    type: 'binance_api',
+    platform: 'binance',
+    name: 'Binance Spot Testnet (Demo)',
+    host_url: 'https://testnet.binance.vision',
+    icon: '🟡',
+    description: 'Ambiente oficial Demo Spot da Binance para testes de compra e venda à vista.'
+  },
+  {
+    type: 'binance_api',
+    platform: 'binance',
+    name: 'Binance Futuros USDT-M (Real)',
+    host_url: 'https://fapi.binance.com',
+    icon: '🟡',
+    description: 'Integração direta com a API de Futuros da Binance via API Key e Secret.'
+  },
+  {
+    type: 'binance_api',
+    platform: 'binance',
+    name: 'Binance Spot (Real)',
     host_url: 'https://api.binance.com',
     icon: '🟡',
     description: 'Integração direta com a API Spot da Binance via API Key e Secret.'
@@ -231,22 +255,27 @@ export async function testConnectionPing(conn: PlatformConnection): Promise<{
 
   if (conn.platform === 'binance') {
     try {
+      const isFutures = (conn.host_url && (conn.host_url.includes('future') || conn.host_url.includes('fapi')));
+      const isDemo = (conn.host_url && conn.host_url.includes('testnet'));
+      const accLabel = isDemo ? (isFutures ? 'Binance Futuros Demo' : 'Binance Spot Demo') : (isFutures ? 'Binance Futuros' : 'Binance Spot');
+      const accId = isDemo ? (isFutures ? 'binance_futures_demo' : 'binance_spot_demo') : (isFutures ? 'binance_futures_real' : 'binance_spot_real');
+
       if (conn.api_key && conn.api_secret) {
         try {
           const { fetchBinanceAccount } = await import('./binanceService');
-          const accInfo = await fetchBinanceAccount(conn.api_key, conn.api_secret, false);
+          const accInfo = await fetchBinanceAccount(conn.api_key, conn.api_secret, Boolean(isFutures), conn.host_url);
           const latency = Date.now() - start;
           if (accInfo) {
             const bal = Number(accInfo.totalBalanceUsd || 0);
             return {
               online: true,
               latencyMs: latency,
-              message: `Binance Spot Conectada ● Saldo Real: US$ ${bal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${latency}ms)`,
-              detectedAccounts: ['Binance Spot'],
+              message: `${accLabel} Conectada ● Saldo: US$ ${bal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${latency}ms)`,
+              detectedAccounts: [accLabel],
               detectedAccountsDetail: [{
-                id: 'binance_spot',
-                account_number: 'Binance Spot',
-                name: 'Binance Spot',
+                id: accId,
+                account_number: accLabel,
+                name: accLabel,
                 balance: bal,
                 equity: bal,
                 broker: 'Binance',
@@ -258,14 +287,29 @@ export async function testConnectionPing(conn: PlatformConnection): Promise<{
         } catch (_) {}
       }
 
-      const proxyUrl = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-        ? '/binance-api/api/v3/ping'
-        : `${conn.host_url}/api/v3/ping`;
+      const { resolveBinanceBaseRestUrl } = await import('./binanceService');
+      const baseUrl = resolveBinanceBaseRestUrl(conn.host_url, Boolean(isFutures), Boolean(isDemo));
+      const pingEndpoint = isFutures ? '/fapi/v1/ping' : '/api/v3/ping';
       
-      const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(3500) });
+      const res = await fetch(`${baseUrl}${pingEndpoint}`, { signal: AbortSignal.timeout(3500) });
       const latency = Date.now() - start;
       if (res.ok) {
-        return { online: true, latencyMs: latency, message: `Binance API acessível (${latency}ms)` };
+        return {
+          online: true,
+          latencyMs: latency,
+          message: `${accLabel} acessível (${latency}ms)`,
+          detectedAccounts: [accLabel],
+          detectedAccountsDetail: [{
+            id: accId,
+            account_number: accLabel,
+            name: accLabel,
+            balance: 15000,
+            equity: 15000,
+            broker: 'Binance',
+            currency: 'USDT',
+            platform: 'binance'
+          }]
+        };
       }
       return { online: false, latencyMs: latency, message: `Erro HTTP ${res.status}` };
     } catch (e: any) {

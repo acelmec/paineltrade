@@ -6,15 +6,47 @@
 import type { Candle } from './db';
 import { cleanAndSanitizeCandles } from './db';
 
-const BINANCE_SPOT_REST_URL = 'https://api.binance.com';
-const BINANCE_FUTURES_REST_URL = 'https://fapi.binance.com';
+export const BINANCE_SPOT_REST_URL = 'https://api.binance.com';
+export const BINANCE_FUTURES_REST_URL = 'https://fapi.binance.com';
+export const BINANCE_FUTURES_TESTNET_URL = 'https://testnet.binancefuture.com';
+export const BINANCE_SPOT_TESTNET_URL = 'https://testnet.binance.vision';
 
-export function getBinanceSpotRestUrl(): string {
+export function resolveBinanceBaseRestUrl(hostUrl?: string, isFutures = false, isDemo = false): string {
+  const normHost = (hostUrl || '').toLowerCase();
+
+  // 1. Futuros Testnet (Demo)
+  if (isDemo || normHost.includes('testnet.binancefuture.com') || (isFutures && normHost.includes('testnet'))) {
+    if (typeof window !== 'undefined' && window.location) {
+      return `${window.location.origin}/binance-future-testnet`;
+    }
+    return BINANCE_FUTURES_TESTNET_URL;
+  }
+
+  // 2. Spot Testnet (Demo)
+  if (normHost.includes('testnet.binance.vision') || normHost.includes('vision') || (isDemo && !isFutures)) {
+    if (typeof window !== 'undefined' && window.location) {
+      return `${window.location.origin}/binance-spot-testnet`;
+    }
+    return BINANCE_SPOT_TESTNET_URL;
+  }
+
+  // 3. Futuros Real (fapi.binance.com)
+  if (isFutures || normHost.includes('fapi.binance.com')) {
+    if (typeof window !== 'undefined' && window.location) {
+      return `${window.location.origin}/binance-fapi`;
+    }
+    return BINANCE_FUTURES_REST_URL;
+  }
+
+  // 4. Spot Real (api.binance.com)
   if (typeof window !== 'undefined' && window.location) {
-    // No navegador (Vite dev localhost:5173 ou produção NGINX), usa o proxy /binance-api para eliminar bloqueios de CORS
     return `${window.location.origin}/binance-api`;
   }
   return BINANCE_SPOT_REST_URL;
+}
+
+export function getBinanceSpotRestUrl(): string {
+  return resolveBinanceBaseRestUrl(undefined, false, false);
 }
 
 
@@ -41,6 +73,7 @@ export interface BinanceOrderParams {
   stopPrice?: number;
   timeInForce?: 'GTC' | 'IOC' | 'FOK';
   isFutures?: boolean;
+  hostUrl?: string;
 }
 
 // =========================================================================
@@ -73,12 +106,13 @@ async function generateHmacSignature(queryString: string, apiSecret: string): Pr
 let binanceTimeOffsetMs = 0;
 let lastTimeSyncTimestamp = 0;
 
-export async function getBinanceServerTime(isFutures = false): Promise<number> {
+export async function getBinanceServerTime(isFutures = false, hostUrl?: string): Promise<number> {
   const now = Date.now();
   if (now - lastTimeSyncTimestamp > 60000 || lastTimeSyncTimestamp === 0) {
     try {
-      const baseUrl = isFutures ? BINANCE_FUTURES_REST_URL : getBinanceSpotRestUrl();
-      const endpoint = isFutures ? '/fapi/v1/time' : '/api/v3/time';
+      const isExplicitFutures = isFutures || (hostUrl && (hostUrl.includes('future') || hostUrl.includes('fapi')));
+      const baseUrl = resolveBinanceBaseRestUrl(hostUrl, Boolean(isExplicitFutures));
+      const endpoint = isExplicitFutures ? '/fapi/v1/time' : '/api/v3/time';
       const timeRes = await fetch(`${baseUrl}${endpoint}`).catch(() => fetch(`${BINANCE_SPOT_REST_URL}/api/v3/time`));
       if (timeRes && timeRes.ok) {
         const timeData = await timeRes.json();
@@ -98,17 +132,19 @@ export async function getBinanceServerTime(isFutures = false): Promise<number> {
 export async function fetchBinanceAccount(
   apiKey: string,
   apiSecret: string,
-  isFutures = false
+  isFutures = false,
+  hostUrl?: string
 ): Promise<BinanceAccountInfo | null> {
   if (!apiKey || !apiSecret) return null;
 
   try {
-    const timestamp = await getBinanceServerTime(isFutures);
+    const isExplicitFutures = isFutures || (hostUrl && (hostUrl.includes('future') || hostUrl.includes('fapi')));
+    const timestamp = await getBinanceServerTime(Boolean(isExplicitFutures), hostUrl);
     const queryString = `timestamp=${timestamp}&recvWindow=60000`;
     const signature = await generateHmacSignature(queryString, apiSecret);
 
-    const baseUrl = isFutures ? BINANCE_FUTURES_REST_URL : getBinanceSpotRestUrl();
-    const endpoint = isFutures ? '/fapi/v2/account' : '/api/v3/account';
+    const baseUrl = resolveBinanceBaseRestUrl(hostUrl, Boolean(isExplicitFutures));
+    const endpoint = isExplicitFutures ? '/fapi/v2/account' : '/api/v3/account';
     const fullUrl = `${baseUrl}${endpoint}?${queryString}&signature=${signature}`;
 
     let res: Response;
@@ -121,17 +157,14 @@ export async function fetchBinanceAccount(
         }
       });
     } catch (proxyErr) {
-      if (!isFutures && baseUrl !== BINANCE_SPOT_REST_URL) {
-        res = await fetch(`${BINANCE_SPOT_REST_URL}${endpoint}?${queryString}&signature=${signature}`, {
-          method: 'GET',
-          headers: {
-            'X-MBX-APIKEY': apiKey.trim(),
-            'Content-Type': 'application/json'
-          }
-        });
-      } else {
-        throw proxyErr;
-      }
+      const fallbackUrl = isExplicitFutures ? BINANCE_FUTURES_TESTNET_URL : BINANCE_SPOT_REST_URL;
+      res = await fetch(`${fallbackUrl}${endpoint}?${queryString}&signature=${signature}`, {
+        method: 'GET',
+        headers: {
+          'X-MBX-APIKEY': apiKey.trim(),
+          'Content-Type': 'application/json'
+        }
+      });
     }
 
     if (!res.ok) {
@@ -422,7 +455,8 @@ export async function executeBinanceOrder(
   }
 
   try {
-    const timestamp = await getBinanceServerTime(params.isFutures);
+    const isExplicitFutures = params.isFutures || (params.hostUrl && (params.hostUrl.includes('future') || params.hostUrl.includes('fapi')));
+    const timestamp = await getBinanceServerTime(Boolean(isExplicitFutures), params.hostUrl);
     const cleanSym = params.symbol.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     
     let queryObj: Record<string, any> = {
@@ -447,8 +481,8 @@ export async function executeBinanceOrder(
       .join('&');
 
     const signature = await generateHmacSignature(queryString, apiSecret);
-    const baseUrl = params.isFutures ? BINANCE_FUTURES_REST_URL : getBinanceSpotRestUrl();
-    const endpoint = params.isFutures ? '/fapi/v1/order' : '/api/v3/order';
+    const baseUrl = resolveBinanceBaseRestUrl(params.hostUrl, Boolean(isExplicitFutures));
+    const endpoint = isExplicitFutures ? '/fapi/v1/order' : '/api/v3/order';
     const fullUrl = `${baseUrl}${endpoint}?${queryString}&signature=${signature}`;
 
     let res: Response;
@@ -461,17 +495,14 @@ export async function executeBinanceOrder(
         }
       });
     } catch (proxyErr) {
-      if (!params.isFutures && baseUrl !== BINANCE_SPOT_REST_URL) {
-        res = await fetch(`${BINANCE_SPOT_REST_URL}${endpoint}?${queryString}&signature=${signature}`, {
-          method: 'POST',
-          headers: {
-            'X-MBX-APIKEY': apiKey.trim(),
-            'Content-Type': 'application/json'
-          }
-        });
-      } else {
-        throw proxyErr;
-      }
+      const fallbackUrl = isExplicitFutures ? BINANCE_FUTURES_TESTNET_URL : BINANCE_SPOT_REST_URL;
+      res = await fetch(`${fallbackUrl}${endpoint}?${queryString}&signature=${signature}`, {
+        method: 'POST',
+        headers: {
+          'X-MBX-APIKEY': apiKey.trim(),
+          'Content-Type': 'application/json'
+        }
+      });
     }
 
     const data = await res.json();

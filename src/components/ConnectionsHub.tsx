@@ -203,6 +203,7 @@ export const ConnectionsHub: React.FC<ConnectionsHubProps> = ({ onSelectConnecti
           initial_balance: acc.balance > 0 ? acc.balance : existing.initial_balance,
           api_key: conn.api_key || (existing as any).api_key,
           api_secret: conn.api_secret || (existing as any).api_secret,
+          connection_host: conn.host_url || (existing as any).connection_host,
           send_localhost: isLocalHostPlatform
         });
         setFeedback(`✅ Conta ${acc.name} sincronizada e atualizada com Saldo Real de ${acc.currency} ${acc.balance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}!`);
@@ -225,6 +226,7 @@ export const ConnectionsHub: React.FC<ConnectionsHubProps> = ({ onSelectConnecti
           send_localhost: isLocalHostPlatform,
           api_key: conn.api_key,
           api_secret: conn.api_secret,
+          connection_host: conn.host_url,
           manual_trading_enabled: true
         });
         setFeedback(`✅ Conta real ${acc.name} (${acc.broker}) importada no painel com Saldo de ${acc.currency} ${initialBal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}!`);

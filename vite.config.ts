@@ -43,6 +43,24 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/binance-api/, ''),
         secure: true
       },
+      '/binance-fapi': {
+        target: 'https://fapi.binance.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/binance-fapi/, ''),
+        secure: true
+      },
+      '/binance-future-testnet': {
+        target: 'https://testnet.binancefuture.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/binance-future-testnet/, ''),
+        secure: true
+      },
+      '/binance-spot-testnet': {
+        target: 'https://testnet.binance.vision',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/binance-spot-testnet/, ''),
+        secure: true
+      },
       '/api/ml': {
         target: 'http://127.0.0.1:8080',
         changeOrigin: true

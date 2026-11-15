@@ -2369,6 +2369,38 @@ export async function insertStrategyReportSupabase(
         };
         mirrorToLocalServer('/sinal_local', localDispatchPayload);
       }
+    } else if (targetAcc?.platform === 'binance' && !(cleanReport as any).already_dispatched) {
+      // ⚡ DISPARO INSTANTÂNEO BINANCE (Spot / Futuros / Testnet)
+      if (targetAcc.api_key && targetAcc.api_secret) {
+        try {
+          const { executeBinanceOrder } = await import('./binanceService');
+          const isFutures = (targetAcc.connection_host && (targetAcc.connection_host.includes('future') || targetAcc.connection_host.includes('fapi'))) || (targetAcc.account_name || '').toLowerCase().includes('futuro');
+          const bSide = payload.side === 'COMPRA' ? 'BUY' : 'SELL';
+          let bSymbol = String(payload.symbol || 'BTCUSDT').toUpperCase().replace(/[^A-Z0-9]/g, '');
+          if (!bSymbol.endsWith('USDT') && !bSymbol.endsWith('BUSD') && !bSymbol.endsWith('USDC')) {
+            bSymbol = `${bSymbol}USDT`;
+          }
+          const qty = Number(payload.contrato || (payload as any).quantity || 0.001);
+          executeBinanceOrder(targetAcc.api_key, targetAcc.api_secret, {
+            symbol: bSymbol,
+            side: bSide,
+            type: 'MARKET',
+            quantity: qty,
+            isFutures: Boolean(isFutures),
+            hostUrl: targetAcc.connection_host
+          }).then(res => {
+            if (res.success) {
+              console.log(`✅ [Binance Order] Ordem executada com sucesso: ${res.orderId}`);
+            } else {
+              console.warn(`⚠️ [Binance Order] Rejeitada pela Binance: ${res.message}`);
+            }
+          }).catch(err => {
+            console.error(`❌ [Binance Order] Exceção ao enviar ordem:`, err);
+          });
+        } catch (bErr) {
+          console.error('[DB] Erro ao carregar binanceService para ordem:', bErr);
+        }
+      }
     }
 
 
