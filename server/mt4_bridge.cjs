@@ -87,13 +87,23 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 3. COMMANDS: MT4 consulta ordens para executar (GET /commands?account=5518533)
+  // 3. COMMANDS: MT4/MT5 consulta ordens para executar e sincroniza telemetria de conta real
   if (req.method === 'GET' && pathname === '/commands') {
     const accNum = String(query.account || '').trim();
     if (accNum) {
+      const existing = accountsConnected.get(accNum) || {};
       accountsConnected.set(accNum, {
+        ...existing,
+        account_name: query.account_name || existing.account_name || `MT4/MT5 #${accNum}`,
         lastSeen: new Date().toISOString(),
-        symbol: query.symbol || 'ACTIVE'
+        symbol: query.symbol || existing.symbol || 'ACTIVE',
+        balance: query.balance ? Number(query.balance) : (existing.balance || 0),
+        equity: query.equity ? Number(query.equity) : (existing.equity || 0),
+        broker: query.broker || existing.broker || 'MetaTrader Server',
+        currency: query.currency || existing.currency || 'USD',
+        is_demo: query.demo !== undefined ? (String(query.demo) === '1' || String(query.demo) === 'true') : (existing.is_demo ?? true),
+        leverage: query.leverage ? Number(query.leverage) : (existing.leverage || 100),
+        platform: query.platform || existing.platform || 'mt4'
       });
     }
 
@@ -108,6 +118,33 @@ const server = http.createServer((req, res) => {
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({})); // Sem comandos pendentes
+    return;
+  }
+
+  // 3.1 GET /accounts ou /mt4/accounts: Retorna lista de contas reais detectadas para sincronização
+  if (req.method === 'GET' && (pathname === '/accounts' || pathname === '/mt4/accounts')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    const accList = [];
+    for (const [acc, info] of accountsConnected.entries()) {
+      accList.push({
+        id: `mt_${acc}`,
+        account_number: acc,
+        name: info.account_name || `MT #${acc}`,
+        balance: info.balance || 0,
+        equity: info.equity || 0,
+        broker: info.broker || 'MetaTrader Server',
+        currency: info.currency || 'USD',
+        is_demo: info.is_demo ?? true,
+        leverage: info.leverage || 100,
+        platform: info.platform || 'mt4',
+        last_seen: info.lastSeen
+      });
+    }
+    res.end(JSON.stringify({
+      success: true,
+      total: accList.length,
+      accounts: accList
+    }));
     return;
   }
 
