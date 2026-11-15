@@ -42,10 +42,22 @@ export function isCandleInSessionPause(
   timestamp: string | Date | number,
   cycleEndStr = '19:00:00',
   cycleStartStr = '20:00:00',
-  _sym?: string,
+  sym?: string,
   _settings?: any
 ): boolean {
   if (!timestamp) return false;
+
+  // Criptoativos operam 24/7/365 e NUNCA sofrem pausa de mercado
+  if (sym) {
+    const s = String(sym).toUpperCase();
+    if (
+      s.includes('BINANCE') ||
+      /USDT|BUSD|USDC/i.test(s) ||
+      /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK|NEAR|SUI|PEPE|RENDER|FET|TAO|WIF|BONK|FLOKI|OP|ARB|FIL|ATOM)/i.test(s)
+    ) {
+      return false;
+    }
+  }
   const d = parseInputToDate(timestamp);
   if (!d) return false;
   const hours = d.getHours();

@@ -4807,6 +4807,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       pName.includes('ACTIVTRADES') ||
       pName.includes(' - MT4') ||
       pName.includes(' - MT5') ||
+      pName.includes('BINANCE') ||
+      pInst.endsWith('usdt') ||
+      /USDT|BUSD|USDC/i.test(pName) ||
       activePlat === 'mt4' ||
       activePlat === 'mt5' ||
       activePlat === 'binance';
@@ -15852,8 +15855,12 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         cache.lastMarketUpdateAt = Date.now();
 
         // 3. Atualização imediata do candle em formação (<1ms) e do Bid/Ask na UI e no Multi-Chart Grid
-        // No MT4/MT5 o candle é formado pelo menor preço (BID), garantindo que o fechamento da vela atual acompanhe exatamente a linha BID
-        const candleRefPrice = (numBid > 0 && numAsk > 0) ? Math.min(numBid, numAsk) : (numBid > 0 ? numBid : numPrice);
+        // No MT4/MT5 o candle é formado pelo menor preço (BID), garantindo que o fechamento da vela atual acompanhe exatamente a linha BID; na Binance usa o preço negociado (numPrice)
+        const isCryptoMatched = sym.endsWith('USDT') || (matchedPanel.name && (matchedPanel.name.includes('BINANCE') || /USDT|BUSD|USDC/i.test(matchedPanel.name)));
+        const candleRefPrice = isCryptoMatched
+          ? numPrice
+          : ((numBid > 0 && numAsk > 0) ? Math.min(numBid, numAsk) : (numBid > 0 ? numBid : numPrice));
+        const tickTime = detail.timestamp || effectiveUpdatedAt;
         if (!cache.candles || cache.candles.length === 0) {
           const flooredNowIso = new Date(Math.floor(Date.now() / 60000) * 60000).toISOString();
           const firstCandle: Candle = {
@@ -15873,7 +15880,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
             bumpPanelCacheVersion();
           }
         } else {
-          const { updatedCandles, hasChanged } = applyRealtimePriceToCandles(cache.candles, candleRefPrice, effectiveUpdatedAt, matchedPanel);
+          const { updatedCandles, hasChanged } = applyRealtimePriceToCandles(cache.candles, candleRefPrice, tickTime, matchedPanel);
           if (hasChanged) {
             cache.candles = updatedCandles;
           }

@@ -2996,11 +2996,16 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     const cycleEnd = settings?.global_cycle_end || '18:00:00';
     const cycleStart = settings?.global_cycle_start || '19:00:00';
     const sym = activePanel?.symbol || activePanel?.name || settings?.gamma_symbol || instanceId || '';
+    const isCrypto = /USDT|BUSD|USDC/i.test(sym) ||
+      /BINANCE/i.test(sym) ||
+      /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK|NEAR|SUI|PEPE|RENDER|FET|TAO|WIF|BONK|FLOKI|OP|ARB|FIL|ATOM)/i.test(sym) ||
+      (activePanel as any)?.platform === 'binance' ||
+      activeAccount?.platform === 'binance';
     const filtered = (candles || []).filter(c =>
-      c && c.timestamp && !isCandleInSessionPause(c.timestamp, cycleEnd, cycleStart, sym, settings)
+      c && c.timestamp && (isCrypto ? true : !isCandleInSessionPause(c.timestamp, cycleEnd, cycleStart, sym, settings))
     );
     return aggregateCandles(filtered, timeframe);
-  }, [candles, timeframe, settings?.global_cycle_end, settings?.global_cycle_start, settings?.general_prompt_days, activePanel?.symbol, activePanel?.name, settings?.gamma_symbol, instanceId]);
+  }, [candles, timeframe, settings?.global_cycle_end, settings?.global_cycle_start, settings?.general_prompt_days, activePanel?.symbol, activePanel?.name, settings?.gamma_symbol, instanceId, activePanel?.platform, activeAccount?.platform]);
 
   // Algoritmos no Modo INDICADOR (action === 'alert') ativos para a conta/painel atual
   const activeIndicatorStrategies = useMemo(() => {

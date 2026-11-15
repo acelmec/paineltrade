@@ -3890,7 +3890,8 @@ export async function fetchCandlesSupabase(
 
       const isFutures = rawSym.includes('FUTUR') || rawSym.includes('PERP') || activePlat === 'binance';
       const { fetchBinanceCandles, subscribeBinanceMarketData, unsubscribeBinanceMarketData } = await import('./binanceService');
-      const binanceCandles = await fetchBinanceCandles(cleanSym, '1m', Math.max(limit, 1000), Boolean(isFutures));
+      const queryLimit = limit > 0 ? Math.min(Math.max(limit, 50), 1000) : 1000;
+      const binanceCandles = await fetchBinanceCandles(cleanSym, '1m', queryLimit, Boolean(isFutures));
       if (binanceCandles && binanceCandles.length > 0) {
         onProgress?.(100, binanceCandles.length, limit);
         saveLocalCandles(queryId, binanceCandles);
@@ -7727,6 +7728,15 @@ export function isSameAsset(sym1?: string | null, sym2?: string | null): boolean
     if (s.includes('BTC')) return 'BTC';
     if (s.includes('ETH')) return 'ETH';
     if (s.includes('SOL')) return 'SOL';
+    if (s.includes('BNB')) return 'BNB';
+    if (s.includes('XRP')) return 'XRP';
+    if (s.includes('DOGE')) return 'DOGE';
+    if (s.includes('ADA')) return 'ADA';
+    if (s.includes('AVAX')) return 'AVAX';
+    if (s.includes('LINK')) return 'LINK';
+    if (s.includes('NEAR')) return 'NEAR';
+    if (s.includes('SUI')) return 'SUI';
+    if (s.includes('PEPE')) return 'PEPE';
     if (s.includes('NQ') || s.includes('NASDAQ')) return 'NQ';
     if (s.includes('ES') || s.includes('SP500') || s.includes('SPX')) return 'ES';
     if (s.includes('YM') || s.includes('DOW')) return 'YM';
