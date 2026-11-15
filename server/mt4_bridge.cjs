@@ -402,7 +402,7 @@ function getMt4Queue(accNum) {
 
         const timestamps = result.timestamp;
         const q = result.indicators.quote[0];
-        const candles = [];
+        const candlesMap = new Map();
 
         for (let i = 0; i < timestamps.length; i++) {
           const cClose = q.close[i];
@@ -412,16 +412,30 @@ function getMt4Queue(accNum) {
           const cLow = q.low[i] ?? Math.min(cOpen, cClose);
           const cVol = q.volume?.[i] ?? 1;
 
-          candles.push({
-            timestamp: new Date(timestamps[i] * 1000).toISOString(),
-            open: Number(cOpen),
-            high: Number(cHigh),
-            low: Number(cLow),
-            close: Number(cClose),
-            volume: Number(cVol)
-          });
+          // Cravamento exato na virada do minuto (:00.000Z)
+          const flooredSec = Math.floor(timestamps[i] / 60) * 60;
+          const flooredIso = new Date(flooredSec * 1000).toISOString();
+
+          const existing = candlesMap.get(flooredSec);
+          if (!existing) {
+            candlesMap.set(flooredSec, {
+              timestamp: flooredIso,
+              open: Number(cOpen),
+              high: Number(cHigh),
+              low: Number(cLow),
+              close: Number(cClose),
+              volume: Number(cVol)
+            });
+          } else {
+            // Mescla snapshot intra-minuto recente do Yahoo no mesmo candle
+            existing.high = Math.max(existing.high, Number(cHigh));
+            existing.low = Math.min(existing.low, Number(cLow));
+            existing.close = Number(cClose);
+            existing.volume += Number(cVol);
+          }
         }
 
+        const candles = Array.from(candlesMap.values());
         const sliced = candles.slice(-limit);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(sliced));
@@ -492,14 +506,27 @@ function getMt4Queue(accNum) {
         if (!pendingCommands.has(accNum)) {
           pendingCommands.set(accNum, []);
         }
-        pendingCommands.get(accNum).push(cmd);
+        // Se for modificação de SL/TP (modify), substitui qualquer comando modify anterior não executado
+        if (cmd.action === 'modify' || cmd.action === 'modify_order' || cmd.action === 'levels') {
+          const filtered = pendingCommands.get(accNum).filter(c => !(c.action === cmd.action && (c.ticket === cmd.ticket || c.symbol === cmd.symbol)));
+          filtered.push(cmd);
+          pendingCommands.set(accNum, filtered);
+        } else {
+          pendingCommands.get(accNum).push(cmd);
+        }
 
         // Também disponibiliza na fila 'all' para garantir entrega caso o EA consulte sem query account
         if (accNum !== 'all') {
           if (!pendingCommands.has('all')) {
             pendingCommands.set('all', []);
           }
-          pendingCommands.get('all').push(cmd);
+          if (cmd.action === 'modify' || cmd.action === 'modify_order' || cmd.action === 'levels') {
+            const filteredAll = pendingCommands.get('all').filter(c => !(c.action === cmd.action && (c.ticket === cmd.ticket || c.symbol === cmd.symbol)));
+            filteredAll.push(cmd);
+            pendingCommands.set('all', filteredAll);
+          } else {
+            pendingCommands.get('all').push(cmd);
+          }
         }
 
         console.log(`🚀 [MT4-BRIDGE] Nova ordem enfileirada para conta ${accNum}:`, cmd);

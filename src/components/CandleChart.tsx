@@ -166,7 +166,8 @@ const LEVEL_CONFIGS: Record<string, { label: string; color: string }> = {
 
 // Aggregate 1-minute candles into custom timeframes
 function aggregateCandles(candles: Candle[], timeframeMinutes: number): Candle[] {
-  if (timeframeMinutes <= 1 || candles.length === 0) return candles;
+  if (candles.length === 0) return [];
+  const tfM = Math.max(1, timeframeMinutes || 1);
 
   const buckets: { [key: number]: Candle[] } = {};
 
@@ -180,7 +181,7 @@ function aggregateCandles(candles: Candle[], timeframeMinutes: number): Candle[]
 
     const timeMs = new Date(c.timestamp).getTime();
     if (isNaN(timeMs)) return;
-    const bucketTime = Math.floor(timeMs / (timeframeMinutes * 60 * 1000)) * (timeframeMinutes * 60 * 1000);
+    const bucketTime = Math.floor(timeMs / (tfM * 60 * 1000)) * (tfM * 60 * 1000);
     if (!buckets[bucketTime]) {
       buckets[bucketTime] = [];
     }
@@ -1809,8 +1810,14 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           const actualReportId = currentReport?.id || (targetId !== 'proposed' && targetId !== 'active-pos' ? targetId : null);
 
           if (actualReportId) {
-            const currentSl = currentReport && 'stop_loss' in currentReport ? Number(currentReport.stop_loss) : null;
-            const currentTp = currentReport && 'take_profit' in currentReport ? Number(currentReport.take_profit) : null;
+            const optCurrent = optimisticReportLevelsRef.current.get(actualReportId);
+            const isOptRecent = optCurrent && (Date.now() - optCurrent.timestamp < 30000);
+            const currentSl = isOptRecent && optCurrent.stop_loss !== undefined
+              ? (optCurrent.stop_loss !== null ? Number(optCurrent.stop_loss) : null)
+              : (currentReport && 'stop_loss' in currentReport ? Number(currentReport.stop_loss) : null);
+            const currentTp = isOptRecent && optCurrent.take_profit !== undefined
+              ? (optCurrent.take_profit !== null ? Number(optCurrent.take_profit) : null)
+              : (currentReport && 'take_profit' in currentReport ? Number(currentReport.take_profit) : null);
             const newSl = dragType === 'stop_loss' ? finalPrice : (!isNaN(Number(currentSl)) ? roundToTick(Number(currentSl), tickSize) : null);
             const newTp = dragType === 'take_profit' ? finalPrice : (!isNaN(Number(currentTp)) ? roundToTick(Number(currentTp), tickSize) : null);
 
@@ -4010,7 +4017,15 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   useEffect(() => {
     const lastCandle = chartDataRef.current.length > 0 ? chartDataRef.current[chartDataRef.current.length - 1] : null;
     const lastPrice = lastCandle ? lastCandle.close : null;
-    let resolvedPrice = marketData?.price && marketData.price !== '--' ? Number(marketData.price) : lastPrice;
+    const mBid = marketData?.bid !== undefined && marketData.bid !== null && !isNaN(Number(marketData.bid)) ? Number(marketData.bid) : 0;
+    const mAsk = marketData?.ask !== undefined && marketData.ask !== null && !isNaN(Number(marketData.ask)) ? Number(marketData.ask) : 0;
+    const mPrice = marketData?.price && marketData.price !== '--' ? Number(marketData.price) : 0;
+
+    // Para MT4/MT5 e gráficos com Bid/Ask, o candle é formado pelo menor preço (BID)
+    let resolvedPrice = (mBid > 0 && mAsk > 0)
+      ? Math.min(mBid, mAsk)
+      : (mBid > 0 ? mBid : (mPrice > 0 ? mPrice : lastPrice));
+
     if (simulatedPrice !== undefined && simulatedPrice > 0) {
       resolvedPrice = simulatedPrice;
     }
@@ -4057,16 +4072,17 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       ? lastCandle.time
       : (lastCandle.timestamp ? getChartTimeFromDate(lastCandle.timestamp) : 0);
 
-    // Determina o horário de referência do tick atual (via timestamp da cotação ou relógio sincronizado)
-    let tickSec = 0;
+    // Determina o horário de referência do tick atual (sempre coerente com o relógio real para nunca ficar defasado)
+    let tickSec = Math.floor(Date.now() / 1000);
     if (marketData?.updated_at) {
       const parsed = parseInputToDate(marketData.updated_at);
       if (parsed && !isNaN(parsed.getTime()) && parsed.getTime() > 0) {
-        tickSec = Math.floor(parsed.getTime() / 1000);
+        const pSec = Math.floor(parsed.getTime() / 1000);
+        // Se a diferença para o relógio real for razoável (<= 45s), utiliza o timestamp do tick
+        if (Math.abs(tickSec - pSec) <= 45) {
+          tickSec = pSec;
+        }
       }
-    }
-    if (!tickSec || isNaN(tickSec) || tickSec <= 0) {
-      tickSec = Math.floor(Date.now() / 1000);
     }
 
     const currentBucketSec = Math.floor(tickSec / bucketSec) * bucketSec;
@@ -4147,7 +4163,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         });
       } catch (_) {}
     }
-  }, [marketData?.price, marketData?.updated_at, simulatedPrice, timeframe, effectiveShowPva]);
+  }, [marketData?.price, marketData?.bid, marketData?.ask, marketData?.updated_at, simulatedPrice, timeframe, effectiveShowPva]);
 
   const updateLevelLabelsRef = useRef<((immediate?: boolean) => void) | null>(null);
   const showOrderLinesRef = useRef<boolean>(showOrderLines);

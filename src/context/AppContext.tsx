@@ -4772,18 +4772,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { updatedCandles: candles, hasChanged: false, isNewBar: false };
     }
 
-    // 1. Determina o horário de referência do tick com base no parâmetro fornecido ou no relógio sincronizado.
-    // NUNCA utilizar lastCandleMs como fallback quando tickTimeStrOrMs for indefinido,
-    // pois isso geraria criação descontrolada de candles futuros em cascata.
-    let tickMs = getSyncedNowMs();
+    // 1. Determina o horário de referência do tick com base no parâmetro fornecido ou no relógio real.
+    let tickMs = Date.now();
     if (typeof tickTimeStrOrMs === 'number' && tickTimeStrOrMs > 0) {
-      tickMs = tickTimeStrOrMs;
-      syncServerClock(tickMs);
+      // Se o timestamp fornecido for muito discrepante do relógio real (> 45s, ex: skew de fuso da VPS ou atraso do Yahoo),
+      // adota o Date.now() local para o tick em tempo real não ficar preso no passado
+      if (Math.abs(Date.now() - tickTimeStrOrMs) <= 45000) {
+        tickMs = tickTimeStrOrMs;
+      }
     } else if (typeof tickTimeStrOrMs === 'string' && tickTimeStrOrMs) {
       const parsed = parseInputToDate(tickTimeStrOrMs);
       if (parsed && !isNaN(parsed.getTime()) && parsed.getTime() > 0) {
-        tickMs = parsed.getTime();
-        syncServerClock(tickMs);
+        const pMs = parsed.getTime();
+        if (Math.abs(Date.now() - pMs) <= 45000) {
+          tickMs = pMs;
+        }
       }
     }
 
@@ -5080,6 +5083,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (canEvaluateTradeExit && activeReportsForPanel.length > 0 && currentPrice > 0) {
         for (const activeReport of activeReportsForPanel) {
+          // Trava Absoluta de Contas MT4/MT5: As posições reais em contas MetaTrader são executadas
+          // diretamente no servidor da corretora e fechadas via syncRemoteMtPositions.
+          // O frontend JAMAIS deve marcar localmente como 'Gain' ou 'Stop' uma posição MT4 real em andamento!
+          if ((activeReport as any).is_mt_real || (activeReport.id && String(activeReport.id).startsWith('mt_'))) {
+            continue;
+          }
+          const repAccount = (accountsRef.current || []).find(a => a.id === activeReport.account_id);
+          if (repAccount && isMtExecutionAccount(repAccount)) {
+            continue;
+          }
+
           const entryPrice = Number(activeReport.entry_price || 0);
           // Trava de segurança 1: Se a cotação de mercado tiver mais de 10% de discrepância do preço de entrada,
           // significa que pertence a outro ativo/painel e nunca deve encerrar a operação por engano!
@@ -10965,20 +10979,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   ): Promise<boolean> => {
     try {
       const nowTs = Date.now();
-      const targetRepForTick = reportsRef.current.find(r => r.id === id || r.master_operation_id === id);
+      const cleanIdTicket = String(id || '').replace(/^mt_/, '');
+      const targetRepForTick = reportsRef.current.find(r =>
+        r.id === id ||
+        r.master_operation_id === id ||
+        (cleanIdTicket && /^\d+$/.test(cleanIdTicket) && String((r as any).ticket) === cleanIdTicket)
+      ) || reportsRef.current.find(r => r.status === 'Em Andamento' && (r as any).is_mt_real);
+
       const targetPanel = panels.find(p => p.id === (targetRepForTick?.panel_id || activePanel?.id));
       const tickSize = resolvePanelTickSize(targetPanel, settings);
 
       const safeStopLoss = stopLoss !== null && stopLoss !== undefined && !isNaN(Number(stopLoss))
         ? roundToTick(Number(stopLoss), tickSize)
-        : null;
+        : (targetRepForTick?.stop_loss ?? null);
       const safeTakeProfit = takeProfit !== null && takeProfit !== undefined && !isNaN(Number(takeProfit))
         ? roundToTick(Number(takeProfit), tickSize)
-        : null;
+        : (targetRepForTick?.take_profit ?? null);
 
       // Atualiza o relatório MASTER no estado local e referências com carimbo de tempo
       reportsRef.current = reportsRef.current.map(r => {
-        if (r.id === id) return { ...r, stop_loss: safeStopLoss, take_profit: safeTakeProfit, _levels_modified_at: nowTs };
+        if (r.id === id || r.id === targetRepForTick?.id) return { ...r, stop_loss: safeStopLoss, take_profit: safeTakeProfit, _levels_modified_at: nowTs };
         if (r.master_operation_id === id && r.status === 'Em Andamento') {
           return { ...r, stop_loss: safeStopLoss, take_profit: safeTakeProfit, _levels_modified_at: nowTs };
         }
@@ -10987,7 +11007,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setReports(prev =>
         prev.map(r => {
-          if (r.id === id) return { ...r, stop_loss: safeStopLoss, take_profit: safeTakeProfit, _levels_modified_at: nowTs };
+          if (r.id === id || r.id === targetRepForTick?.id) return { ...r, stop_loss: safeStopLoss, take_profit: safeTakeProfit, _levels_modified_at: nowTs };
           // Propaga também para cópias SLAVE vinculadas ainda em andamento
           if (r.master_operation_id === id && r.status === 'Em Andamento') {
             return { ...r, stop_loss: safeStopLoss, take_profit: safeTakeProfit, _levels_modified_at: nowTs };
@@ -11012,11 +11032,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
 
-      await updateStrategyReportLevelsSupabase(realDbId, stopLoss, takeProfit, currentPrice);
+      await updateStrategyReportLevelsSupabase(realDbId, safeStopLoss, safeTakeProfit, currentPrice);
 
       try {
         window.dispatchEvent(new CustomEvent('vortex_report_levels_updated', {
-          detail: { id: realDbId, stop_loss: stopLoss, take_profit: takeProfit }
+          detail: { id: realDbId, stop_loss: safeStopLoss, take_profit: safeTakeProfit }
         }));
       } catch {}
 
@@ -15793,6 +15813,10 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         const liveMetrics = computeLiveCandleMetrics(cache.candles || [], numPrice);
 
         // 2. Atualização imediata do cache de MarketData com métricas dinâmicas
+        const rawUpdatedAtMs = detail.updated_at ? new Date(detail.updated_at).getTime() : 0;
+        const isTimeSkewed = !rawUpdatedAtMs || isNaN(rawUpdatedAtMs) || Math.abs(Date.now() - rawUpdatedAtMs) > 45000;
+        const effectiveUpdatedAt = isTimeSkewed ? new Date().toISOString() : detail.updated_at;
+
         const mData: MarketData = {
           symbol: sym,
           price: String(numPrice),
@@ -15811,7 +15835,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
           sellVolume: 0,
           printsPerSecond: 0,
           blockTrades: cache.marketData?.blockTrades || [],
-          updated_at: detail.updated_at || new Date().toISOString()
+          updated_at: effectiveUpdatedAt
         };
         cache.marketData = mData;
         cache.lastMarketUpdateAt = Date.now();
@@ -15820,9 +15844,9 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         // No MT4/MT5 o candle é formado pelo menor preço (BID), garantindo que o fechamento da vela atual acompanhe exatamente a linha BID
         const candleRefPrice = (numBid > 0 && numAsk > 0) ? Math.min(numBid, numAsk) : (numBid > 0 ? numBid : numPrice);
         if (!cache.candles || cache.candles.length === 0) {
-          const nowIso = detail.updated_at || new Date().toISOString();
+          const flooredNowIso = new Date(Math.floor(Date.now() / 60000) * 60000).toISOString();
           const firstCandle: Candle = {
-            timestamp: nowIso,
+            timestamp: flooredNowIso,
             open: candleRefPrice,
             high: candleRefPrice,
             low: candleRefPrice,
@@ -15838,7 +15862,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
             bumpPanelCacheVersion();
           }
         } else {
-          const { updatedCandles, hasChanged } = applyRealtimePriceToCandles(cache.candles, candleRefPrice, detail.updated_at, matchedPanel);
+          const { updatedCandles, hasChanged } = applyRealtimePriceToCandles(cache.candles, candleRefPrice, effectiveUpdatedAt, matchedPanel);
           if (hasChanged) {
             cache.candles = updatedCandles;
           }

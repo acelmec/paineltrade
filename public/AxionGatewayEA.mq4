@@ -843,6 +843,7 @@ bool ExecuteMarketOrder(const string sym, int direction, double lot, double sl, 
 //+------------------------------------------------------------------+
 bool ModifyPositionSLTP(int ticket, string rawSym, double sl, double tp)
 {
+   RefreshRates();
    if(ticket > 0)
    {
       if(OrderSelect(ticket, SELECT_BY_TICKET))
@@ -855,7 +856,7 @@ bool ModifyPositionSLTP(int ticket, string rawSym, double sl, double tp)
          {
             Print("🔄 [AxionGatewayEA MT4] SL/TP modificado no Ticket: ", ticket, " -> SL: ", normSl, " | TP: ", normTp);
             return true;
-         }
+          }
          Print("⚠️ [AxionGatewayEA MT4] Falha ao modificar SL/TP no Ticket ", ticket, ": Erro #", GetLastError());
       }
       return false;

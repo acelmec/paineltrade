@@ -2223,15 +2223,27 @@ export async function fetchStrategyReportsSupabase(): Promise<StrategyReport[]> 
       const map = new Map<string, StrategyReport>();
       const localStatusMap = new Map(localList.map(r => [r.id, r]));
 
+      const nowMergeMs = Date.now();
       data.forEach((r: any) => {
         const local = localStatusMap.get(r.id);
+        const isLocalLevelsFresh = Boolean(local && (local as any)._levels_modified_at && (nowMergeMs - Number((local as any)._levels_modified_at) < 30000));
         // Se localmente a ordem já foi encerrada/cancelada e o banco ainda está 'Em Andamento' ou 'Pendente', respeita o encerramento local
         if (local && (local.status === 'Cancelado' || local.status === 'Gain' || local.status === 'Stop') && (r.status === 'Em Andamento' || (r.status as any) === 'Pendente')) {
           map.set(r.id, { ...r, ...local, status: local.status, exit_price: local.exit_price ?? r.exit_price, closed_at: local.closed_at ?? r.closed_at });
         } else if (local && local.status === 'Em Andamento' && (r.status as any) === 'Pendente') {
           map.set(r.id, { ...r, ...local, status: 'Em Andamento' });
-        } else if (local && ((local as any).ticket || (local as any).is_mt_real || (local as any).pnl_liquido !== undefined)) {
-          map.set(r.id, { ...local, ...r, ticket: (local as any).ticket, is_mt_real: (local as any).is_mt_real, pnl_liquido: (local as any).pnl_liquido, realized_pnl: (local as any).realized_pnl });
+        } else if (local && ((local as any).ticket || (local as any).is_mt_real || (local as any).pnl_liquido !== undefined || isLocalLevelsFresh)) {
+          map.set(r.id, {
+            ...local,
+            ...r,
+            stop_loss: isLocalLevelsFresh ? local.stop_loss : (r.stop_loss ?? local.stop_loss),
+            take_profit: isLocalLevelsFresh ? local.take_profit : (r.take_profit ?? local.take_profit),
+            _levels_modified_at: (local as any)._levels_modified_at,
+            ticket: (local as any).ticket,
+            is_mt_real: (local as any).is_mt_real,
+            pnl_liquido: (local as any).pnl_liquido,
+            realized_pnl: (local as any).realized_pnl
+          } as StrategyReport);
         } else {
           map.set(r.id, r);
         }
@@ -2440,12 +2452,36 @@ export function isMtExecutionAccount(acc: any): boolean {
   return platform === 'mt4' || platform === 'mt5';
 }
 
+let lastDetectedMtAccountNumber = '';
+export function setLastDetectedMtAccountNumber(accNum: string | number | undefined | null): void {
+  const clean = String(accNum || '').replace(/\D/g, '').trim();
+  if (clean && clean.length >= 3) {
+    lastDetectedMtAccountNumber = clean;
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('vortex_last_mt_account_number', clean);
+      }
+    } catch {}
+  }
+}
+
 export function extractMtAccountNumber(acc: any): string {
-  if (!acc) return '';
-  const rawName = String(acc.account_name || acc.name || acc.id || '').trim();
+  if (!acc) return lastDetectedMtAccountNumber || '';
+  if ((acc as any).account_number && /^\d+$/.test(String((acc as any).account_number).trim())) {
+    return String((acc as any).account_number).trim();
+  }
+  const rawName = String(acc.account_name || acc.name || '').trim();
   const stripped = rawName.replace(/^(?:MT4|MT5|MetaTrader\s*[45]?)\s*[-_#]?\s*/i, '').trim();
   const digits = stripped.replace(/\D/g, '');
-  return digits || rawName.replace(/\D/g, '') || rawName;
+  if (digits && digits.length >= 3) return digits;
+  const idDigits = String(acc.id || '').startsWith('mt_') ? String(acc.id).replace('mt_', '').replace(/\D/g, '') : '';
+  if (idDigits && idDigits.length >= 3) return idDigits;
+  if (lastDetectedMtAccountNumber) return lastDetectedMtAccountNumber;
+  try {
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('vortex_last_mt_account_number') : null;
+    if (saved && saved.length >= 3) return saved;
+  } catch {}
+  return digits || stripped || rawName;
 }
 
 export function dispatchMtGatewayCommand(acc: any, cmdPayload: Record<string, any>): void {
@@ -2460,18 +2496,30 @@ export function dispatchMtGatewayCommand(acc: any, cmdPayload: Record<string, an
     const activeMtConn = mtConns.find((c: any) => c.status === 'online') || mtConns[0];
     const mtHost = (activeMtConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
     const targetNumber = extractMtAccountNumber(acc);
-    const bodyStr = JSON.stringify({
-      ...cmdPayload,
-      account: targetNumber,
-      account_name: acc.account_name
-    });
+    let fallbackDetected = lastDetectedMtAccountNumber;
+    if (!fallbackDetected) {
+      try {
+        fallbackDetected = (typeof localStorage !== 'undefined' ? localStorage.getItem('vortex_last_mt_account_number') : '') || '';
+      } catch {}
+    }
+
+    const targetAccounts = Array.from(new Set([targetNumber, fallbackDetected].filter(Boolean)));
+    if (targetAccounts.length === 0) targetAccounts.push('all');
+
     const hosts = [mtHost, 'http://localhost:8003'].filter((h, i, arr) => h && arr.indexOf(h) === i);
-    hosts.forEach(h => {
-      fetch(`${h}/order`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: bodyStr
-      }).catch(() => {});
+    targetAccounts.forEach(accTarget => {
+      const bodyStr = JSON.stringify({
+        ...cmdPayload,
+        account: accTarget,
+        account_name: acc.account_name
+      });
+      hosts.forEach(h => {
+        fetch(`${h}/order`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: bodyStr
+        }).catch(() => {});
+      });
     });
   } catch {}
 }
@@ -3133,10 +3181,20 @@ export async function updateStrategyReportLevelsSupabase(
 
   // Atualizar cache local imediatamente (0ms) - propaga também para cópias SLAVE em andamento
   const localReports = getLocalStrategyReports();
-  const reportObj = localReports.find(r => r.id === id);
+  const cleanIdTicket = String(id || '').replace(/^mt_/, '');
+  const reportObj = localReports.find(r =>
+    r.id === id ||
+    (cleanIdTicket && /^\d+$/.test(cleanIdTicket) && String((r as any).ticket) === cleanIdTicket)
+  ) || localReports.find(r => r.status === 'Em Andamento' && (r as any).is_mt_real);
+
+  const effectiveSl = updatePayload.stop_loss !== null ? updatePayload.stop_loss : (reportObj?.stop_loss ?? null);
+  const effectiveTp = updatePayload.take_profit !== null ? updatePayload.take_profit : (reportObj?.take_profit ?? null);
+  updatePayload.stop_loss = effectiveSl;
+  updatePayload.take_profit = effectiveTp;
+
   const nowTs = Date.now();
   const updatedLocals = localReports.map(r => 
-    (r.id === id || (r.master_operation_id === id && r.status === 'Em Andamento'))
+    (r.id === id || r.id === reportObj?.id || (r.master_operation_id === id && r.status === 'Em Andamento'))
       ? { ...r, stop_loss: updatePayload.stop_loss, take_profit: updatePayload.take_profit, _levels_modified_at: nowTs }
       : r
   );
@@ -3144,7 +3202,18 @@ export async function updateStrategyReportLevelsSupabase(
 
   // Buscar todas as contas disponíveis
   const allAccounts = getLocalBrokerAccounts();
-  const targetAcc = allAccounts.find(a => a.id === reportObj?.account_id);
+  let targetAcc = allAccounts.find(a => a.id === reportObj?.account_id);
+  if (!targetAcc) {
+    try {
+      const savedActiveAccId = typeof localStorage !== 'undefined' ? localStorage.getItem('vortex_active_account_id') : null;
+      if (savedActiveAccId) {
+        targetAcc = allAccounts.find(a => a.id === savedActiveAccId);
+      }
+    } catch {}
+  }
+  if (!targetAcc) {
+    targetAcc = allAccounts.find(a => isMtExecutionAccount(a) && a.is_active !== false);
+  }
 
   // Helper para calcular e espelhar níveis no ConectorLocal / NinjaTrader
   const dispatchLevelsToNinja = (rep: any, acc: any) => {
@@ -3501,13 +3570,30 @@ export function cleanAndSanitizeCandles(rawCandles: Candle[]): Candle[] {
 
   if (basicValid.length === 0) return [];
 
-  // 2. Ordenação e deduplicação por minuto
+  // 2. Ordenação e deduplicação estrita por minuto (timestamp cravado em :00.000Z)
   const minuteMap = new Map<number, Candle>();
   basicValid.forEach(c => {
     const ms = new Date(c.timestamp).getTime();
     if (isNaN(ms) || ms <= 0) return;
     const mKey = Math.floor(ms / 60000);
-    minuteMap.set(mKey, c);
+    const flooredIso = new Date(mKey * 60000).toISOString();
+    const existing = minuteMap.get(mKey);
+    if (!existing) {
+      minuteMap.set(mKey, {
+        ...c,
+        timestamp: flooredIso
+      });
+    } else {
+      // Mescla snapshots intra-minuto (ex: último snapshot do Yahoo ou tick atual)
+      minuteMap.set(mKey, {
+        timestamp: flooredIso,
+        open: existing.open,
+        high: Math.max(existing.high, c.high),
+        low: Math.min(existing.low, c.low),
+        close: c.close,
+        volume: (existing.volume || 0) + (c.volume || 0)
+      });
+    }
   });
 
   const sorted = Array.from(minuteMap.values()).sort(
@@ -3754,8 +3840,36 @@ export async function fetchCandlesSupabase(
     } catch {}
   }
 
-  // 0.1 Prioridade para Bridge MT4/MT5 / VPS quando o ativo pertence à corretora (isMtFeed) ou é Forex/CFD/Metais/Índices
-  if (isForexOrCfd && (isMtFeed || !isCryptoAsset)) {
+  // 0.1 Para Criptoativos (BTCUSD, ETHUSD, SOLUSD, etc.), prioridade máxima para a Binance REST API
+  // A Binance fornece histórico contínuo M1 autêntico em tempo real (sem delay de 1m nem flat dashes com segundos do Yahoo)
+  if (isCryptoAsset) {
+    try {
+      let cleanSym = baseSym;
+      if (cleanSym.endsWith('USD') && !cleanSym.endsWith('USDT')) {
+        cleanSym = `${cleanSym}T`; // ETHUSD -> ETHUSDT, BTCUSD -> BTCUSDT
+      } else if (!cleanSym.endsWith('USDT') && !cleanSym.endsWith('BUSD') && !cleanSym.endsWith('USDC')) {
+        cleanSym = `${cleanSym}USDT`;
+      }
+      const { fetchBinanceCandles, subscribeBinanceMarketData, unsubscribeBinanceMarketData } = await import('./binanceService');
+      const binanceCandles = await fetchBinanceCandles(cleanSym, '1m', Math.max(limit, 1000), false);
+      if (binanceCandles && binanceCandles.length > 0) {
+        onProgress?.(100, binanceCandles.length, limit);
+        saveLocalCandles(queryId, binanceCandles);
+        // Se a conta ou ativo for MT4/Corretora, o WebSocket da Binance NUNCA é ativado para não colidir com o Bid/Ask da corretora
+        if (!isMtFeed) {
+          subscribeBinanceMarketData(cleanSym, false);
+        } else {
+          unsubscribeBinanceMarketData();
+        }
+        return binanceCandles;
+      }
+    } catch (e) {
+      console.warn('[DB] Falha no feed histórico da Binance para cripto, tentando fallback:', e);
+    }
+  }
+
+  // 0.2 Prioridade para Bridge MT4/MT5 / VPS para Forex, Metais e Índices (EURUSD, XAUUSD, US30, GER40, etc.)
+  if (isForexOrCfd && !isCryptoAsset) {
     try {
       const { getLocalPlatformConnections } = await import('./connectionsService');
       const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
@@ -3783,33 +3897,6 @@ export async function fetchCandlesSupabase(
       }
     } catch (mErr) {
       console.warn('[DB] Falha no feed de Forex/CFDs via Bridge, tentando fallback:', mErr);
-    }
-  }
-
-  // 0.2 Coleta de histórico contínuo para Criptoativos (Binance REST API - ou fallback de histórico se o MT4 ainda não enviou velas de BTCUSD/ETHUSD)
-  if (isCryptoAsset) {
-    try {
-      let cleanSym = baseSym;
-      if (cleanSym.endsWith('USD') && !cleanSym.endsWith('USDT')) {
-        cleanSym = `${cleanSym}T`; // ETHUSD -> ETHUSDT, BTCUSD -> BTCUSDT
-      } else if (!cleanSym.endsWith('USDT') && !cleanSym.endsWith('BUSD') && !cleanSym.endsWith('USDC')) {
-        cleanSym = `${cleanSym}USDT`;
-      }
-      const { fetchBinanceCandles, subscribeBinanceMarketData, unsubscribeBinanceMarketData } = await import('./binanceService');
-      const binanceCandles = await fetchBinanceCandles(cleanSym, '1m', Math.max(limit, 1000), false);
-      if (binanceCandles && binanceCandles.length > 0) {
-        onProgress?.(100, binanceCandles.length, limit);
-        saveLocalCandles(queryId, binanceCandles);
-        // Se a conta ou ativo for MT4/Corretora, o WebSocket da Binance NUNCA é ativado para não colidir com o Bid/Ask da corretora
-        if (!isMtFeed) {
-          subscribeBinanceMarketData(cleanSym, false);
-        } else {
-          unsubscribeBinanceMarketData();
-        }
-        return binanceCandles;
-      }
-    } catch (e) {
-      console.warn('[DB] Falha no feed histórico da Binance para cripto, tentando fallback:', e);
     }
   }
 

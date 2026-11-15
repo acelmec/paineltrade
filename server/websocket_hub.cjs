@@ -1021,7 +1021,13 @@ if ((req.method === 'GET' || req.method === 'POST') && pathname === '/commands')
         [accNum, rawAcc, 'all'].forEach(k => {
           if (k) {
             if (!mt4PendingCommands.has(k)) mt4PendingCommands.set(k, []);
-            mt4PendingCommands.get(k).push(cmd);
+            if (cmd.action === 'modify' || cmd.action === 'modify_order' || cmd.action === 'levels') {
+              const filtered = mt4PendingCommands.get(k).filter(c => !(c.action === cmd.action && (c.ticket === cmd.ticket || c.symbol === cmd.symbol)));
+              filtered.push(cmd);
+              mt4PendingCommands.set(k, filtered);
+            } else {
+              mt4PendingCommands.get(k).push(cmd);
+            }
           }
         });
 
@@ -1099,7 +1105,7 @@ if ((req.method === 'GET' || req.method === 'POST') && pathname === '/commands')
 
         const timestamps = result.timestamp;
         const q = result.indicators.quote[0];
-        const candles = [];
+        const candlesMap = new Map();
 
         for (let i = 0; i < timestamps.length; i++) {
           const cClose = q.close[i];
@@ -1109,16 +1115,30 @@ if ((req.method === 'GET' || req.method === 'POST') && pathname === '/commands')
           const cLow = q.low[i] ?? Math.min(cOpen, cClose);
           const cVol = q.volume?.[i] ?? 1;
 
-          candles.push({
-            timestamp: new Date(timestamps[i] * 1000).toISOString(),
-            open: Number(cOpen),
-            high: Number(cHigh),
-            low: Number(cLow),
-            close: Number(cClose),
-            volume: Number(cVol)
-          });
+          // Cravamento exato na virada do minuto (:00.000Z)
+          const flooredSec = Math.floor(timestamps[i] / 60) * 60;
+          const flooredIso = new Date(flooredSec * 1000).toISOString();
+
+          const existing = candlesMap.get(flooredSec);
+          if (!existing) {
+            candlesMap.set(flooredSec, {
+              timestamp: flooredIso,
+              open: Number(cOpen),
+              high: Number(cHigh),
+              low: Number(cLow),
+              close: Number(cClose),
+              volume: Number(cVol)
+            });
+          } else {
+            // Mescla snapshot intra-minuto recente do Yahoo no mesmo candle
+            existing.high = Math.max(existing.high, Number(cHigh));
+            existing.low = Math.min(existing.low, Number(cLow));
+            existing.close = Number(cClose);
+            existing.volume += Number(cVol);
+          }
         }
 
+        const candles = Array.from(candlesMap.values());
         const sliced = candles.slice(-limit);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(sliced));

@@ -78,20 +78,8 @@ export function isCandleInSessionPause(
  */
 let serverClockOffsetMs = 0;
 
-export function syncServerClock(serverTimeInput?: string | Date | number | null): void {
-  if (!serverTimeInput) return;
-  const parsed = parseInputToDate(serverTimeInput);
-  if (!parsed) return;
-  const serverMs = parsed.getTime();
-  if (isNaN(serverMs) || serverMs <= 0) return;
-
-  const localMs = Date.now();
-  const diff = serverMs - localMs;
-  if (Math.abs(diff) > 90 * 1000 && Math.abs(diff) < 24 * 3600 * 1000) {
-    serverClockOffsetMs = diff;
-  } else if (Math.abs(diff) <= 90 * 1000) {
-    serverClockOffsetMs = 0;
-  }
+export function syncServerClock(_serverTimeInput?: string | Date | number | null): void {
+  serverClockOffsetMs = 0;
 }
 
 export function getSyncedNowMs(): number {
