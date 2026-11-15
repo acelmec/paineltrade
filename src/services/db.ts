@@ -3325,7 +3325,9 @@ export const saveLocalCandles = (instanceId: string, candles: Candle[]) => {
     if (rawExisting && candles.length < 500) {
       try {
         const parsed: Candle[] = JSON.parse(rawExisting);
-        if (Array.isArray(parsed) && parsed.length > candles.length) {
+        const existingHasGap = detectInternalCandleGap(parsed);
+        // Se o cache existente contiver lacuna/gap interno (ex: computador esteve suspenso), descarta o cache corrompido
+        if (Array.isArray(parsed) && !existingHasGap && parsed.length > candles.length) {
           const map = new Map<number, Candle>();
           parsed.forEach(c => {
             const t = new Date(c.timestamp).getTime();
@@ -3604,8 +3606,10 @@ export async function fetchCandlesSupabase(
                    (targetPanelObj as any)?.source === 'mt4' ||
                    (targetPanelObj?.instance_id || '').startsWith('mt4_');
 
-  const isCrypto = !isMtFeed && (/USDT|BUSD|USDC/i.test(baseSym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(baseSym));
-  if (isCrypto) {
+  const isCryptoAsset = /USDT|BUSD|USDC/i.test(baseSym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(baseSym);
+
+  // 0. Coleta de histórico contínuo para Criptoativos (Binance REST API - 1000 klines sem lacunas)
+  if (isCryptoAsset) {
     try {
       let cleanSym = baseSym;
       if (cleanSym.endsWith('USD') && !cleanSym.endsWith('USDT')) {
@@ -3613,16 +3617,21 @@ export async function fetchCandlesSupabase(
       } else if (!cleanSym.endsWith('USDT') && !cleanSym.endsWith('BUSD') && !cleanSym.endsWith('USDC')) {
         cleanSym = `${cleanSym}USDT`;
       }
-      const { fetchBinanceCandles, subscribeBinanceMarketData } = await import('./binanceService');
-      const binanceCandles = await fetchBinanceCandles(cleanSym, '1m', limit, false);
+      const { fetchBinanceCandles, subscribeBinanceMarketData, unsubscribeBinanceMarketData } = await import('./binanceService');
+      const binanceCandles = await fetchBinanceCandles(cleanSym, '1m', Math.max(limit, 1000), false);
       if (binanceCandles && binanceCandles.length > 0) {
         onProgress?.(100, binanceCandles.length, limit);
         saveLocalCandles(queryId, binanceCandles);
-        subscribeBinanceMarketData(cleanSym, false);
+        // Se a conta for MT4, o WebSocket da Binance NÃO é ativado para não colidir com o Bid/Ask da corretora
+        if (!isMtFeed) {
+          subscribeBinanceMarketData(cleanSym, false);
+        } else {
+          unsubscribeBinanceMarketData();
+        }
         return binanceCandles;
       }
     } catch (e) {
-      console.warn('[DB] Falha no feed da Binance para cripto, tentando fallback:', e);
+      console.warn('[DB] Falha no feed histórico da Binance para cripto, tentando fallback:', e);
     }
   } else if (isMtFeed) {
     // Garante que o WebSocket da Binance seja desativado para não colidir com o feed da corretora MT4
@@ -3632,7 +3641,7 @@ export async function fetchCandlesSupabase(
   }
 
   // 0.1 Detecção e alimentação nativa de Forex, Metais & Índices Globais via Bridge / VPS (e fallback para Cripto)
-  const isForexOrCfd = isCrypto || /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(baseSym);
+  const isForexOrCfd = isCryptoAsset || /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(baseSym);
   if (isForexOrCfd) {
     try {
       const { getLocalPlatformConnections } = await import('./connectionsService');

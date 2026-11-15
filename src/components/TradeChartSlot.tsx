@@ -274,7 +274,7 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
             const sym = (slotPanel?.symbol || slotPanel?.name || '').toUpperCase();
             const isCrypto = /USDT|BUSD|USDC/i.test(sym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(sym);
             const isMt = (slotPanel as any)?.platform === 'mt4' || (slotPanel as any)?.platform === 'mt5' || (slotPanel as any)?.source === 'mt4' || (slotPanel?.instance_id || '').startsWith('mt4_') || (activeAccount?.platform === 'mt4' && /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX|BTC|ETH)/i.test(sym));
-            const isNt8 = !isMt && (slotPanel?.platform === 'ninjatrader' || isStreamerWsConnected());
+            const isNt8 = !isMt && !isCrypto && ((slotPanel as any)?.platform === 'ninjatrader' || (isStreamerWsConnected() && /^(NQ|MNQ|ES|MES|YM|MYM|RTY|M2K|CL|MCL|GC|MGC|FDAX|FESX|WIN|WDO|RUSSELL)/i.test(sym)));
 
             let label = 'Axion Feed';
             let dotColor = 'bg-sky-400';

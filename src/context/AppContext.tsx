@@ -9367,6 +9367,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const effSettings = mergedOverride ? { ...(baseSettings || {}), ...mergedOverride } : baseSettings;
 
       initialLoadedPanelsRef.current.delete(pId);
+      // Limpa cache corrompido em localStorage para garantir recarga 100% gapless
+      try {
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem(`vortex_candles_cache_${pId}`);
+          if (targetPanel.instance_id) localStorage.removeItem(`vortex_candles_cache_${targetPanel.instance_id}`);
+        }
+      } catch (_) {}
+
       if (panelDataCache.current[pId]) {
         panelDataCache.current[pId].lastCandlesFetch = 0;
         panelDataCache.current[pId].lastGammaFetch = 0;
@@ -15072,9 +15080,10 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       // Throttling de 10s: só processa se a aba estava oculta e voltou a ficar visível
       if (document.visibilityState === 'visible' && (now - lastVisibilitySync > 10000)) {
         lastVisibilitySync = now;
-        console.log('[CONTEXT] Aba visível pós-suspensão. Sincronizando relatórios.');
+        console.log('[CONTEXT] 🔄 Aba visível pós-suspensão. Sincronizando relatórios e atualizando histórico do gráfico.');
         setWakeTrigger(prev => prev + 1);
         fetchReportsList(true);
+        refreshMarketData();
       }
     };
 

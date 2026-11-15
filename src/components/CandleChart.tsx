@@ -9585,8 +9585,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
             {(() => {
               const sym = (activePanel?.symbol || activePanel?.name || '').toUpperCase();
               const isCrypto = /USDT|BUSD|USDC/i.test(sym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(sym);
-              const isMt = activeAccount?.platform === 'mt4' || activeAccount?.platform === 'mt5' || (activePanel as any)?.platform === 'mt4' || (activePanel as any)?.source === 'mt4' || (activePanel?.instance_id || '').startsWith('mt4_') || /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(sym);
-              const isNt8 = activeAccount?.platform === 'ninjatrader' || isStreamerWsConnected();
+              const isMt = (activePanel as any)?.platform === 'mt4' || (activePanel as any)?.platform === 'mt5' || (activePanel as any)?.source === 'mt4' || (activePanel?.instance_id || '').startsWith('mt4_') || (activeAccount?.platform === 'mt4' && /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX|BTC|ETH)/i.test(sym));
+              const isNt8 = !isMt && !isCrypto && ((activePanel as any)?.platform === 'ninjatrader' || activeAccount?.platform === 'ninjatrader' || (isStreamerWsConnected() && /^(NQ|MNQ|ES|MES|YM|MYM|RTY|M2K|CL|MCL|GC|MGC|FDAX|FESX|WIN|WDO|RUSSELL)/i.test(sym)));
 
               let badge = {
                 shortLabel: 'Axion Feed',
