@@ -4846,6 +4846,8 @@ export interface BrokerAccount {
   user_id: string;
   account_type: 'internal_demo' | 'tradovate_demo' | 'tradovate_live';
   platform?: AccountPlatform;
+  broker?: string;
+  leverage?: number;
   tradovate_account_id?: number | null;
   account_name: string;
   balance: number;

@@ -13176,6 +13176,64 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
     };
   }, [isAuthenticated, user]);
 
+  // 5.0.0.1 Loop de Cotações em Tempo Real para Conexões Remotas MT4 / MT5 via Túnel VPS
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+
+    let mtQuotesTimer: any = null;
+    let isFetchingQuotes = false;
+
+    const fetchRemoteMtQuotes = async () => {
+      const acc = activeAccountRef.current;
+      const isMtAcc = acc?.platform === 'mt4' || acc?.platform === 'mt5';
+      if (!isMtAcc || isFetchingQuotes) return;
+
+      isFetchingQuotes = true;
+      try {
+        const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
+        const activeConn = mtConns.find(c => c.status === 'online') || mtConns[0];
+        const host = (activeConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
+
+        const res = await fetch(`${host}/quotes`, { signal: AbortSignal.timeout(2500) });
+        if (res.ok) {
+          const quotes = await res.json();
+          if (quotes && typeof quotes === 'object') {
+            for (const [rawSym, qData] of Object.entries<any>(quotes)) {
+              const sym = String(rawSym).toUpperCase();
+              const numPrice = Number(qData.price || qData.bid || 0);
+              if (numPrice <= 0) continue;
+
+              // Dispara evento event-driven para alimentar gráficos e boleta via túnel
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
+                  detail: {
+                    symbol: sym,
+                    panel: sym.toLowerCase(),
+                    price: numPrice,
+                    bid: Number(qData.bid || numPrice),
+                    ask: Number(qData.ask || numPrice),
+                    volume: Number(qData.volume || 1),
+                    updated_at: qData.updated_at || new Date().toISOString()
+                  }
+                }));
+              }
+            }
+          }
+        }
+      } catch (_) {
+        // Silencioso se host momentaneamente offline
+      } finally {
+        isFetchingQuotes = false;
+      }
+    };
+
+    mtQuotesTimer = createWorkerInterval(fetchRemoteMtQuotes, 1500);
+
+    return () => {
+      if (mtQuotesTimer) clearWorkerTimer(mtQuotesTimer);
+    };
+  }, [isAuthenticated, user]);
+
   // 5.0.1 Loop de Monitoramento de Execuções Master no NinjaTrader (Reverse Copy Trading & Watchdog de Segurança)
   useEffect(() => {
     if (!isAuthenticated || !user) return;
@@ -14781,7 +14839,16 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       const currentPanels = allPanelsRef.current || [];
       const matchedPanel = currentPanels.find((p: any) => {
         const pName = (p.name || p.id || '').toUpperCase();
-        return (pan && pName.includes(pan)) || isMarketDataCompatibleWithPanel(p.name || p.id, sym);
+        const pSym = (p.symbol || '').toUpperCase();
+        const pInst = (p.instance_id || '').toUpperCase();
+        return (
+          (pan && (pName.includes(pan) || pInst === pan)) ||
+          pName.startsWith(sym) ||
+          pName.includes(sym) ||
+          pSym === sym ||
+          pInst === sym ||
+          isMarketDataCompatibleWithPanel(p.name || p.id, sym)
+        );
       });
 
       if (!matchedPanel) return;

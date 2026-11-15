@@ -47,12 +47,23 @@ interface ImportAssetsModalProps {
 }
 
 export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, onClose }) => {
-  const { panels, createPanelAction, switchPanel, addLog } = useApp() as any;
+  const { panels, createPanelAction, switchPanel, addLog, activeAccount } = useApp() as any;
   const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(new Set());
   const [detectedSymbols, setDetectedSymbols] = useState<string[]>([]);
   const [isSearchingBridge, setIsSearchingBridge] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<{ current: number; total: number; name: string } | null>(null);
+
+  const [brokerSuffix, setBrokerSuffix] = useState<string>(() => {
+    if (activeAccount?.broker && activeAccount.broker !== 'MetaTrader 4' && activeAccount.broker !== 'MetaTrader Server') {
+      return activeAccount.broker;
+    }
+    const accName = (activeAccount?.account_name || '').toUpperCase();
+    if (accName.includes('ACTIVE') || accName.includes('ACTIVETRADE') || accName.includes('ACTIVTRADES')) return 'ActivTrades';
+    if (accName.includes('PEPPER')) return 'Pepperstone';
+    if (activeAccount?.platform === 'mt4' || activeAccount?.platform === 'mt5') return 'ActivTrades';
+    return '';
+  });
 
   // Mapeia ativos já existentes em panels para não reimportar
   const existingSet = new Set(
@@ -100,6 +111,18 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
             });
             return next;
           });
+        }
+      }
+
+      // Tenta obter o nome real da corretora a partir do conector MT4
+      const accRes = await fetch(`${host}/accounts`, { signal: AbortSignal.timeout(3000) }).catch(() => null);
+      if (accRes && accRes.ok) {
+        const accData = await accRes.json();
+        if (Array.isArray(accData.accounts) && accData.accounts.length > 0) {
+          const firstB = accData.accounts[0].broker;
+          if (firstB && !['MetaTrader 4', 'MetaTrader 5', 'MetaTrader Server'].includes(firstB)) {
+            setBrokerSuffix(prev => prev ? prev : firstB);
+          }
         }
       }
     } catch (_) {
@@ -170,7 +193,8 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
       }
 
       const instanceId = sym.toLowerCase();
-      const success = await createPanelAction(sym, instanceId, point, tick, sl, tp);
+      const finalName = brokerSuffix.trim() ? `${sym} - ${brokerSuffix.trim()}` : sym;
+      const success = await createPanelAction(finalName, instanceId, point, tick, sl, tp);
       if (success) {
         importedCount++;
       }
@@ -228,6 +252,26 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
           >
             ✕
           </button>
+        </div>
+
+        {/* Sufixo da Corretora / Conexão (Ex: ActivTrades) */}
+        <div className="px-5 py-2.5 bg-slate-900 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 flex-1 min-w-[260px]">
+            <span className="text-[11px] font-bold text-slate-300 shrink-0 flex items-center gap-1.5">
+              <span>🏷️</span>
+              <span>Sufixo da Corretora / Conta:</span>
+            </span>
+            <input
+              type="text"
+              value={brokerSuffix}
+              onChange={(e) => setBrokerSuffix(e.target.value)}
+              placeholder="Ex: ActivTrades, Pepperstone, MT4"
+              className="bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-lg px-2.5 py-1 text-xs text-sky-300 font-bold outline-none flex-1 max-w-xs shadow-inner"
+            />
+          </div>
+          <div className="text-[10px] text-slate-400 bg-slate-950/60 px-2 py-1 rounded border border-slate-800">
+            Formato na boleta/gráfico: <span className="font-black text-sky-300">BTCUSD{brokerSuffix.trim() ? ` - ${brokerSuffix.trim()}` : ''}</span>
+          </div>
         </div>
 
         {/* Filtros e Ações Rápidas */}
@@ -300,7 +344,9 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
                       }`}
                     >
                       <div className="min-w-0">
-                        <div className="font-black truncate">{sym}</div>
+                        <div className="font-black truncate">
+                          {sym}{brokerSuffix.trim() ? ` - ${brokerSuffix.trim()}` : ''}
+                        </div>
                         <div className="text-[9px] text-slate-400">Corretora MT4</div>
                       </div>
                       {isAlreadyExists ? (
@@ -345,7 +391,9 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
                         }`}
                       >
                         <div className="min-w-0">
-                          <div className="font-black truncate">{item.symbol}</div>
+                          <div className="font-black truncate">
+                            {item.symbol}{brokerSuffix.trim() ? ` - ${brokerSuffix.trim()}` : ''}
+                          </div>
                           <div className="text-[9px] text-slate-400 truncate">{item.name}</div>
                         </div>
                         {isAlreadyExists ? (
