@@ -124,7 +124,6 @@ export const AssetSearchSelect: React.FC<AssetSearchSelectProps> = ({
               filteredPanels.map((p) => {
                 const isSelected = p.id === currentPanelId;
                 const cleanName = p.name ? p.name.replace(/\s*\([^)]*\)/g, '').trim() : 'Painel';
-                const subSymbol = p.symbol && p.symbol !== cleanName ? p.symbol : (p.instance_id || '');
                 return (
                   <button
                     key={p.id}
@@ -140,9 +139,6 @@ export const AssetSearchSelect: React.FC<AssetSearchSelectProps> = ({
                   >
                     <div className="flex flex-col truncate">
                       <span className="font-extrabold uppercase truncate tracking-wide">{cleanName}</span>
-                      {subSymbol && (
-                        <span className="text-[9px] text-slate-400 truncate uppercase">{subSymbol}</span>
-                      )}
                     </div>
                     {isSelected && <span className="text-blue-400 text-[10px]">✓</span>}
                   </button>
