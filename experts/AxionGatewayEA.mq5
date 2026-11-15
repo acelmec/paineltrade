@@ -66,7 +66,7 @@ string FormatIsoTimestamp(datetime dt)
 //+------------------------------------------------------------------+
 //| JSON HELPER: EXTRAIR VALOR SIMPLES                               |
 //+------------------------------------------------------------------+
-string ExtractJsonValue(const string &json, const string &key)
+string ExtractJsonValue(string json, string key)
 {
    string search = "\"" + key + "\"";
    int pos = StringFind(json, search);
@@ -183,7 +183,7 @@ void OnTimer()
 //+------------------------------------------------------------------+
 //| ENVIO DE STREAMER PAYLOAD                                        |
 //+------------------------------------------------------------------+
-void SendStreamerPayload(const string &json)
+void SendStreamerPayload(string json)
 {
    if(InpTransportMode == TRANSPORT_LOCAL_HTTP)
    {
@@ -328,7 +328,7 @@ void CloseAllPositions()
 //+------------------------------------------------------------------+
 //| CONFIRMAR EXECUÇÃO DE COMANDO                                    |
 //+------------------------------------------------------------------+
-void ConfirmCommandExecuted(const string &cmdId, const string &status)
+void ConfirmCommandExecuted(string cmdId, string status)
 {
    if(cmdId == "") return;
    string url = InpGatewayUrl + "/command_ack";

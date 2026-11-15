@@ -18,10 +18,13 @@ import {
 import type { BrokerAccount, AccountStrategy, AccountPlatform, RemoteCopySubscription } from '../services/db';
 import { checkNinjaStatus, isNinjaExecutionAccount } from '../services/ninjaGateway';
 import { NinjaSyncModal } from './NinjaSyncModal';
+import { ConnectionsHub } from './ConnectionsHub';
+import { getLocalPlatformConnections } from '../services/connectionsService';
 import { sanitizeTimeMask } from '../utils/date';
 import { isElectronApp } from '../utils/platform';
 
 export const AccountsDashboard: React.FC = () => {
+  const [dashboardMainTab, setDashboardMainTab] = useState<'contas' | 'conexoes'>('contas');
   const {
     user,
     accounts,
@@ -827,6 +830,42 @@ export const AccountsDashboard: React.FC = () => {
             );
           })()}
 
+          {/* Botão de Sincronização MetaTrader 4 / 5 */}
+          {(() => {
+            const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
+            const hasMtOnline = mtConns.some(c => c.status === 'online');
+            const mtDetectedCount = mtConns.reduce((sum, c) => sum + (c.detected_accounts_detail?.length || c.detected_accounts?.length || 0), 0);
+
+            if (mtConns.length === 0 && !accounts.some(a => a.platform === 'mt4' || a.platform === 'mt5')) return null;
+
+            return (
+              <button
+                type="button"
+                onClick={() => setDashboardMainTab('conexoes')}
+                className={`px-3 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 border shadow-md active:scale-95 cursor-pointer ${
+                  hasMtOnline
+                    ? 'bg-sky-950/80 hover:bg-sky-900/90 text-sky-300 border-sky-700/60 shadow-sky-900/20'
+                    : 'bg-slate-900/80 hover:bg-slate-800 text-slate-400 border-slate-800'
+                }`}
+                title="Sincronizar contas reais do MetaTrader 4 / 5"
+              >
+                <span className="relative flex h-2 w-2">
+                  {hasMtOnline && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>}
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${hasMtOnline ? 'bg-sky-400' : 'bg-slate-500'}`}></span>
+                </span>
+                <span className="flex items-center gap-1.5" translate="no">
+                  <span>🟦</span>
+                  <span>Sincronizar MetaTrader</span>
+                  {mtDetectedCount > 0 && (
+                    <span className="text-[11px] opacity-90 font-mono text-emerald-400 font-bold">
+                      ({mtDetectedCount} online)
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })()}
+
           {/* Botão de Alternância: Modo Cards vs Modo Lista */}
           <button
             type="button"
@@ -869,8 +908,72 @@ export const AccountsDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Visualização de Contas: Modo Cards (Grid) ou Modo Lista */}
-      {viewMode === 'grid' ? (
+      {/* Abas Superiores do Dashboard: Minhas Contas vs Central de Conexões */}
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+        <button
+          type="button"
+          onClick={() => setDashboardMainTab('contas')}
+          className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+            dashboardMainTab === 'contas'
+              ? 'bg-blue-600 text-white shadow-md shadow-blue-900/40'
+              : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+          }`}
+        >
+          <span>🏦</span> Minhas Contas ({accounts.length})
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setDashboardMainTab('conexoes')}
+          className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+            dashboardMainTab === 'conexoes'
+              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-900/40'
+              : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+          }`}
+        >
+          <span>🔌</span> Central de Conexões (VPS / NT8 / MT4 / MT5 / Binance)
+        </button>
+      </div>
+
+      {dashboardMainTab === 'conexoes' ? (
+        <ConnectionsHub
+          accounts={accounts}
+          onAccountsUpdated={async () => { await refreshAccounts(); }}
+          onSelectConnection={(conn, detectedAcc) => {
+            setDashboardMainTab('contas');
+            handleOpenCreate();
+            setFormPlatform(conn.platform as any);
+            if (conn.platform === 'mt4' || conn.platform === 'mt5') {
+              setFormSendLocalhost(true);
+              if (detectedAcc) {
+                setFormName(detectedAcc.name || `MT4 #${detectedAcc.account_number}`);
+                if (detectedAcc.balance > 0) {
+                  setFormInitialBalance(detectedAcc.balance);
+                  setFormDailyStop(Math.round(detectedAcc.balance * 0.05) || 1000);
+                  setFormMaxDd(Math.round(detectedAcc.balance * 0.1) || 2500);
+                  setFormProfitTarget(Math.round(detectedAcc.balance * 0.1) || 2000);
+                }
+              } else if (conn.detected_accounts_detail && conn.detected_accounts_detail.length > 0) {
+                const first = conn.detected_accounts_detail[0];
+                setFormName(first.name || `MT4 #${first.account_number}`);
+                if (first.balance > 0) {
+                  setFormInitialBalance(first.balance);
+                  setFormDailyStop(Math.round(first.balance * 0.05) || 1000);
+                  setFormMaxDd(Math.round(first.balance * 0.1) || 2500);
+                  setFormProfitTarget(Math.round(first.balance * 0.1) || 2000);
+                }
+              } else if (conn.detected_accounts && conn.detected_accounts.length > 0) {
+                setFormName(`Conta MT4 #${conn.detected_accounts[0]}`);
+              }
+            } else if (conn.platform === 'nt8') {
+              setFormSendLocalhost(true);
+            }
+          }}
+        />
+      ) : (
+        <>
+          {/* Visualização de Contas: Modo Cards (Grid) ou Modo Lista */}
+          {viewMode === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {displayAccounts.map(acc => {
             const isNinjaAcc = isNinjaExecutionAccount(acc);
@@ -1006,6 +1109,54 @@ export const AccountsDashboard: React.FC = () => {
                     </div>
                   )}
 
+                  {/* Status de Sincronização do MetaTrader 4 */}
+                  {acc.platform === 'mt4' && (
+                    <div className="flex items-center justify-between text-[10px] px-2.5 py-1 bg-sky-500/10 rounded-lg border border-sky-500/20">
+                      <span className="text-slate-300 font-semibold flex items-center gap-1.5">
+                        <span>🟦</span> MetaTrader 4
+                      </span>
+                      <span className="text-sky-300 font-mono text-[9.5px]">
+                        Conector EA (Porta 8003 / Hub)
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Status de Sincronização do MetaTrader 5 */}
+                  {acc.platform === 'mt5' && (
+                    <div className="flex items-center justify-between text-[10px] px-2.5 py-1 bg-blue-500/10 rounded-lg border border-blue-500/20">
+                      <span className="text-slate-300 font-semibold flex items-center gap-1.5">
+                        <span>🔷</span> MetaTrader 5
+                      </span>
+                      <span className="text-blue-300 font-mono text-[9.5px]">
+                        Conector EA (Porta 8003 / Hub)
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Status de Sincronização do cTrader */}
+                  {acc.platform === 'ctrader' && (
+                    <div className="flex items-center justify-between text-[10px] px-2.5 py-1 bg-teal-500/10 rounded-lg border border-teal-500/20">
+                      <span className="text-slate-300 font-semibold flex items-center gap-1.5">
+                        <span>🟪</span> cTrader
+                      </span>
+                      <span className="text-teal-300 font-mono text-[9.5px]">
+                        Conector cBot / Open API
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Status de Sincronização da Binance */}
+                  {acc.platform === 'binance' && (
+                    <div className="flex items-center justify-between text-[10px] px-2.5 py-1 bg-amber-500/10 rounded-lg border border-amber-500/20">
+                      <span className="text-slate-300 font-semibold flex items-center gap-1.5">
+                        <span>🟡</span> Binance Spot
+                      </span>
+                      <span className="text-amber-400 font-mono text-[9.5px]">
+                        API REST Conectada
+                      </span>
+                    </div>
+                  )}
+
                   {/* Saldo & PnL */}
                   <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/80 flex items-center justify-between">
                     <div>
@@ -1109,10 +1260,18 @@ export const AccountsDashboard: React.FC = () => {
                       <div>Stop Diário: <span className="text-red-400 font-bold">US$ {acc.daily_stop_loss_usd}</span></div>
                       <div>Meta Lucro Total: <span className="text-emerald-400 font-bold">US$ {acc.profit_target_usd || 3000}</span></div>
                       <div>DD Máximo: <span className="text-amber-400 font-bold">US$ {acc.max_drawdown_usd}</span></div>
-                      {!(acc.platform === 'nt8' || isNinjaExecutionAccount(acc) || acc.send_localhost) ? (
-                        <div>Eliminação Definitiva: <span className="text-slate-200 font-bold">{acc.simulate_elimination !== false ? 'SIM' : 'NÃO'}</span></div>
+                      {acc.platform === 'binance' ? (
+                        <div>Tipo: <span className="text-yellow-400 font-bold font-mono">Binance Spot</span></div>
+                      ) : acc.platform === 'mt4' ? (
+                        <div>Tipo: <span className="text-sky-400 font-bold font-mono">MetaTrader 4</span></div>
+                      ) : acc.platform === 'mt5' ? (
+                        <div>Tipo: <span className="text-blue-400 font-bold font-mono">MetaTrader 5</span></div>
+                      ) : acc.platform === 'ctrader' ? (
+                        <div>Tipo: <span className="text-teal-400 font-bold font-mono">cTrader</span></div>
+                      ) : (acc.platform === 'nt8' || isNinjaExecutionAccount(acc)) ? (
+                        <div>Tipo: <span className="text-amber-400 font-bold font-mono">NinjaTrader 8</span></div>
                       ) : (
-                        <div>Tipo: <span className="text-cyan-300 font-bold font-mono">NinjaTrader 8</span></div>
+                        <div>Eliminação Definitiva: <span className="text-slate-200 font-bold">{acc.simulate_elimination !== false ? 'SIM' : 'NÃO'}</span></div>
                       )}
                     </div>
                   </div>
@@ -1555,6 +1714,8 @@ export const AccountsDashboard: React.FC = () => {
           </div>
         </div>
       )}
+        </>
+      )}
 
       {/* Modal Criar / Editar Conta */}
       {(isCreateModalOpen || editingAccount) && (
@@ -1575,6 +1736,63 @@ export const AccountsDashboard: React.FC = () => {
                 ✕
               </button>
             </div>
+
+            {/* Seletor Rápido de Conexão Validada (Hub de Conexões) */}
+            {!editingAccount && (
+              <div className="bg-slate-950/90 p-3 rounded-lg border border-emerald-900/40 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                    <span>🔌</span> Vincular a uma Conexão Validada (Hub VPS / MT4 / NT8):
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCreateModalOpen(false);
+                      setDashboardMainTab('conexoes');
+                    }}
+                    className="text-[10px] text-emerald-400 hover:underline cursor-pointer"
+                  >
+                    Gerenciar Conexões ➔
+                  </button>
+                </div>
+                <select
+                  onChange={(e) => {
+                    const connId = e.target.value;
+                    if (!connId) return;
+                    const conns = getLocalPlatformConnections();
+                    const found = conns.find(c => c.id === connId);
+                    if (found) {
+                      setFormPlatform(found.platform as any);
+                      if (found.platform === 'mt4' || found.platform === 'mt5') {
+                        setFormSendLocalhost(true);
+                        const accDetail = found.detected_accounts_detail?.[0];
+                        if (accDetail) {
+                          setFormName(accDetail.name || `MT4 #${accDetail.account_number}`);
+                          if (accDetail.balance > 0) {
+                            setFormInitialBalance(accDetail.balance);
+                            setFormDailyStop(Math.round(accDetail.balance * 0.05) || 1000);
+                            setFormMaxDd(Math.round(accDetail.balance * 0.1) || 2500);
+                            setFormProfitTarget(Math.round(accDetail.balance * 0.1) || 2000);
+                          }
+                        } else if (found.detected_accounts && found.detected_accounts.length > 0) {
+                          setFormName(`Conta MT4 #${found.detected_accounts[0]}`);
+                        }
+                      } else if (found.platform === 'nt8') {
+                        setFormSendLocalhost(true);
+                      }
+                    }
+                  }}
+                  className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-3 py-2 outline-none focus:border-emerald-500 font-mono cursor-pointer"
+                >
+                  <option value="">Selecione uma conexão para auto-preencher...</option>
+                  {getLocalPlatformConnections().filter(c => c.is_active).map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.platform === 'nt8' ? '🟧' : c.platform === 'mt4' ? '🟦' : c.platform === 'mt5' ? '🔷' : c.platform === 'binance' ? '🟡' : '🟪'} {c.name} ({c.status === 'online' ? '● Online' : '○ Offline'}) — {c.host_url}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* Seletor Visual de Plataforma */}
             <div className="bg-slate-950/80 p-3 rounded-lg border border-slate-800 space-y-2">

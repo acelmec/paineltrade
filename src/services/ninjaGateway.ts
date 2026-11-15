@@ -117,13 +117,20 @@ const REQUEST_TIMEOUT_MS = 2500;
  */
 export function isNinjaExecutionAccount(acc: any): boolean {
   if (!acc) return false;
-  // 1. Flag explícita de envio local
-  if (acc.send_localhost === true) return true;
-
   const platform = (acc.platform || '').toLowerCase();
-  if (platform === 'nt8' || platform === 'mt5') return true;
 
-  // 2. Auto-detecção inteligente por padrão de nome de conta NinjaTrader
+  // Contas explicitamente MT4, MT5, cTrader, Binance ou Axion Demo NUNCA são tratadas como NinjaTrader
+  if (['mt4', 'mt5', 'ctrader', 'binance', 'axion', 'demo', 'internal_demo'].includes(platform)) {
+    return false;
+  }
+
+  // 1. Flag explícita da plataforma NT8
+  if (platform === 'nt8') return true;
+
+  // 2. Se send_localhost for true e a plataforma não for definida
+  if (acc.send_localhost === true && !platform) return true;
+
+  // 3. Auto-detecção inteligente por padrão de nome de conta NinjaTrader
   const name = (acc.account_name || acc.name || '').trim().toUpperCase();
   if (
     name.startsWith('SIM') ||
@@ -137,14 +144,11 @@ export function isNinjaExecutionAccount(acc: any): boolean {
     return true;
   }
 
-  // 3. Contas estritamente axion virtuais sem flag local
-  const blockedPlatforms = ['axion', 'demo', 'internal_demo'];
+  // 4. Contas estritamente virtuais sem flag local
   const accountType = (acc.account_type || '').toLowerCase();
-  if (blockedPlatforms.includes(platform)) return false;
-  if (accountType === 'internal_demo') return false;
-  if (name.includes('INTERNAL_DEMO')) return false;
+  if (accountType === 'internal_demo' || name.includes('INTERNAL_DEMO')) return false;
 
-  return Boolean(acc.send_localhost || platform === 'nt8' || platform === 'mt5');
+  return Boolean(platform === 'nt8');
 }
 
 /**

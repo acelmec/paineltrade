@@ -55,6 +55,11 @@ const ML_REGISTRY_PATH = path.join(__dirname, '..', 'ml_pipeline', 'models', 'st
 const ML_SCHEDULE_PATH = path.join(__dirname, '..', 'ml_pipeline', 'models', 'ml_schedule.json');
 const ML_SCRIPT_PATH = path.join(__dirname, '..', 'ml_pipeline', 'pattern_analyzer.py');
 
+// Cache em memória para Conector Oficial MetaTrader 4 & MetaTrader 5 (Porta 80 / HTTP Padrão)
+const mt4QuotesCache = new Map(); // symbol -> { price, bid, ask, volume, updated_at }
+const mt4AccountsConnected = new Map(); // accountNumber -> { lastSeen: Date, symbol: string }
+const mt4PendingCommands = new Map(); // accountId/number -> Array<{ id, action, symbol, direction, side, lots, stop_loss, take_profit, ticket }>
+
 let mlRunState = {
   is_running: false,
   current_symbol: null,
@@ -624,18 +629,202 @@ const server = http.createServer((req, res) => {
     const memory = process.memoryUsage();
     res.end(JSON.stringify({
       status: 'online',
-      version: '3.3.0',
+      service: 'Axion WebSocket Hub & MetaTrader Gateway',
+      version: '3.4.0',
       uptime_seconds: Math.floor((Date.now() - startTime) / 1000),
       connected_clients: wss.clients.size,
+      connected_accounts_count: mt4AccountsConnected.size,
+      connected_accounts: Array.from(mt4AccountsConnected.entries()).map(([acc, info]) => ({ account: acc, ...info })),
       active_orders_monitored: activeOrders.length,
       orders_closed_by_server: totalOrdersClosedByServer,
       last_orders_sync_ago_sec: lastOrdersSyncTime > 0 ? Math.floor((Date.now() - lastOrdersSyncTime) / 1000) : null,
       messages_received: totalMessagesReceived,
       broadcasts_sent: totalBroadcastsSent,
       cached_instances: Array.from(marketDataCache.keys()),
+      quotes: Object.fromEntries(mt4QuotesCache),
       memory_rss_mb: (memory.rss / (1024 * 1024)).toFixed(2),
       memory_heap_mb: (memory.heapUsed / (1024 * 1024)).toFixed(2)
     }, null, 2));
+    return;
+  }
+
+  // --- ROTAS DO CONECTOR METATRADER 4 / METATRADER 5 (PORTA 80 PADRÃO) ---
+  // 1. GET /commands?account=5518533 (MT4 faz polling de ordens e sincroniza saldo/dados da conta)
+  if (req.method === 'GET' && pathname === '/commands') {
+    const accNum = String(url.searchParams.get('account') || '').trim();
+    if (accNum) {
+      const balance = parseFloat(url.searchParams.get('balance') || '0');
+      const equity = parseFloat(url.searchParams.get('equity') || '0');
+      let broker = url.searchParams.get('broker') || 'MetaTrader 4';
+      try { broker = decodeURIComponent(broker); } catch (_) {}
+      const currency = url.searchParams.get('currency') || 'USD';
+      const isDemo = url.searchParams.get('demo') === '1';
+      const leverage = parseInt(url.searchParams.get('leverage') || '100', 10);
+
+      const existing = mt4AccountsConnected.get(accNum) || {};
+      mt4AccountsConnected.set(accNum, {
+        account: accNum,
+        account_name: `MT4 #${accNum}`,
+        balance: balance > 0 ? balance : (existing.balance || 0),
+        equity: equity > 0 ? equity : (existing.equity || 0),
+        broker: broker || existing.broker || 'MetaTrader 4',
+        currency: currency || existing.currency || 'USD',
+        is_demo: isDemo,
+        leverage: leverage || existing.leverage || 100,
+        lastSeen: new Date().toISOString(),
+        symbol: url.searchParams.get('symbol') || existing.symbol || 'ACTIVE'
+      });
+    }
+
+    const queue = mt4PendingCommands.get(accNum) || mt4PendingCommands.get('all') || [];
+    if (queue.length > 0) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(queue[0]));
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({}));
+    return;
+  }
+
+  // 1.1 GET /accounts ou /mt4/accounts: Retorna lista de contas reais detectadas para sincronização
+  if (req.method === 'GET' && (pathname === '/accounts' || pathname === '/mt4/accounts')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    const accList = [];
+    for (const [acc, info] of mt4AccountsConnected.entries()) {
+      accList.push({
+        id: acc,
+        account_number: acc,
+        name: `MT4 #${acc}`,
+        cashValue: info.balance || 0,
+        balance: info.balance || 0,
+        equity: info.equity || 0,
+        buyingPower: info.equity || info.balance || 0,
+        broker: info.broker || 'MetaTrader 4',
+        currency: info.currency || 'USD',
+        isDemo: info.is_demo !== false,
+        isConnected: true,
+        platform: 'mt4',
+        lastSeen: info.lastSeen
+      });
+    }
+    res.end(JSON.stringify({ accounts: accList }));
+    return;
+  }
+
+  // 2. POST /command_ack (MT4 confirma execução de comando)
+  if (req.method === 'POST' && pathname === '/command_ack') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const cmdId = payload.id;
+        const accNum = String(payload.account || '').trim();
+        const status = payload.status;
+
+        console.log(`✅ [MT4-HUB] Ordem ${cmdId} confirmada pelo MT4 (${accNum}) status: ${status}`);
+
+        if (accNum && mt4PendingCommands.has(accNum)) {
+          const list = mt4PendingCommands.get(accNum).filter(c => c.id !== cmdId);
+          mt4PendingCommands.set(accNum, list);
+        }
+        if (mt4PendingCommands.has('all')) {
+          const list = mt4PendingCommands.get('all').filter(c => c.id !== cmdId);
+          mt4PendingCommands.set('all', list);
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // 3. POST /streamer (Recebe ticks e candles do MT4)
+  if (req.method === 'POST' && pathname === '/streamer') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body || '{}');
+        const sym = (data.symbol || '').toUpperCase();
+        if (sym) {
+          mt4QuotesCache.set(sym, {
+            symbol: sym,
+            price: Number(data.price || data.close || 0),
+            bid: Number(data.bid || 0),
+            ask: Number(data.ask || 0),
+            volume: Number(data.volume || 0),
+            updated_at: data.updated_at || new Date().toISOString()
+          });
+
+          // Também repassa para o broadcast WebSocket do VortexWeb
+          broadcast({
+            type: data.type || 'market_data',
+            instance_id: data.panel || sym.toLowerCase(),
+            symbol: sym,
+            data: data,
+            ts_relay: Date.now()
+          });
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, symbol: sym }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // 4. POST /order (VortexWeb envia ordem para o MT4)
+  if (req.method === 'POST' && (pathname === '/order' || pathname === '/send_order')) {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const accNum = String(payload.account || payload.account_name || 'all').trim();
+        const cmdId = payload.id || `cmd_${Date.now()}`;
+
+        const cmd = {
+          id: cmdId,
+          action: payload.action || 'order',
+          symbol: payload.symbol || '',
+          direction: payload.direction || (payload.side === 'COMPRA' || payload.side === 'BUY' ? 1 : 2),
+          side: payload.side || (payload.direction === 1 ? 'BUY' : 'SELL'),
+          lots: Number(payload.lots || payload.contracts || 0.01),
+          stop_loss: Number(payload.stop_loss || 0),
+          take_profit: Number(payload.take_profit || 0),
+          ticket: Number(payload.ticket || 0)
+        };
+
+        if (!mt4PendingCommands.has(accNum)) {
+          mt4PendingCommands.set(accNum, []);
+        }
+        mt4PendingCommands.get(accNum).push(cmd);
+
+        console.log(`🚀 [MT4-HUB] Ordem enfileirada para MT4 (${accNum}):`, cmd);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, command_id: cmdId }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // 5. GET /quotes (Cotações MT4)
+  if (req.method === 'GET' && pathname === '/quotes') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(Object.fromEntries(mt4QuotesCache)));
     return;
   }
 

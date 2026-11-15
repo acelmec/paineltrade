@@ -2373,7 +2373,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       alert('🔒 Modo Segundo Acesso Restrito: O reset de saldo de contas não é permitido neste acesso.');
       return false;
     }
-    if (acc.platform === 'nt8' || acc.send_localhost) {
+    if (isNinjaExecutionAccount(acc)) {
       alert(`A conta "${acc.account_name}" é sincronizada com o NinjaTrader 8. O saldo desta conta é gerenciado diretamente pela corretora/NinjaTrader e não pode ser resetado manualmente pelo painel.`);
       return false;
     }
@@ -10193,8 +10193,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return null;
       }
 
-      // 🔌 Bloqueio de Conexão NinjaTrader: Se a conta selecionada for NinjaTrader / Local, o Gateway deve estar online
-      if (targetAcc && (targetAcc.platform === 'nt8' || targetAcc.send_localhost === true)) {
+      // 🔌 Bloqueio de Conexão NinjaTrader: Se a conta selecionada for NinjaTrader, o Gateway deve estar online
+      if (targetAcc && isNinjaExecutionAccount(targetAcc)) {
         const ninjaHealth = await checkNinjaStatus();
         if (ninjaHealth.status !== 'online') {
           const msg = `⚠️ NinjaTrader Desconectado: A conta "${targetAcc.account_name}" é vinculada ao NinjaTrader 8, mas o Vortex Gateway local (Porta 8001) está offline.\n\nAbra o NinjaTrader 8 e verifique se o conector está ativo antes de abrir operações.`;

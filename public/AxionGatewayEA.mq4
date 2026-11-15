@@ -21,9 +21,9 @@ enum ENUM_GATEWAY_TRANSPORT {
 //| INPUTS                                                           |
 //+------------------------------------------------------------------+
 extern string                  Group_Conexao        = "=== 1. CONEXÃO AXION GATEWAY ===";
-extern ENUM_GATEWAY_TRANSPORT  InpTransportMode     = TRANSPORT_LOCAL_HTTP;     // Modo de Transporte
-extern string                  InpGatewayUrl        = "http://localhost:8003";  // URL Gateway Local / VPS
-extern string                  InpPairingToken      = "";                       // Token de Pareamento de Nuvem
+extern ENUM_GATEWAY_TRANSPORT  InpTransportMode     = TRANSPORT_CLOUD_RELAY;    // Modo de Transporte
+extern string                  InpGatewayUrl        = "http://144.126.141.254"; // URL Gateway Local / VPS (Porta 80 Padrão)
+extern string                  InpPairingToken      = "vps_mt4";                // Token de Pareamento de Nuvem
 extern int                     InpPollIntervalMs    = 300;                      // Intervalo de Consulta de Ordens (ms)
 extern int                     InpMagicNumber       = 888999;                   // Magic Number das Ordens
 
@@ -59,7 +59,7 @@ string FormatIsoTimestamp(datetime dt)
 //+------------------------------------------------------------------+
 //| JSON HELPER: EXTRAIR VALOR SIMPLES                               |
 //+------------------------------------------------------------------+
-string ExtractJsonValue(const string &json, const string &key)
+string ExtractJsonValue(string json, string key)
 {
    string search = "\"" + key + "\"";
    int pos = StringFind(json, search);
@@ -101,6 +101,7 @@ int OnInit()
 {
    EventSetMillisecondTimer(MathMax(100, InpPollIntervalMs));
    Print("🚀 [AxionGatewayEA MT4] Conector inicializado para ", _Symbol, " | Conta: ", AccountNumber());
+   Print("📊 [AxionGatewayEA MT4] Saldo Real: ", DoubleToString(AccountBalance(), 2), " ", AccountCurrency(), " | Corretora: ", AccountCompany(), " (", IsDemo() ? "DEMO" : "REAL", ")");
    return(INIT_SUCCEEDED);
 }
 
@@ -164,19 +165,17 @@ void OnTimer()
 //+------------------------------------------------------------------+
 //| ENVIO DE STREAMER PAYLOAD                                        |
 //+------------------------------------------------------------------+
-void SendStreamerPayload(const string &json)
+void SendStreamerPayload(string json)
 {
-   if(InpTransportMode == TRANSPORT_LOCAL_HTTP)
-   {
-      string url = InpGatewayUrl + "/streamer";
-      string headers = "Content-Type: application/json\r\n";
-      char data[];
-      StringToCharArray(json, data, 0, StringLen(json));
-      char result[];
-      string resultHeaders;
-      ResetLastError();
-      WebRequest("POST", url, headers, 100, data, result, resultHeaders);
-   }
+   if(InpGatewayUrl == "") return;
+   string url = InpGatewayUrl + "/streamer";
+   string headers = "Content-Type: application/json\r\n";
+   char data[];
+   StringToCharArray(json, data, 0, StringLen(json));
+   char result[];
+   string resultHeaders;
+   ResetLastError();
+   WebRequest("POST", url, headers, 100, data, result, resultHeaders);
 }
 
 //+------------------------------------------------------------------+
@@ -184,7 +183,18 @@ void SendStreamerPayload(const string &json)
 //+------------------------------------------------------------------+
 void PollAndProcessCommands()
 {
-   string url = InpGatewayUrl + "/commands?account=" + IntegerToString(AccountNumber());
+   if(InpGatewayUrl == "") return;
+   
+   string brokerClean = AccountCompany();
+   StringReplace(brokerClean, " ", "%20");
+   string url = InpGatewayUrl + "/commands?account=" + IntegerToString(AccountNumber()) + 
+                "&symbol=" + _Symbol +
+                "&balance=" + DoubleToString(AccountBalance(), 2) +
+                "&equity=" + DoubleToString(AccountEquity(), 2) +
+                "&currency=" + AccountCurrency() +
+                "&broker=" + brokerClean +
+                "&demo=" + (IsDemo() ? "1" : "0") +
+                "&leverage=" + IntegerToString(AccountLeverage());
    if(InpPairingToken != "") url += "&token=" + InpPairingToken;
 
    char data[];
@@ -192,6 +202,20 @@ void PollAndProcessCommands()
    string resultHeaders;
    ResetLastError();
    int res = WebRequest("GET", url, "Content-Type: application/json\r\n", 500, data, result, resultHeaders);
+   if(res == -1)
+   {
+      int err = GetLastError();
+      if(err == 4060)
+      {
+         static datetime lastWarn4060 = 0;
+         if(TimeCurrent() - lastWarn4060 > 15)
+         {
+            lastWarn4060 = TimeCurrent();
+            Print("⚠️ [AxionGatewayEA MT4] WebRequest BLOQUEADO para '", InpGatewayUrl, "' (Erro 4060). Adicione '", InpGatewayUrl, "' em: Ferramentas -> Opções -> Experts!");
+         }
+      }
+      return;
+   }
    if(res != 200 || ArraySize(result) == 0) return;
 
    string response = CharArrayToString(result);
@@ -331,7 +355,7 @@ void CloseAllPositions()
 //+------------------------------------------------------------------+
 //| CONFIRMAR EXECUÇÃO DE COMANDO                                    |
 //+------------------------------------------------------------------+
-void ConfirmCommandExecuted(const string &cmdId, const string &status)
+void ConfirmCommandExecuted(string cmdId, string status)
 {
    if(cmdId == "") return;
    string url = InpGatewayUrl + "/command_ack";
