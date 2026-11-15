@@ -3699,6 +3699,23 @@ async function queryCandleChunkWithAbort(
   }
 }
 
+export function isStandardSupabasePanel(panel: any): boolean {
+  if (!panel) return false;
+  const inst = String(panel.instance_id || '').toLowerCase().trim();
+  const name = String(panel.name || '').toUpperCase().trim();
+  // Se possui sufixo de corretora/conector (ex: " - ActivTrades", " - NT8", " - MT4"), é ativo sincronizado pelo usuário
+  if (name.includes(' - ')) return false;
+  // Ativos padrão do Axion cadastrados pelo Admin que utilizam feed do Supabase
+  if (inst.startsWith('painel_')) return true;
+  if (
+    ['nasdaq', 'russel2000', 'gold', 'sp500', 'dowjones', 'oil'].includes(inst) &&
+    ['NASDAQ', 'RUSSEL2000', 'GOLD', 'SP500', 'DOWJONES', 'OIL'].includes(name)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export async function fetchCandlesSupabase(
   panelId: string,
   panelInstanceId?: string,
@@ -3713,55 +3730,32 @@ export async function fetchCandlesSupabase(
 
   onProgress?.(15, 0, limit);
 
-  // 0. Detecção e alimentação nativa de Cripto (Binance Cloud Feed)
+  // 0. Detecção de plataforma ativa e separação estrita entre Ativos de Corretora (MT4/MT5/NT8) vs Binance
   const rawSym = (targetPanelObj?.symbol || targetPanelObj?.name || targetPanelObj?.instance_id || queryId || '').toUpperCase();
   const baseSym = rawSym.split(/[-_(\s]/)[0].trim().replace(/[^A-Z0-9]/g, '');
+  const hasBrokerSuffix = rawSym.includes(' - ') && !rawSym.includes('BINANCE');
 
   const activePlat = typeof window !== 'undefined' ? (localStorage.getItem('vortex_active_account_platform') || '') : '';
   const isMtFeed = activePlat === 'mt4' ||
                    activePlat === 'mt5' ||
+                   hasBrokerSuffix ||
                    (targetPanelObj as any)?.platform === 'mt4' ||
                    (targetPanelObj as any)?.platform === 'mt5' ||
                    (targetPanelObj as any)?.source === 'mt4' ||
                    (targetPanelObj?.instance_id || '').startsWith('mt4_');
 
   const isCryptoAsset = /USDT|BUSD|USDC/i.test(baseSym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(baseSym);
+  const isForexOrCfd = isCryptoAsset || /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(baseSym);
 
-  // 0. Coleta de histórico contínuo para Criptoativos (Binance REST API - 1000 klines sem lacunas)
-  if (isCryptoAsset) {
-    try {
-      let cleanSym = baseSym;
-      if (cleanSym.endsWith('USD') && !cleanSym.endsWith('USDT')) {
-        cleanSym = `${cleanSym}T`; // ETHUSD -> ETHUSDT, BTCUSD -> BTCUSDT
-      } else if (!cleanSym.endsWith('USDT') && !cleanSym.endsWith('BUSD') && !cleanSym.endsWith('USDC')) {
-        cleanSym = `${cleanSym}USDT`;
-      }
-      const { fetchBinanceCandles, subscribeBinanceMarketData, unsubscribeBinanceMarketData } = await import('./binanceService');
-      const binanceCandles = await fetchBinanceCandles(cleanSym, '1m', Math.max(limit, 1000), false);
-      if (binanceCandles && binanceCandles.length > 0) {
-        onProgress?.(100, binanceCandles.length, limit);
-        saveLocalCandles(queryId, binanceCandles);
-        // Se a conta for MT4, o WebSocket da Binance NÃO é ativado para não colidir com o Bid/Ask da corretora
-        if (!isMtFeed) {
-          subscribeBinanceMarketData(cleanSym, false);
-        } else {
-          unsubscribeBinanceMarketData();
-        }
-        return binanceCandles;
-      }
-    } catch (e) {
-      console.warn('[DB] Falha no feed histórico da Binance para cripto, tentando fallback:', e);
-    }
-  } else if (isMtFeed) {
-    // Garante que o WebSocket da Binance seja desativado para não colidir com o feed da corretora MT4
+  if (isMtFeed) {
+    // Garante que o WebSocket da Binance seja imediatamente desativado para nunca colidir com o Bid/Ask da corretora MT4/MT5
     try {
       import('./binanceService').then(m => m.unsubscribeBinanceMarketData?.()).catch(() => {});
     } catch {}
   }
 
-  // 0.1 Detecção e alimentação nativa de Forex, Metais & Índices Globais via Bridge / VPS (e fallback para Cripto)
-  const isForexOrCfd = isCryptoAsset || /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(baseSym);
-  if (isForexOrCfd) {
+  // 0.1 Prioridade para Bridge MT4/MT5 / VPS quando o ativo pertence à corretora (isMtFeed) ou é Forex/CFD/Metais/Índices
+  if (isForexOrCfd && (isMtFeed || !isCryptoAsset)) {
     try {
       const { getLocalPlatformConnections } = await import('./connectionsService');
       const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
@@ -3788,7 +3782,34 @@ export async function fetchCandlesSupabase(
         }
       }
     } catch (mErr) {
-      console.warn('[DB] Falha no feed de Forex/CFDs via Bridge, tentando Supabase:', mErr);
+      console.warn('[DB] Falha no feed de Forex/CFDs via Bridge, tentando fallback:', mErr);
+    }
+  }
+
+  // 0.2 Coleta de histórico contínuo para Criptoativos (Binance REST API - ou fallback de histórico se o MT4 ainda não enviou velas de BTCUSD/ETHUSD)
+  if (isCryptoAsset) {
+    try {
+      let cleanSym = baseSym;
+      if (cleanSym.endsWith('USD') && !cleanSym.endsWith('USDT')) {
+        cleanSym = `${cleanSym}T`; // ETHUSD -> ETHUSDT, BTCUSD -> BTCUSDT
+      } else if (!cleanSym.endsWith('USDT') && !cleanSym.endsWith('BUSD') && !cleanSym.endsWith('USDC')) {
+        cleanSym = `${cleanSym}USDT`;
+      }
+      const { fetchBinanceCandles, subscribeBinanceMarketData, unsubscribeBinanceMarketData } = await import('./binanceService');
+      const binanceCandles = await fetchBinanceCandles(cleanSym, '1m', Math.max(limit, 1000), false);
+      if (binanceCandles && binanceCandles.length > 0) {
+        onProgress?.(100, binanceCandles.length, limit);
+        saveLocalCandles(queryId, binanceCandles);
+        // Se a conta ou ativo for MT4/Corretora, o WebSocket da Binance NUNCA é ativado para não colidir com o Bid/Ask da corretora
+        if (!isMtFeed) {
+          subscribeBinanceMarketData(cleanSym, false);
+        } else {
+          unsubscribeBinanceMarketData();
+        }
+        return binanceCandles;
+      }
+    } catch (e) {
+      console.warn('[DB] Falha no feed histórico da Binance para cripto, tentando fallback:', e);
     }
   }
 

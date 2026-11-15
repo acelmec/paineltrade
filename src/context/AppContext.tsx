@@ -63,6 +63,7 @@ import {
   validateAccountTradingRules,
   getLocalCopyTradingConfigs,
   syncAllCopyRulesToNinjaTrader,
+  isStandardSupabasePanel,
   isSameAsset,
   saveNinjaLiveBridgeSnapshotSupabase,
   fetchNinjaPendingRemoteCommandsSupabase,
@@ -3640,7 +3641,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           let didDeleteAny = false;
           let didUpdateAny = false;
 
-          for (const adminPanel of adminPanels) {
+          // Apenas sincroniza os ativos padrão do Axion (Supabase) criados pelo Admin,
+          // ignorando ativos de conectores pessoais (MT4/MT5/NT8) sincronizados pelo usuário
+          const standardAdminPanels = adminPanels.filter(ap => isStandardSupabasePanel(ap));
+
+          for (const adminPanel of standardAdminPanels) {
             // A numeracao/instance do painel replica o ID do admin diretamente
             const expectedInstanceId = adminPanel.instance_id;
             
@@ -3872,10 +3877,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
           }
 
-          // Excluir painéis que o admin removeu
-          const adminExpectedInstances = new Set(adminPanels.map(ap => ap.instance_id));
+          // Excluir apenas painéis padrão Axion (Supabase) que o admin removeu,
+          // preservando ativos sincronizados pelo próprio usuário via conectores NT8 / MetaTrader
+          const adminExpectedInstances = new Set(standardAdminPanels.map(ap => ap.instance_id));
           const panelsToDelete = updatedPanelsList.filter(p => {
-            // Apenas remove painéis que o admin não possui mais
+            if (!isStandardSupabasePanel(p)) return false;
             return !adminExpectedInstances.has(p.instance_id);
           });
 
@@ -10017,19 +10023,51 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const deletePanelAction = async (panelId: string): Promise<boolean> => {
+  const deletePanelAction = async (
+    panelId: string,
+    options?: { protectStandardAxion?: boolean; skipReload?: boolean }
+  ): Promise<boolean> => {
     if (!user || panels.length <= 1) return false;
     try {
+      const targetPanel = panels.find(p => p.id === panelId);
+      if (options?.protectStandardAxion && targetPanel && isStandardSupabasePanel(targetPanel)) {
+        addLog('AVISO', `🔒 O ativo padrão "${targetPanel.name}" (Supabase) é protegido e não pode ser excluído.`, 'alerta');
+        return false;
+      }
+
       const isSystemAdmin = user.email?.toLowerCase() === 'admin@vortex.com';
       const storedSubscriptionId = isSystemAdmin ? 'admin' : localStorage.getItem('vortex_subscription_id');
 
-      // Se for o painel ativo, mudar o ativo para outro primeiro
-      if (activePanel?.id === panelId) {
-        const fallbackPanel = panels.find(p => p.id !== panelId);
+      // Se for o painel ativo, mudar o ativo para outro primeiro (preferindo um padrão Axion)
+      if (activePanel?.id === panelId || activePanelRef.current?.id === panelId) {
+        const fallbackPanel =
+          panels.find(p => p.id !== panelId && isStandardSupabasePanel(p)) ||
+          panels.find(p => p.id !== panelId);
         if (fallbackPanel) {
           switchPanel(fallbackPanel.id);
         }
       }
+
+      // Atualização otimista imediata na memória para resposta instantânea na UI
+      setPanels(prev => prev.filter(p => p.id !== panelId));
+
+      try {
+        localStorage.removeItem(`vortex_panel_tick_size_${panelId}`);
+        localStorage.removeItem(`vortex_panel_point_value_${panelId}`);
+        localStorage.removeItem(`vortex_panel_default_sl_${panelId}`);
+        localStorage.removeItem(`vortex_panel_default_tp_${panelId}`);
+        if (targetPanel?.instance_id) {
+          localStorage.removeItem(`vortex_candles_cache_${targetPanel.instance_id}`);
+        }
+      } catch (_) {}
+
+      await withDbTimeout(
+        supabase
+          .from('painelvm_settings')
+          .delete()
+          .eq('panel_id', panelId),
+        3000
+      ).catch(() => {});
 
       const { error: deleteError } = await withDbTimeout(
         supabase
@@ -10041,8 +10079,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (deleteError) throw deleteError;
 
-      addLog('SISTEMA', 'Painel excluído com sucesso.', 'sistema');
-      await loadUserSettings(user.id, storedSubscriptionId, { skipAuxiliary: true });
+      addLog('SISTEMA', `Ativo/Painel "${targetPanel?.name || panelId}" excluído com sucesso.`, 'sistema');
+      if (!options?.skipReload) {
+        await loadUserSettings(user.id, storedSubscriptionId, { skipAuxiliary: true });
+      }
       return true;
     } catch (err: any) {
       console.error('[CONTEXT] Erro ao deletar painel:', err);

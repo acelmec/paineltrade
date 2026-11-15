@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { getLocalPlatformConnections } from '../services/connectionsService';
+import { isStandardSupabasePanel } from '../services/db';
 
 export interface SuggestedAssetItem {
   symbol: string;
@@ -47,11 +48,13 @@ interface ImportAssetsModalProps {
 }
 
 export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, onClose }) => {
-  const { panels, createPanelAction, switchPanel, addLog, activeAccount } = useApp() as any;
+  const { panels, createPanelAction, deletePanelAction, switchPanel, addLog, activeAccount } = useApp() as any;
   const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(new Set());
   const [detectedSymbols, setDetectedSymbols] = useState<string[]>([]);
   const [isSearchingBridge, setIsSearchingBridge] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [importProgress, setImportProgress] = useState<{ current: number; total: number; name: string } | null>(null);
 
   const [brokerSuffix, setBrokerSuffix] = useState<string>(() => {
@@ -65,17 +68,35 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
     return '';
   });
 
-  // Mapeia ativos já existentes em panels para não reimportar
+  // Separação estrita:
+  // 1) Ativos Padrão do Axion (incluídos pelo Admin e que usam Supabase) -> PROTEGIDOS (não podem ser excluídos)
+  // 2) Ativos Sincronizados pelo Usuário (via conectores NT8 / MetaTrader / Cripto) -> PODEM ser excluídos
+  const standardAxionPanels = (panels || []).filter((p: any) => isStandardSupabasePanel(p));
+  const syncedConnectorPanels = (panels || []).filter((p: any) => !isStandardSupabasePanel(p));
+
+  const getMatchingSyncedPanels = (sym: string): any[] => {
+    const upper = sym.toUpperCase().trim();
+    return syncedConnectorPanels.filter((p: any) => {
+      const pName = String(p.name || '').toUpperCase().trim();
+      const pBase = pName.split(' - ')[0].trim();
+      const pSym = String(p.symbol || '').toUpperCase().trim();
+      const pInst = String(p.instance_id || '').toUpperCase().trim();
+      return pName === upper || pBase === upper || pSym === upper || pInst === upper;
+    });
+  };
+
+  // Mapeia ativos sincronizados já existentes em panels para controle de "Já ativo"
   const existingSet = new Set(
-    (panels || []).map((p: any) => {
-      const name = (p.name || '').toUpperCase().trim();
-      const sym = (p.symbol || '').toUpperCase().trim();
-      const inst = (p.instance_id || '').toUpperCase().trim();
-      return [name, sym, inst];
+    syncedConnectorPanels.map((p: any) => {
+      const name = String(p.name || '').toUpperCase().trim();
+      const baseName = name.split(' - ')[0].trim();
+      const sym = String(p.symbol || '').toUpperCase().trim();
+      const inst = String(p.instance_id || '').toUpperCase().trim();
+      return [name, baseName, sym, inst];
     }).flat().filter(Boolean)
   );
 
-  // Inicializa a seleção com os ativos que ainda NÃO existem
+  // Inicializa a seleção com os ativos que ainda NÃO existem quando o modal abre
   useEffect(() => {
     if (isOpen) {
       const toSelect = new Set<string>();
@@ -87,7 +108,60 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
       setSelectedSymbols(toSelect);
       fetchLiveBrokerSymbols();
     }
-  }, [isOpen, panels?.length]);
+  }, [isOpen]);
+
+  const handleDeleteSyncedPanels = async (panelsToRemove: any[], symLabel?: string) => {
+    if (!deletePanelAction || panelsToRemove.length === 0) return;
+    // Filtra apenas ativos sincronizados via conectores (nunca ativos padrão Supabase)
+    const allowed = panelsToRemove.filter(p => !isStandardSupabasePanel(p));
+    if (allowed.length === 0) {
+      if (addLog) {
+        addLog('AVISO', '🔒 Ativos padrão do Axion (Supabase) são protegidos e não podem ser excluídos.', 'alerta');
+      }
+      return;
+    }
+
+    setDeletingIds(prev => {
+      const next = new Set(prev);
+      allowed.forEach(p => next.add(p.id));
+      return next;
+    });
+
+    try {
+      for (let i = 0; i < allowed.length; i++) {
+        const p = allowed[i];
+        const isLast = i === allowed.length - 1;
+        await deletePanelAction(p.id, { protectStandardAxion: true, skipReload: !isLast });
+      }
+      if (symLabel) {
+        // Já marca o ativo recém-excluído para facilitar reimportação imediata com sufixo correto (ex: BTCUSD - ActivTrades)
+        setSelectedSymbols(prev => {
+          const next = new Set(prev);
+          next.add(symLabel);
+          return next;
+        });
+      }
+    } finally {
+      setDeletingIds(prev => {
+        const next = new Set(prev);
+        allowed.forEach(p => next.delete(p.id));
+        return next;
+      });
+    }
+  };
+
+  const handleDeleteAllSynced = async () => {
+    if (!deletePanelAction || syncedConnectorPanels.length === 0) return;
+    setIsDeletingAll(true);
+    try {
+      await handleDeleteSyncedPanels(syncedConnectorPanels);
+      if (addLog) {
+        addLog('SISTEMA', `🗑️ Todos os ${syncedConnectorPanels.length} ativos sincronizados pelos conectores foram removidos. Os ativos padrão do Axion (Supabase) foram preservados.`, 'sistema');
+      }
+    } finally {
+      setIsDeletingAll(false);
+    }
+  };
 
   const fetchLiveBrokerSymbols = async () => {
     setIsSearchingBridge(true);
@@ -321,6 +395,80 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
 
         {/* Lista de Ativos Agrupados */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {/* Painel de Gestão de Ativos Sincronizados vs Padrão Axion */}
+          <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black text-amber-300 flex items-center gap-1.5">
+                  <span>🔌</span>
+                  <span>Ativos Sincronizados pelos Conectores ({syncedConnectorPanels.length})</span>
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  (NT8 / MetaTrader — podem ser excluídos)
+                </span>
+              </div>
+              {syncedConnectorPanels.length > 0 && (
+                <button
+                  type="button"
+                  disabled={isDeletingAll || isImporting}
+                  onClick={handleDeleteAllSynced}
+                  className="px-2.5 py-1 rounded-lg bg-rose-950/80 hover:bg-rose-900 border border-rose-700/60 text-rose-200 font-black text-[10px] transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                >
+                  <span>🗑️</span>
+                  <span>{isDeletingAll ? 'Excluindo...' : `Excluir Todos Sincronizados (${syncedConnectorPanels.length})`}</span>
+                </button>
+              )}
+            </div>
+
+            {syncedConnectorPanels.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {syncedConnectorPanels.map((p: any) => {
+                  const isDeletingThis = deletingIds.has(p.id);
+                  return (
+                    <div
+                      key={p.id}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700/80 text-[11px] text-slate-200"
+                    >
+                      <span className="font-bold text-sky-300">{p.name}</span>
+                      <button
+                        type="button"
+                        disabled={isDeletingThis || isDeletingAll || isImporting}
+                        onClick={() => handleDeleteSyncedPanels([p], String(p.name || '').split(' - ')[0].trim())}
+                        title={`Excluir ativo sincronizado ${p.name}`}
+                        className="ml-1 px-1.5 py-0.5 rounded bg-rose-950/80 hover:bg-rose-800 text-rose-300 hover:text-white border border-rose-700/50 text-[9px] font-black transition cursor-pointer disabled:opacity-50"
+                      >
+                        {isDeletingThis ? '...' : '🗑️ Excluir'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-[11px] text-slate-500 italic">
+                Nenhum ativo de conector sincronizado no momento.
+              </div>
+            )}
+
+            {standardAxionPanels.length > 0 && (
+              <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] font-bold text-slate-400 mr-1 flex items-center gap-1">
+                  <span>🔒</span>
+                  <span>Padrão Axion (Supabase — Protegidos):</span>
+                </span>
+                {standardAxionPanels.map((sp: any) => (
+                  <span
+                    key={sp.id}
+                    className="px-2 py-0.5 rounded bg-slate-900/90 border border-slate-800 text-[10px] font-bold text-slate-400 flex items-center gap-1 select-none"
+                    title="Ativo padrão do Axion alimentado via Supabase (protegido pelo Admin)"
+                  >
+                    <span>🔒</span>
+                    <span>{sp.name}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
           {detectedSymbols.length > 0 && (
             <div className="space-y-1.5">
               <div className="text-[10px] font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
@@ -329,34 +477,50 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {detectedSymbols.map(sym => {
-                  const isAlreadyExists = existingSet.has(sym.toUpperCase());
+                  const matchedPanels = getMatchingSyncedPanels(sym);
+                  const isAlreadyExists = matchedPanels.length > 0;
+                  const isDeletingSym = matchedPanels.some(p => deletingIds.has(p.id));
                   const isChecked = selectedSymbols.has(sym);
+                  const activeNames = matchedPanels.map(p => p.name).join(', ');
                   return (
                     <div
                       key={`det_${sym}`}
                       onClick={() => !isAlreadyExists && handleToggleSymbol(sym)}
-                      className={`p-2 rounded-xl border flex items-center justify-between text-xs transition cursor-pointer select-none ${
+                      className={`p-2 rounded-xl border flex items-center justify-between text-xs transition select-none ${
                         isAlreadyExists
-                          ? 'bg-slate-900/40 border-slate-800 text-slate-500 opacity-60 cursor-not-allowed'
+                          ? 'bg-slate-900/60 border-slate-700/80 text-slate-300'
                           : isChecked
-                          ? 'bg-emerald-950/60 border-emerald-500 text-emerald-200 shadow-sm'
-                          : 'bg-slate-950/50 border-slate-800 text-slate-300 hover:bg-slate-800'
+                          ? 'bg-emerald-950/60 border-emerald-500 text-emerald-200 shadow-sm cursor-pointer'
+                          : 'bg-slate-950/50 border-slate-800 text-slate-300 hover:bg-slate-800 cursor-pointer'
                       }`}
                     >
-                      <div className="min-w-0">
+                      <div className="min-w-0 pr-1">
                         <div className="font-black truncate">
                           {sym}{brokerSuffix.trim() ? ` - ${brokerSuffix.trim()}` : ''}
                         </div>
-                        <div className="text-[9px] text-slate-400">Corretora MT4</div>
+                        <div className="text-[9px] text-slate-400 truncate">
+                          {isAlreadyExists ? `Ativo: ${activeNames}` : 'Corretora MT4'}
+                        </div>
                       </div>
                       {isAlreadyExists ? (
-                        <span className="text-[9px] text-slate-500 font-bold">Já ativo</span>
+                        <button
+                          type="button"
+                          disabled={isDeletingSym || isDeletingAll || isImporting}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteSyncedPanels(matchedPanels, sym);
+                          }}
+                          title={`Excluir ${activeNames} (Sincronizado via conector)`}
+                          className="px-2 py-1 rounded-lg bg-rose-950/80 hover:bg-rose-800 border border-rose-700/60 text-rose-200 hover:text-white text-[9px] font-black shrink-0 transition cursor-pointer disabled:opacity-50"
+                        >
+                          {isDeletingSym ? '...' : '🗑️ Excluir'}
+                        </button>
                       ) : (
                         <input
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => {}}
-                          className="w-3.5 h-3.5 accent-emerald-500 rounded pointer-events-none"
+                          className="w-3.5 h-3.5 accent-emerald-500 rounded pointer-events-none shrink-0"
                         />
                       )}
                     </div>
@@ -376,28 +540,44 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {items.map(item => {
-                    const isAlreadyExists = existingSet.has(item.symbol.toUpperCase());
+                    const matchedPanels = getMatchingSyncedPanels(item.symbol);
+                    const isAlreadyExists = matchedPanels.length > 0;
+                    const isDeletingSym = matchedPanels.some(p => deletingIds.has(p.id));
                     const isChecked = selectedSymbols.has(item.symbol);
+                    const activeNames = matchedPanels.map(p => p.name).join(', ');
                     return (
                       <div
                         key={item.symbol}
                         onClick={() => !isAlreadyExists && handleToggleSymbol(item.symbol)}
-                        className={`p-2 rounded-xl border flex items-center justify-between text-xs transition cursor-pointer select-none ${
+                        className={`p-2 rounded-xl border flex items-center justify-between text-xs transition select-none ${
                           isAlreadyExists
-                            ? 'bg-slate-900/40 border-slate-800 text-slate-500 opacity-60 cursor-not-allowed'
+                            ? 'bg-slate-900/60 border-slate-700/80 text-slate-300'
                             : isChecked
-                            ? 'bg-blue-950/60 border-blue-500 text-blue-200 shadow-sm'
-                            : 'bg-slate-950/50 border-slate-800 text-slate-300 hover:bg-slate-800'
+                            ? 'bg-blue-950/60 border-blue-500 text-blue-200 shadow-sm cursor-pointer'
+                            : 'bg-slate-950/50 border-slate-800 text-slate-300 hover:bg-slate-800 cursor-pointer'
                         }`}
                       >
-                        <div className="min-w-0">
+                        <div className="min-w-0 pr-1">
                           <div className="font-black truncate">
                             {item.symbol}{brokerSuffix.trim() ? ` - ${brokerSuffix.trim()}` : ''}
                           </div>
-                          <div className="text-[9px] text-slate-400 truncate">{item.name}</div>
+                          <div className="text-[9px] text-slate-400 truncate">
+                            {isAlreadyExists ? `Ativo: ${activeNames}` : item.name}
+                          </div>
                         </div>
                         {isAlreadyExists ? (
-                          <span className="text-[9px] text-slate-500 font-bold shrink-0 ml-1">Já ativo</span>
+                          <button
+                            type="button"
+                            disabled={isDeletingSym || isDeletingAll || isImporting}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteSyncedPanels(matchedPanels, item.symbol);
+                            }}
+                            title={`Excluir ${activeNames} (Sincronizado via conector)`}
+                            className="px-2 py-1 rounded-lg bg-rose-950/80 hover:bg-rose-800 border border-rose-700/60 text-rose-200 hover:text-white text-[9px] font-black shrink-0 ml-1 transition cursor-pointer disabled:opacity-50"
+                          >
+                            {isDeletingSym ? '...' : '🗑️ Excluir'}
+                          </button>
                         ) : (
                           <input
                             type="checkbox"
