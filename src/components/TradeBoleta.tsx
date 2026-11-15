@@ -55,7 +55,9 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
     updateReportLevelsAction,
     checkOperationalLimits,
     getPanelPrice,
-    switchPanel
+    switchPanel,
+    createPanelAction,
+    addLog
   } = useApp() as any;
 
   const [isImportAssetsOpen, setIsImportAssetsOpen] = useState(false);
@@ -1501,12 +1503,26 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
               {activeAccount?.platform === 'binance' && !(panels || []).some((p: any) => /USDT|BUSD|BINANCE/i.test(p.name || '') || /USDT|BUSD|BINANCE/i.test(p.instance_id || '')) && (
                 <button
                   type="button"
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.stopPropagation();
-                    setIsImportAssetsOpen(true);
+                    if (createPanelAction) {
+                      addLog?.('SISTEMA', '⚡ Importando pares Binance Futuros (BTCUSDT, ETHUSDT, SOLUSDT)...', 'sistema');
+                      const suffix = (activeAccount.account_name || '').toLowerCase().includes('futuro') ? 'Binance Futuros' : 'Binance';
+                      await createPanelAction(`BTCUSDT - ${suffix}`, 'btcusdt', 1.0, 0.10, 400, 800);
+                      await createPanelAction(`ETHUSDT - ${suffix}`, 'ethusdt', 1.0, 0.01, 30, 60);
+                      await createPanelAction(`SOLUSDT - ${suffix}`, 'solusdt', 1.0, 0.01, 3.0, 6.0);
+                      setTimeout(() => {
+                        const btc = (panels || []).find((p: any) => p.instance_id === 'btcusdt' || (p.name && p.name.includes('BTCUSDT')));
+                        if (btc?.id && switchPanel) {
+                          switchPanel(btc.id);
+                        }
+                      }, 500);
+                    } else {
+                      setIsImportAssetsOpen(true);
+                    }
                   }}
-                  className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 text-[10px] font-black transition active:scale-95 flex items-center gap-1 animate-pulse"
-                  title="Importar Pares de Cripto da Binance (BTCUSDT, ETHUSDT...)"
+                  className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 text-[10px] font-black transition active:scale-95 flex items-center gap-1 animate-pulse cursor-pointer shadow"
+                  title="Importar Pares de Cripto da Binance (BTCUSDT, ETHUSDT, SOLUSDT)"
                 >
                   <span>🟡</span>
                   <span>Importar Criptos Binance</span>

@@ -67,6 +67,9 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [importProgress, setImportProgress] = useState<{ current: number; total: number; name: string } | null>(null);
   const [customSymbol, setCustomSymbol] = useState('');
+  const [activeCategoryTab, setActiveCategoryTab] = useState<string>(() => {
+    return activeAccount?.platform === 'binance' ? 'Cripto' : 'Todos';
+  });
 
   const [brokerSuffix, setBrokerSuffix] = useState<string>(() => {
     if (activeAccount?.platform === 'binance') {
@@ -83,11 +86,12 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
     return '';
   });
 
-  // Atualiza brokerSuffix quando o modal abre ou a conta ativa muda
+  // Atualiza brokerSuffix e categoria padrão quando o modal abre ou a conta ativa muda
   useEffect(() => {
     if (activeAccount?.platform === 'binance') {
       const isFut = (activeAccount.connection_host && (activeAccount.connection_host.includes('future') || activeAccount.connection_host.includes('fapi'))) || (activeAccount.account_name || '').toLowerCase().includes('futuro');
       setBrokerSuffix(isFut ? 'Binance Futuros' : 'Binance');
+      setActiveCategoryTab('Cripto');
     } else if (activeAccount?.broker && !['MetaTrader 4', 'MetaTrader Server', 'MetaTrader 5'].includes(activeAccount.broker)) {
       setBrokerSuffix(activeAccount.broker);
     } else {
@@ -104,27 +108,32 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
   const standardAxionPanels = (panels || []).filter((p: any) => isStandardSupabasePanel(p));
   const syncedConnectorPanels = (panels || []).filter((p: any) => !isStandardSupabasePanel(p));
 
-  const getMatchingSyncedPanels = (sym: string): any[] => {
-    const upper = sym.toUpperCase().trim();
-    return syncedConnectorPanels.filter((p: any) => {
+  // Checa se o ativo específico já existe COM O SUFIXO ATUAL ou se é um par já existente para essa mesma corretora/plataforma
+  const isPanelAlreadyImported = (sym: string): boolean => {
+    const upperSym = sym.toUpperCase().trim();
+    const curSuffix = brokerSuffix.trim().toUpperCase();
+    const targetFullName = curSuffix ? `${upperSym} - ${curSuffix}` : upperSym;
+    return (syncedConnectorPanels || []).some((p: any) => {
       const pName = String(p.name || '').toUpperCase().trim();
-      const pBase = pName.split(' - ')[0].trim();
-      const pSym = String(p.symbol || '').toUpperCase().trim();
       const pInst = String(p.instance_id || '').toUpperCase().trim();
-      return pName === upper || pBase === upper || pSym === upper || pInst === upper;
+      if (pName === targetFullName) return true;
+      if (curSuffix && pName.includes(curSuffix) && (pInst === upperSym.toLowerCase() || pName.startsWith(upperSym))) return true;
+      return false;
     });
   };
 
-  // Mapeia ativos sincronizados já existentes em panels para controle de "Já ativo"
-  const existingSet = new Set(
-    syncedConnectorPanels.map((p: any) => {
-      const name = String(p.name || '').toUpperCase().trim();
-      const baseName = name.split(' - ')[0].trim();
-      const sym = String(p.symbol || '').toUpperCase().trim();
-      const inst = String(p.instance_id || '').toUpperCase().trim();
-      return [name, baseName, sym, inst];
-    }).flat().filter(Boolean)
-  );
+  const getMatchingSyncedPanels = (sym: string): any[] => {
+    const upperSym = sym.toUpperCase().trim();
+    const curSuffix = brokerSuffix.trim().toUpperCase();
+    const targetFullName = curSuffix ? `${upperSym} - ${curSuffix}` : upperSym;
+    return (syncedConnectorPanels || []).filter((p: any) => {
+      const pName = String(p.name || '').toUpperCase().trim();
+      const pInst = String(p.instance_id || '').toUpperCase().trim();
+      if (pName === targetFullName) return true;
+      if (curSuffix && pName.includes(curSuffix) && (pInst === upperSym.toLowerCase() || pName.startsWith(upperSym))) return true;
+      return false;
+    });
+  };
 
   // Inicializa a seleção com os ativos que ainda NÃO existem quando o modal abre
   useEffect(() => {
@@ -132,13 +141,13 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
       const toSelect = new Set<string>();
       if (activeAccount?.platform === 'binance') {
         PRESET_MARKET_ASSETS.filter(item => item.category === 'Cripto').forEach(item => {
-          if (!existingSet.has(item.symbol.toUpperCase())) {
+          if (!isPanelAlreadyImported(item.symbol)) {
             toSelect.add(item.symbol);
           }
         });
       } else {
         PRESET_MARKET_ASSETS.forEach(item => {
-          if (!existingSet.has(item.symbol.toUpperCase())) {
+          if (!isPanelAlreadyImported(item.symbol)) {
             toSelect.add(item.symbol);
           }
         });
@@ -148,7 +157,7 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
         fetchLiveBrokerSymbols();
       }
     }
-  }, [isOpen, activeAccount]);
+  }, [isOpen, activeAccount, brokerSuffix]);
 
   const handleAddCustomSymbol = () => {
     const raw = customSymbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -175,6 +184,39 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
       return next;
     });
     setCustomSymbol('');
+  };
+
+  // Importação Expressa de Binance em 1 Clique
+  const handleQuickImportBinance = async () => {
+    const binancePairs = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT'];
+    const suffix = brokerSuffix.trim() || 'Binance Futuros';
+    setIsImporting(true);
+    let count = 0;
+    for (let i = 0; i < binancePairs.length; i++) {
+      const sym = binancePairs[i];
+      setImportProgress({ current: i + 1, total: binancePairs.length, name: sym });
+      const preset = PRESET_MARKET_ASSETS.find(p => p.symbol === sym);
+      const fullName = `${sym} - ${suffix}`;
+      const inst = sym.toLowerCase();
+      const tick = preset?.tickSize || (sym.startsWith('BTC') ? 0.10 : 0.01);
+      const point = preset?.pointValue || 1.0;
+      const sl = preset?.defaultSl || 40;
+      const tp = preset?.defaultTp || 80;
+      const ok = await createPanelAction(fullName, inst, point, tick, sl, tp);
+      if (ok) count++;
+    }
+    setIsImporting(false);
+    setImportProgress(null);
+    if (addLog) {
+      addLog('SISTEMA', `✅ ${count} pares de Cripto da Binance importados com sucesso!`, 'sucesso');
+    }
+    setTimeout(() => {
+      const btc = (panels || []).find((p: any) => p.instance_id === 'btcusdt' || (p.name && p.name.includes('BTCUSDT')));
+      if (btc?.id && switchPanel) {
+        switchPanel(btc.id);
+      }
+      onClose();
+    }, 500);
   };
 
   const handleDeleteSyncedPanels = async (panelsToRemove: any[], symLabel?: string) => {
@@ -246,7 +288,7 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
           setSelectedSymbols(prev => {
             const next = new Set(prev);
             data.detected_symbols.forEach((s: string) => {
-              if (!existingSet.has(s.toUpperCase())) {
+              if (!isPanelAlreadyImported(s)) {
                 next.add(s.toUpperCase());
               }
             });
@@ -287,15 +329,17 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
   const handleSelectAll = (filterCat?: string) => {
     const next = new Set<string>();
     PRESET_MARKET_ASSETS.forEach(a => {
-      if (!existingSet.has(a.symbol.toUpperCase())) {
+      if (!isPanelAlreadyImported(a.symbol)) {
         if (!filterCat || a.category === filterCat) {
           next.add(a.symbol);
         }
       }
     });
-    detectedSymbols.forEach(s => {
-      if (!existingSet.has(s.toUpperCase())) next.add(s);
-    });
+    if (activeAccount?.platform !== 'binance') {
+      detectedSymbols.forEach(s => {
+        if (!isPanelAlreadyImported(s)) next.add(s);
+      });
+    }
     setSelectedSymbols(next);
   };
 
@@ -305,7 +349,7 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
 
   const handleImport = async () => {
     if (!createPanelAction) return;
-    const toImport = Array.from(selectedSymbols).filter(s => !existingSet.has(s.toUpperCase()));
+    const toImport = Array.from(selectedSymbols).filter(s => !isPanelAlreadyImported(s));
     if (toImport.length === 0) {
       alert('Nenhum ativo novo selecionado para importação.');
       return;
@@ -344,16 +388,22 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
     setIsImporting(false);
     setImportProgress(null);
     if (addLog) {
-      addLog('SISTEMA', `✅ ${importedCount} ativo(s) de Forex / Índices importado(s) com sucesso!`, 'sucesso');
+      addLog('SISTEMA', `✅ ${importedCount} ativo(s) importado(s) com sucesso!`, 'sucesso');
     }
 
     // Se o usuário importou ativos, atualiza o gráfico para o primeiro ativo importado
     if (toImport.length > 0 && switchPanel) {
       const firstSym = toImport[0];
-      const found = (panels || []).find((p: any) => p.name?.toUpperCase() === firstSym.toUpperCase());
-      if (found?.id) {
-        switchPanel(found.id);
-      }
+      const targetFullName = brokerSuffix.trim() ? `${firstSym} - ${brokerSuffix.trim()}` : firstSym;
+      setTimeout(() => {
+        const found = (panels || []).find((p: any) => 
+          p.name?.toUpperCase() === targetFullName.toUpperCase() || 
+          p.instance_id?.toLowerCase() === firstSym.toLowerCase()
+        );
+        if (found?.id) {
+          switchPanel(found.id);
+        }
+      }, 500);
     }
 
     setTimeout(() => {
@@ -361,7 +411,9 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
     }, 400);
   };
 
-  const categories: Array<SuggestedAssetItem['category']> = ['Forex', 'Metais & Energia', 'Índices', 'Cripto'];
+  const categories: Array<SuggestedAssetItem['category']> = activeAccount?.platform === 'binance'
+    ? ['Cripto', 'Forex', 'Metais & Energia', 'Índices']
+    : ['Forex', 'Metais & Energia', 'Índices', 'Cripto'];
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -417,24 +469,22 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
 
         {/* Banner Informativo se a Conta Ativa for Binance */}
         {activeAccount?.platform === 'binance' && (
-          <div className="mx-5 my-2.5 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="text-xl shrink-0">🟡</span>
+          <div className="mx-5 my-2.5 p-3.5 bg-gradient-to-r from-amber-500/15 to-amber-600/10 border border-amber-500/40 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs shadow-md">
+            <div className="flex items-center gap-2.5">
+              <span className="text-2xl shrink-0">🟡</span>
               <div>
-                <div className="font-black text-amber-300">Conta Binance Conectada ({activeAccount.account_name})</div>
-                <div className="text-[10px] text-slate-300">Selecione os pares de cripto (ex: BTCUSDT, ETHUSDT) para carregar o gráfico ao vivo e boleta.</div>
+                <div className="font-black text-amber-300 text-sm">Conta Binance Conectada ({activeAccount.account_name})</div>
+                <div className="text-[11px] text-slate-300">Importe os pares de cripto (BTCUSDT, ETHUSDT, etc.) para carregar candles de 1m ao vivo e operar na boleta.</div>
               </div>
             </div>
             <button
               type="button"
-              onClick={() => {
-                handleSelectAll('Cripto');
-                const isFut = (activeAccount.connection_host && (activeAccount.connection_host.includes('future') || activeAccount.connection_host.includes('fapi'))) || (activeAccount.account_name || '').toLowerCase().includes('futuro');
-                setBrokerSuffix(isFut ? 'Binance Futuros' : 'Binance');
-              }}
-              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg text-xs shadow transition active:scale-95 shrink-0 cursor-pointer"
+              onClick={handleQuickImportBinance}
+              disabled={isImporting}
+              className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black rounded-lg text-xs shadow-lg transition active:scale-95 shrink-0 cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
             >
-              ⚡ Selecionar Pares Binance
+              <span>⚡</span>
+              <span>{isImporting ? 'Importando...' : 'Importar Criptos Binance (1-Clique)'}</span>
             </button>
           </div>
         )}
@@ -442,48 +492,83 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
         {/* Filtros e Ações Rápidas */}
         <div className="px-5 py-2.5 bg-slate-950/40 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[10px] text-slate-400 font-bold uppercase mr-1">Filtros:</span>
+            <span className="text-[10px] text-slate-400 font-bold uppercase mr-1">Abas / Filtros:</span>
             <button
               type="button"
-              onClick={() => handleSelectAll()}
-              className="px-2 py-0.5 rounded bg-blue-950/80 hover:bg-blue-900 text-blue-300 border border-blue-700/60 font-bold text-[10px]"
+              onClick={() => {
+                setActiveCategoryTab('Cripto');
+                handleSelectAll('Cripto');
+              }}
+              className={`px-2.5 py-1 rounded-lg font-black text-xs transition cursor-pointer flex items-center gap-1 ${
+                activeCategoryTab === 'Cripto'
+                  ? 'bg-amber-500 text-slate-950 shadow'
+                  : 'bg-amber-950/60 hover:bg-amber-900 text-amber-300 border border-amber-700/60'
+              }`}
             >
-              Todos
+              <span>🟡</span> Cripto (Binance)
             </button>
             <button
               type="button"
-              onClick={() => handleSelectAll('Cripto')}
-              className="px-2 py-0.5 rounded bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-700/60 font-bold text-[10px]"
+              onClick={() => {
+                setActiveCategoryTab('Todos');
+                handleSelectAll();
+              }}
+              className={`px-2.5 py-1 rounded-lg font-black text-xs transition cursor-pointer ${
+                activeCategoryTab === 'Todos'
+                  ? 'bg-blue-600 text-white shadow'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+              }`}
             >
-              🟡 Cripto (Binance)
+              Todos os Ativos
             </button>
             <button
               type="button"
-              onClick={() => handleSelectAll('Forex')}
-              className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold text-[10px]"
+              onClick={() => {
+                setActiveCategoryTab('Forex');
+                handleSelectAll('Forex');
+              }}
+              className={`px-2 py-0.5 rounded font-bold text-[10px] transition cursor-pointer ${
+                activeCategoryTab === 'Forex'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+              }`}
             >
-              Apenas Forex
+              Forex
             </button>
             <button
               type="button"
-              onClick={() => handleSelectAll('Índices')}
-              className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold text-[10px]"
+              onClick={() => {
+                setActiveCategoryTab('Índices');
+                handleSelectAll('Índices');
+              }}
+              className={`px-2 py-0.5 rounded font-bold text-[10px] transition cursor-pointer ${
+                activeCategoryTab === 'Índices'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+              }`}
             >
-              Apenas Índices
+              Índices
             </button>
             <button
               type="button"
-              onClick={() => handleSelectAll('Metais & Energia')}
-              className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold text-[10px]"
+              onClick={() => {
+                setActiveCategoryTab('Metais & Energia');
+                handleSelectAll('Metais & Energia');
+              }}
+              className={`px-2 py-0.5 rounded font-bold text-[10px] transition cursor-pointer ${
+                activeCategoryTab === 'Metais & Energia'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+              }`}
             >
               Metais (Ouro)
             </button>
             <button
               type="button"
               onClick={handleDeselectAll}
-              className="px-2 py-0.5 rounded bg-slate-800/60 hover:bg-slate-700 text-slate-400 border border-slate-700/60 font-bold text-[10px]"
+              className="px-2 py-0.5 rounded bg-slate-800/60 hover:bg-slate-700 text-slate-400 border border-slate-700/60 font-bold text-[10px] cursor-pointer"
             >
-              Limpar
+              Limpar Seleção
             </button>
           </div>
           <div className="text-[11px] font-bold text-sky-400">
@@ -659,18 +744,21 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
             </div>
           )}
 
-          {categories.map(cat => {
+          {categories.filter(c => activeCategoryTab === 'Todos' || c === activeCategoryTab).map(cat => {
             const items = PRESET_MARKET_ASSETS.filter(a => a.category === cat);
             return (
               <div key={cat} className="space-y-1.5">
                 <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center justify-between">
-                  <span>{cat}</span>
+                  <span className="flex items-center gap-1.5">
+                    {cat === 'Cripto' && <span>🟡</span>}
+                    <span>{cat}</span>
+                  </span>
                   <span className="text-[9px] font-normal text-slate-500">{items.length} ativos</span>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {items.map(item => {
+                    const isAlreadyExists = isPanelAlreadyImported(item.symbol);
                     const matchedPanels = getMatchingSyncedPanels(item.symbol);
-                    const isAlreadyExists = matchedPanels.length > 0;
                     const isDeletingSym = matchedPanels.some(p => deletingIds.has(p.id));
                     const isChecked = selectedSymbols.has(item.symbol);
                     const activeNames = matchedPanels.map(p => p.name).join(', ');
