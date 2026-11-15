@@ -221,6 +221,33 @@ export async function testConnectionPing(conn: PlatformConnection): Promise<{
 
   if (conn.platform === 'binance') {
     try {
+      if (conn.api_key && conn.api_secret) {
+        try {
+          const { fetchBinanceAccount } = await import('./binanceService');
+          const accInfo = await fetchBinanceAccount(conn.api_key, conn.api_secret, false);
+          const latency = Date.now() - start;
+          if (accInfo) {
+            const bal = Number(accInfo.totalBalanceUsd || 0);
+            return {
+              online: true,
+              latencyMs: latency,
+              message: `Binance Spot Conectada ● Saldo Real: US$ ${bal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${latency}ms)`,
+              detectedAccounts: ['Binance Spot'],
+              detectedAccountsDetail: [{
+                id: 'binance_spot',
+                account_number: 'Binance Spot',
+                name: 'Binance Spot',
+                balance: bal,
+                equity: bal,
+                broker: 'Binance',
+                currency: 'USDT',
+                platform: 'binance'
+              }]
+            };
+          }
+        } catch (_) {}
+      }
+
       const proxyUrl = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
         ? '/binance-api/api/v3/ping'
         : `${conn.host_url}/api/v3/ping`;

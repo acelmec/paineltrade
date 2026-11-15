@@ -26,9 +26,9 @@ enum ENUM_GATEWAY_TRANSPORT {
 //| INPUTS                                                           |
 //+------------------------------------------------------------------+
 input string                  Group_Conexao        = "=== 1. CONEXÃO AXION GATEWAY ===";
-input ENUM_GATEWAY_TRANSPORT  InpTransportMode     = TRANSPORT_LOCAL_HTTP;     // Modo de Transporte
-input string                  InpGatewayUrl        = "http://localhost:8003";  // URL Gateway Local / VPS
-input string                  InpPairingToken      = "";                       // Token de Pareamento de Nuvem
+input ENUM_GATEWAY_TRANSPORT  InpTransportMode     = TRANSPORT_CLOUD_RELAY;    // Modo de Transporte
+input string                  InpGatewayUrl        = "http://144.126.141.254"; // URL Gateway Local / VPS (Porta 80 Padrão)
+input string                  InpPairingToken      = "vps_mt5";                // Token de Pareamento de Nuvem
 input int                     InpPollIntervalMs    = 250;                      // Intervalo de Consulta de Ordens (ms)
 input int                     InpMagicNumber       = 888999;                   // Magic Number das Ordens
 
@@ -112,6 +112,7 @@ int OnInit()
 
    EventSetMillisecondTimer(MathMax(50, InpPollIntervalMs));
    Print("🚀 [AxionGatewayEA MT5] Conector inicializado para ", _Symbol, " | Conta: ", AccountInfoInteger(ACCOUNT_LOGIN));
+   Print("📊 [AxionGatewayEA MT5] Saldo Real: ", DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2), " ", AccountInfoString(ACCOUNT_CURRENCY), " | Corretora: ", AccountInfoString(ACCOUNT_COMPANY));
    return(INIT_SUCCEEDED);
 }
 
@@ -185,17 +186,15 @@ void OnTimer()
 //+------------------------------------------------------------------+
 void SendStreamerPayload(string json)
 {
-   if(InpTransportMode == TRANSPORT_LOCAL_HTTP)
-   {
-      string url = InpGatewayUrl + "/streamer";
-      string headers = "Content-Type: application/json\r\n";
-      char data[];
-      StringToCharArray(json, data, 0, StringLen(json));
-      char result[];
-      string resultHeaders;
-      ResetLastError();
-      WebRequest("POST", url, headers, 100, data, result, resultHeaders);
-   }
+   if(InpGatewayUrl == "") return;
+   string url = InpGatewayUrl + "/streamer";
+   string headers = "Content-Type: application/json\r\n";
+   char data[];
+   StringToCharArray(json, data, 0, StringLen(json));
+   char result[];
+   string resultHeaders;
+   ResetLastError();
+   WebRequest("POST", url, headers, 100, data, result, resultHeaders);
 }
 
 //+------------------------------------------------------------------+
@@ -203,7 +202,26 @@ void SendStreamerPayload(string json)
 //+------------------------------------------------------------------+
 void PollAndProcessCommands()
 {
-   string url = InpGatewayUrl + "/commands?account=" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN));
+   if(InpGatewayUrl == "") return;
+
+   string brokerClean = AccountInfoString(ACCOUNT_COMPANY);
+   StringReplace(brokerClean, " ", "%20");
+   long accLogin = AccountInfoInteger(ACCOUNT_LOGIN);
+   double accBal = AccountInfoDouble(ACCOUNT_BALANCE);
+   double accEq = AccountInfoDouble(ACCOUNT_EQUITY);
+   string accCurr = AccountInfoString(ACCOUNT_CURRENCY);
+   long accLev = AccountInfoInteger(ACCOUNT_LEVERAGE);
+   bool isDemo = (AccountInfoInteger(ACCOUNT_TRADE_MODE) == ACCOUNT_TRADE_MODE_DEMO);
+
+   string url = InpGatewayUrl + "/commands?account=" + IntegerToString(accLogin) + 
+                "&symbol=" + _Symbol +
+                "&platform=mt5" +
+                "&balance=" + DoubleToString(accBal, 2) +
+                "&equity=" + DoubleToString(accEq, 2) +
+                "&currency=" + accCurr +
+                "&broker=" + brokerClean +
+                "&demo=" + (isDemo ? "1" : "0") +
+                "&leverage=" + IntegerToString(accLev);
    if(InpPairingToken != "") url += "&token=" + InpPairingToken;
 
    char data[];
@@ -211,6 +229,20 @@ void PollAndProcessCommands()
    string resultHeaders;
    ResetLastError();
    int res = WebRequest("GET", url, "Content-Type: application/json\r\n", 500, data, result, resultHeaders);
+   if(res == -1)
+   {
+      int err = GetLastError();
+      if(err == 4060)
+      {
+         static datetime lastWarn4060 = 0;
+         if(TimeCurrent() - lastWarn4060 > 15)
+         {
+            lastWarn4060 = TimeCurrent();
+            Print("⚠️ [AxionGatewayEA MT5] WebRequest BLOQUEADO para '", InpGatewayUrl, "' (Erro 4060). Adicione '", InpGatewayUrl, "' em: Ferramentas -> Opções -> Experts!");
+         }
+      }
+      return;
+   }
    if(res != 200 || ArraySize(result) == 0) return;
 
    string response = CharArrayToString(result);

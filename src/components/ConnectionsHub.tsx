@@ -194,16 +194,20 @@ export const ConnectionsHub: React.FC<ConnectionsHubProps> = ({ onSelectConnecti
         (a.account_name.includes(acc.account_number) || (a as any).account_number === acc.account_number)
       );
 
+      const isLocalHostPlatform = conn.platform === 'nt8' || conn.platform === 'mt4' || conn.platform === 'mt5' || conn.platform === 'ctrader';
+
       if (existing) {
         // Atualiza o saldo real da conta existente!
         await updateAccountSupabase(existing.id, {
           balance: acc.balance > 0 ? acc.balance : existing.balance,
           initial_balance: acc.balance > 0 ? acc.balance : existing.initial_balance,
-          send_localhost: true
+          api_key: conn.api_key || (existing as any).api_key,
+          api_secret: conn.api_secret || (existing as any).api_secret,
+          send_localhost: isLocalHostPlatform
         });
         setFeedback(`✅ Conta ${acc.name} sincronizada e atualizada com Saldo Real de ${acc.currency} ${acc.balance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}!`);
       } else {
-        // Cria a conta real no Supabase com os dados do MT4!
+        // Cria a conta real no Supabase com os dados da plataforma!
         const initialBal = acc.balance > 0 ? acc.balance : 10000;
         await createDemoAccountSupabase({
           account_name: acc.name,
@@ -218,7 +222,9 @@ export const ConnectionsHub: React.FC<ConnectionsHubProps> = ({ onSelectConnecti
           enforce_dd_lockout: true,
           simulate_elimination: false,
           is_master: false,
-          send_localhost: true,
+          send_localhost: isLocalHostPlatform,
+          api_key: conn.api_key,
+          api_secret: conn.api_secret,
           manual_trading_enabled: true
         });
         setFeedback(`✅ Conta real ${acc.name} (${acc.broker}) importada no painel com Saldo de ${acc.currency} ${initialBal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}!`);

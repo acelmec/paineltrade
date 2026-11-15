@@ -830,6 +830,39 @@ export const AccountsDashboard: React.FC = () => {
             );
           })()}
 
+          {/* Botão de Sincronização Binance */}
+          {(() => {
+            const binanceAcc = accounts.find(a => a.platform === 'binance');
+            const binanceConns = getLocalPlatformConnections().filter(c => c.platform === 'binance' && c.is_active);
+            const hasBinance = Boolean(binanceAcc || binanceConns.length > 0);
+
+            if (!hasBinance) return null;
+
+            return (
+              <button
+                type="button"
+                onClick={() => {
+                  if (binanceAcc) {
+                    handleSyncBinanceBalance(binanceAcc);
+                  } else {
+                    setDashboardMainTab('conexoes');
+                  }
+                }}
+                className="px-3 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 border shadow-md active:scale-95 cursor-pointer bg-yellow-950/80 hover:bg-yellow-900/90 text-yellow-300 border-yellow-700/60 shadow-yellow-900/20"
+                title="Sincronizar saldo real e ativos da Binance"
+              >
+                <span>🟡</span>
+                <span>Sincronizar Binance</span>
+                {binanceAcc && (
+                  <span className="text-[11px] opacity-90 font-mono text-emerald-400 font-bold">
+                    (US$ {Number(binanceAcc.balance || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})
+                  </span>
+                )}
+              </button>
+            );
+          })()}
+
+
           {/* Botão de Sincronização MetaTrader 4 / 5 */}
           {(() => {
             const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
@@ -964,6 +997,22 @@ export const AccountsDashboard: React.FC = () => {
                 }
               } else if (conn.detected_accounts && conn.detected_accounts.length > 0) {
                 setFormName(`Conta MT4 #${conn.detected_accounts[0]}`);
+              }
+            } else if (conn.platform === 'binance') {
+              setFormPlatform('binance');
+              setFormSendLocalhost(false);
+              if (conn.api_key) setFormApiKey(conn.api_key);
+              if (conn.api_secret) setFormApiSecret(conn.api_secret);
+              if (detectedAcc) {
+                setFormName(detectedAcc.name || 'Binance Spot');
+                if (detectedAcc.balance > 0) {
+                  setFormInitialBalance(detectedAcc.balance);
+                  setFormDailyStop(Math.round(detectedAcc.balance * 0.05) || 100);
+                  setFormMaxDd(Math.round(detectedAcc.balance * 0.1) || 200);
+                  setFormProfitTarget(Math.round(detectedAcc.balance * 0.1) || 200);
+                }
+              } else {
+                setFormName(conn.name || 'Binance Spot');
               }
             } else if (conn.platform === 'nt8') {
               setFormSendLocalhost(true);
