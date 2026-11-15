@@ -13222,9 +13222,11 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
             id: ticketId,
             ticket: pos.ticket,
             user_id: user.id,
+            strategy_id: null,
             account_id: accId,
             panel_id: matchedPanel?.id || 'default',
             instance_id: matchedPanel?.instance_id || pSym.toLowerCase(),
+            symbol: pos.symbol || pSym,
             strategy_name: `MT4 #${pos.ticket}`,
             side: pos.side === 'COMPRA' ? 'COMPRA' : 'VENDA',
             contrato: Number(pos.lots || 1),
@@ -13234,6 +13236,8 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
             take_profit: Number(pos.tp || 0),
             status: 'Em Andamento',
             pnl_liquido: Number(pos.profit || 0),
+            realized_pnl: Number(pos.profit || 0),
+            description: `[${pos.symbol || pSym}] Ordem MT4 #${pos.ticket} (${pos.lots} lotes)`,
             created_at: pos.open_time || new Date().toISOString(),
             already_dispatched: true
           };
@@ -13253,6 +13257,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         if (changed) {
           reportsRef.current = updatedReports;
           setReports(updatedReports);
+          saveLocalStrategyReports(updatedReports);
         }
       } else {
         const mtOpen = existingReports.filter(r => r.account_id === accId && (r.id.startsWith('mt_') || (r as any).ticket) && r.status === 'Em Andamento');
@@ -13265,6 +13270,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
           });
           reportsRef.current = updated;
           setReports(updated);
+          saveLocalStrategyReports(updated);
         }
       }
     };
@@ -13319,25 +13325,29 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
             take_profit: Number(trade.tp || 0),
             pnl_liquido: netProfit,
             realized_pnl: Number(trade.profit || 0),
-            description: `Trade MT4 #${ticket} (${trade.symbol})`,
+            description: `[${trade.symbol}] Trade MT4 #${ticket} (${trade.lots} lotes)`,
             created_at: trade.open_time || trade.close_time || new Date().toISOString(),
             closed_at: trade.close_time || new Date().toISOString()
           };
           existingReports.unshift(newReport);
           changed = true;
+          insertStrategyReportSupabase(newReport).catch(() => {});
         }
       });
 
       if (changed) {
         reportsRef.current = existingReports;
         setReports(existingReports);
+        saveLocalStrategyReports(existingReports);
       }
     };
 
     const fetchRemoteMtQuotes = async () => {
-      const acc = activeAccountRef.current;
-      const isMtAcc = acc?.platform === 'mt4' || acc?.platform === 'mt5';
-      if (!isMtAcc || isFetchingQuotes) return;
+      const curAcc = activeAccountRef.current;
+      const acc = (curAcc?.platform === 'mt4' || curAcc?.platform === 'mt5')
+        ? curAcc
+        : (accountsRef.current || []).find(a => a.platform === 'mt4' || a.platform === 'mt5');
+      if (!acc || isFetchingQuotes) return;
 
       isFetchingQuotes = true;
       try {

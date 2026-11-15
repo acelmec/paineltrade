@@ -269,6 +269,9 @@ void PollAndProcessCommands()
    StringReplace(brokerClean, " ", "%20");
    string url = InpGatewayUrl + "/commands?account=" + IntegerToString(AccountNumber()) + 
                 "&symbol=" + _Symbol +
+                "&bid=" + DoubleToString(Bid, Digits) +
+                "&ask=" + DoubleToString(Ask, Digits) +
+                "&price=" + DoubleToString(Bid, Digits) +
                 "&balance=" + DoubleToString(AccountBalance(), 2) +
                 "&equity=" + DoubleToString(AccountEquity(), 2) +
                 "&currency=" + AccountCurrency() +
@@ -288,8 +291,8 @@ void PollAndProcessCommands()
    string posJson = GetOpenPositionsJson();
    string histJson = GetClosedOrdersHistoryJson();
    string reqBody = StringFormat(
-      "{\"account\":\"%d\",\"balance\":%.2f,\"equity\":%.2f,\"broker\":\"%s\",\"positions\":%s,\"history\":%s}",
-      AccountNumber(), AccountBalance(), AccountEquity(), AccountCompany(), posJson, histJson
+      "{\"account\":\"%d\",\"symbol\":\"%s\",\"bid\":%.5f,\"ask\":%.5f,\"price\":%.5f,\"balance\":%.2f,\"equity\":%.2f,\"broker\":\"%s\",\"positions\":%s,\"history\":%s}",
+      AccountNumber(), _Symbol, Bid, Ask, Bid, AccountBalance(), AccountEquity(), AccountCompany(), posJson, histJson
    );
    char data[];
    StringToCharArray(reqBody, data, 0, StringLen(reqBody));

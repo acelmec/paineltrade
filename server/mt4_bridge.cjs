@@ -123,6 +123,20 @@ const server = http.createServer((req, res) => {
         if (Array.isArray(bodyData.history)) {
           accountsTradesHistory.set(accNum, bodyData.history);
         }
+
+        const qSym = (query.symbol || bodyData.symbol || existing.symbol || '').toUpperCase();
+        const qBid = Number(query.bid || bodyData.bid || 0);
+        const qAsk = Number(query.ask || bodyData.ask || 0);
+        if (qSym && (qBid > 0 || qAsk > 0)) {
+          quotesCache.set(qSym, {
+            symbol: qSym,
+            price: qBid || qAsk,
+            bid: qBid,
+            ask: qAsk,
+            volume: 1,
+            updated_at: new Date().toISOString()
+          });
+        }
       }
 
       // Busca próximo comando pendente para a conta ou comando global

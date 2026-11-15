@@ -17,8 +17,6 @@ export function getBinanceSpotRestUrl(): string {
   return BINANCE_SPOT_REST_URL;
 }
 
-const BINANCE_SPOT_WS_URL = 'wss://stream.binance.com:9443/ws';
-const BINANCE_FUTURES_WS_URL = 'wss://fstream.binance.com/ws';
 
 export interface BinanceAccountInfo {
   canTrade: boolean;
@@ -286,6 +284,8 @@ export async function fetchBinanceCandles(
 // =========================================================================
 let activeBinanceWs: WebSocket | null = null;
 let activeSubscribedSymbol = '';
+let lastBinanceBid = 0;
+let lastBinanceAsk = 0;
 
 export function subscribeBinanceMarketData(symbol = 'BTCUSDT', isFutures = false): void {
   if (typeof window === 'undefined') return;
@@ -302,9 +302,10 @@ export function subscribeBinanceMarketData(symbol = 'BTCUSDT', isFutures = false
   }
 
   activeSubscribedSymbol = cleanSym;
-  const wsBase = isFutures ? BINANCE_FUTURES_WS_URL : BINANCE_SPOT_WS_URL;
-  // Subscrição combinada: kline de 1m + trade tick a tick
-  const wsUrl = `${wsBase}/${cleanSym}@kline_1m`;
+  // Subscrição combinada: kline de 1m + bookTicker (Bid/Ask em tempo real)
+  const wsUrl = isFutures
+    ? `wss://fstream.binance.com/stream?streams=${cleanSym}@kline_1m/${cleanSym}@bookTicker`
+    : `wss://stream.binance.com:9443/stream?streams=${cleanSym}@kline_1m/${cleanSym}@bookTicker`;
 
   try {
     const ws = new WebSocket(wsUrl);
@@ -316,12 +317,39 @@ export function subscribeBinanceMarketData(symbol = 'BTCUSDT', isFutures = false
 
     ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data);
-        if (!msg || !msg.k) return;
+        const raw = JSON.parse(event.data);
+        const msg = raw?.data || raw;
+        if (!msg) return;
+
+        // Atualização de BookTicker (Melhor Bid e Melhor Ask com Spread real)
+        if (msg.b && msg.a) {
+          lastBinanceBid = Number(msg.b);
+          lastBinanceAsk = Number(msg.a);
+          const sym = String(msg.s || cleanSym).toUpperCase();
+          if (typeof window !== 'undefined' && lastBinanceBid > 0 && lastBinanceAsk > 0) {
+            window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
+              detail: {
+                symbol: sym,
+                panel: sym,
+                price: lastBinanceBid,
+                bid: lastBinanceBid,
+                ask: lastBinanceAsk,
+                spread: Number((lastBinanceAsk - lastBinanceBid).toFixed(4)),
+                updated_at: new Date().toISOString()
+              }
+            }));
+          }
+          return;
+        }
+
+        if (!msg.k) return;
 
         const k = msg.k;
         const sym = String(k.s || cleanSym).toUpperCase();
         const price = Number(k.c || 0);
+
+        const curBid = lastBinanceBid > 0 ? lastBinanceBid : price;
+        const curAsk = lastBinanceAsk > 0 ? lastBinanceAsk : (price > 0 ? price + 0.5 : price);
 
         if (price > 0 && typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
@@ -329,6 +357,9 @@ export function subscribeBinanceMarketData(symbol = 'BTCUSDT', isFutures = false
               symbol: sym,
               panel: sym,
               price: price,
+              bid: curBid,
+              ask: curAsk,
+              spread: Number((curAsk - curBid).toFixed(4)),
               open: Number(k.o || price),
               high: Number(k.h || price),
               low: Number(k.l || price),

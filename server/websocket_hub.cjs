@@ -692,6 +692,20 @@ const server = http.createServer((req, res) => {
         if (Array.isArray(bodyData.history)) {
           mt4TradesHistoryCache.set(accNum, bodyData.history);
         }
+
+        const qSym = (url.searchParams.get('symbol') || bodyData.symbol || existing.symbol || '').toUpperCase();
+        const qBid = Number(url.searchParams.get('bid') || bodyData.bid || 0);
+        const qAsk = Number(url.searchParams.get('ask') || bodyData.ask || 0);
+        if (qSym && (qBid > 0 || qAsk > 0)) {
+          mt4QuotesCache.set(qSym, {
+            symbol: qSym,
+            price: qBid || qAsk,
+            bid: qBid,
+            ask: qAsk,
+            volume: 1,
+            updated_at: new Date().toISOString()
+          });
+        }
       }
 
       const queue = mt4PendingCommands.get(accNum) || mt4PendingCommands.get('all') || [];

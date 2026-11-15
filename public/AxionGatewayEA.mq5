@@ -311,8 +311,16 @@ void PollAndProcessCommands()
    long accLev = AccountInfoInteger(ACCOUNT_LEVERAGE);
    bool isDemo = (AccountInfoInteger(ACCOUNT_TRADE_MODE) == ACCOUNT_TRADE_MODE_DEMO);
 
+   double curBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double curAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(curBid <= 0) curBid = accBal;
+   if(curAsk <= 0) curAsk = curBid;
+
    string url = InpGatewayUrl + "/commands?account=" + IntegerToString(accLogin) + 
                 "&symbol=" + _Symbol +
+                "&bid=" + DoubleToString(curBid, _Digits) +
+                "&ask=" + DoubleToString(curAsk, _Digits) +
+                "&price=" + DoubleToString(curBid, _Digits) +
                 "&platform=mt5" +
                 "&balance=" + DoubleToString(accBal, 2) +
                 "&equity=" + DoubleToString(accEq, 2) +
@@ -333,8 +341,8 @@ void PollAndProcessCommands()
    string posJson = GetOpenPositionsJson();
    string histJson = GetClosedOrdersHistoryJson();
    string reqBody = StringFormat(
-      "{\"account\":\"%I64d\",\"balance\":%.2f,\"equity\":%.2f,\"broker\":\"%s\",\"positions\":%s,\"history\":%s}",
-      accLogin, accBal, accEq, brokerClean, posJson, histJson
+      "{\"account\":\"%I64d\",\"symbol\":\"%s\",\"bid\":%.5f,\"ask\":%.5f,\"price\":%.5f,\"balance\":%.2f,\"equity\":%.2f,\"broker\":\"%s\",\"positions\":%s,\"history\":%s}",
+      accLogin, _Symbol, curBid, curAsk, curBid, accBal, accEq, brokerClean, posJson, histJson
    );
    char data[];
    StringToCharArray(reqBody, data, 0, StringLen(reqBody));

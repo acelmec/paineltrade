@@ -5063,13 +5063,14 @@ const deleteLocalBrokerAccount = (id: string, name?: string) => {
   } catch (e) {}
 };
 
-// Helper interno para persistir regras customizadas por conta localmente
-const saveLocalAccountRules = (id: string, rules: Partial<BrokerAccount>) => {
+// Helper para persistir regras customizadas por conta localmente
+export const saveLocalAccountRules = (id: string, rules: Partial<BrokerAccount>) => {
   try {
     const rawMap = localStorage.getItem('vortex_account_custom_rules') || '{}';
     const map = JSON.parse(rawMap);
-    map[id] = {
-      ...(map[id] || {}),
+    const existing = map[id] || {};
+    const ruleData = {
+      ...existing,
       ...(rules.account_name !== undefined ? { account_name: rules.account_name } : {}),
       ...(rules.platform !== undefined ? { platform: rules.platform } : {}),
       ...(rules.send_localhost !== undefined ? { send_localhost: rules.send_localhost } : {}),
@@ -5092,6 +5093,10 @@ const saveLocalAccountRules = (id: string, rules: Partial<BrokerAccount>) => {
       ...(rules.connection_port !== undefined ? { connection_port: rules.connection_port } : {}),
       ...(rules.pairing_token !== undefined ? { pairing_token: rules.pairing_token } : {})
     };
+    map[id] = ruleData;
+    if (rules.account_name) {
+      map[rules.account_name.trim().toLowerCase()] = ruleData;
+    }
     localStorage.setItem('vortex_account_custom_rules', JSON.stringify(map));
   } catch (e) {}
 };
@@ -5294,48 +5299,31 @@ export async function fetchAccountsSupabase(): Promise<BrokerAccount[]> {
       // Quando logado e o banco respondeu com sucesso, o Supabase é a fonte de verdade.
       // Contas deletadas em outro PC não serão ressuscitadas pelo cache local deste PC.
       const finalAccounts = dbData.map(a => {
-        const lr = localRulesMap[a.id] || {};
+        const cleanName = a.account_name ? a.account_name.trim().toLowerCase() : '';
+        const lr = localRulesMap[a.id] || (cleanName ? localRulesMap[cleanName] : {}) || {};
         const fullAcc: BrokerAccount = {
           ...a,
-          account_name: a.account_name || lr.account_name || 'Conta',
-          platform: a.platform || lr.platform || 'axion',
-          send_localhost: a.send_localhost !== undefined ? a.send_localhost : (lr.send_localhost ?? false),
-          execution_symbol: a.execution_symbol || lr.execution_symbol || '',
-          symbol_mapping: a.symbol_mapping || lr.symbol_mapping || '',
-          profit_target_usd: a.profit_target_usd !== undefined && a.profit_target_usd !== null
-            ? Number(a.profit_target_usd)
-            : (lr.profit_target_usd !== undefined ? Number(lr.profit_target_usd) : 3000),
-          consistency_pct: a.consistency_pct !== undefined && a.consistency_pct !== null
-            ? Number(a.consistency_pct)
-            : (lr.consistency_pct !== undefined ? Number(lr.consistency_pct) : 40),
-          simulate_elimination: (a.platform === 'nt8' || a.send_localhost || isNinjaExecutionAccount(a))
-            ? false
-            : (a.simulate_elimination !== undefined && a.simulate_elimination !== null
-                ? a.simulate_elimination
-                : (lr.simulate_elimination !== undefined ? lr.simulate_elimination : false)),
-          manual_trading_enabled: a.manual_trading_enabled !== undefined && a.manual_trading_enabled !== null
-            ? a.manual_trading_enabled
-            : (lr.manual_trading_enabled !== undefined ? lr.manual_trading_enabled : true),
-          manual_start_time: a.manual_start_time || lr.manual_start_time || '09:00:00',
-          manual_end_time: a.manual_end_time || lr.manual_end_time || '17:00:00',
-          manual_max_lots: a.manual_max_lots !== undefined && a.manual_max_lots !== null
-            ? Number(a.manual_max_lots)
-            : (lr.manual_max_lots !== undefined ? Number(lr.manual_max_lots) : 10),
-          manual_max_daily_trades: a.manual_max_daily_trades !== undefined && a.manual_max_daily_trades !== null
-            ? Number(a.manual_max_daily_trades)
-            : (lr.manual_max_daily_trades !== undefined ? Number(lr.manual_max_daily_trades) : 0),
-          trader_daily_stop_loss_usd: a.trader_daily_stop_loss_usd !== undefined && a.trader_daily_stop_loss_usd !== null
-            ? Number(a.trader_daily_stop_loss_usd)
-            : (lr.trader_daily_stop_loss_usd !== undefined ? Number(lr.trader_daily_stop_loss_usd) : 0),
-          trader_daily_take_profit_usd: a.trader_daily_take_profit_usd !== undefined && a.trader_daily_take_profit_usd !== null
-            ? Number(a.trader_daily_take_profit_usd)
-            : (lr.trader_daily_take_profit_usd !== undefined ? Number(lr.trader_daily_take_profit_usd) : 0),
-          manual_strategy_id: a.manual_strategy_id || lr.manual_strategy_id || getAccountManualStrategyId(a),
-          api_key: a.api_key || lr.api_key || '',
-          api_secret: a.api_secret || lr.api_secret || '',
-          connection_host: a.connection_host || lr.connection_host || '',
-          connection_port: a.connection_port || lr.connection_port || undefined,
-          pairing_token: a.pairing_token || lr.pairing_token || ''
+          account_name: lr.account_name || a.account_name || 'Conta',
+          platform: lr.platform || a.platform || 'axion',
+          send_localhost: lr.send_localhost !== undefined ? lr.send_localhost : (a.send_localhost ?? false),
+          execution_symbol: lr.execution_symbol !== undefined ? lr.execution_symbol : (a.execution_symbol || ''),
+          symbol_mapping: lr.symbol_mapping !== undefined ? lr.symbol_mapping : (a.symbol_mapping || ''),
+          profit_target_usd: lr.profit_target_usd !== undefined ? Number(lr.profit_target_usd) : (a.profit_target_usd !== undefined && a.profit_target_usd !== null ? Number(a.profit_target_usd) : 3000),
+          consistency_pct: lr.consistency_pct !== undefined ? Number(lr.consistency_pct) : (a.consistency_pct !== undefined && a.consistency_pct !== null ? Number(a.consistency_pct) : 40),
+          simulate_elimination: lr.simulate_elimination !== undefined ? lr.simulate_elimination : ((a.platform === 'nt8' || a.send_localhost || isNinjaExecutionAccount(a)) ? false : (a.simulate_elimination ?? false)),
+          manual_trading_enabled: lr.manual_trading_enabled !== undefined ? lr.manual_trading_enabled : (a.manual_trading_enabled ?? true),
+          manual_start_time: lr.manual_start_time !== undefined && lr.manual_start_time !== '' ? lr.manual_start_time : (a.manual_start_time || '00:00:00'),
+          manual_end_time: lr.manual_end_time !== undefined && lr.manual_end_time !== '' ? lr.manual_end_time : (a.manual_end_time || '23:59:59'),
+          manual_max_lots: lr.manual_max_lots !== undefined ? Number(lr.manual_max_lots) : (a.manual_max_lots !== undefined && a.manual_max_lots !== null ? Number(a.manual_max_lots) : 10),
+          manual_max_daily_trades: lr.manual_max_daily_trades !== undefined ? Number(lr.manual_max_daily_trades) : (a.manual_max_daily_trades !== undefined && a.manual_max_daily_trades !== null ? Number(a.manual_max_daily_trades) : 0),
+          trader_daily_stop_loss_usd: lr.trader_daily_stop_loss_usd !== undefined ? Number(lr.trader_daily_stop_loss_usd) : (a.trader_daily_stop_loss_usd !== undefined && a.trader_daily_stop_loss_usd !== null ? Number(a.trader_daily_stop_loss_usd) : 0),
+          trader_daily_take_profit_usd: lr.trader_daily_take_profit_usd !== undefined ? Number(lr.trader_daily_take_profit_usd) : (a.trader_daily_take_profit_usd !== undefined && a.trader_daily_take_profit_usd !== null ? Number(a.trader_daily_take_profit_usd) : 0),
+          manual_strategy_id: lr.manual_strategy_id || a.manual_strategy_id || getAccountManualStrategyId(a),
+          api_key: lr.api_key || a.api_key || '',
+          api_secret: lr.api_secret || a.api_secret || '',
+          connection_host: lr.connection_host || a.connection_host || '',
+          connection_port: lr.connection_port || a.connection_port || undefined,
+          pairing_token: lr.pairing_token || a.pairing_token || ''
         };
         return fullAcc;
       });
@@ -7434,6 +7422,9 @@ export function isSameAsset(sym1?: string | null, sym2?: string | null): boolean
   if (clean1.includes(clean2) || clean2.includes(clean1)) return true;
 
   const extractRoot = (s: string) => {
+    if (s.includes('BTC')) return 'BTC';
+    if (s.includes('ETH')) return 'ETH';
+    if (s.includes('SOL')) return 'SOL';
     if (s.includes('NQ') || s.includes('NASDAQ')) return 'NQ';
     if (s.includes('ES') || s.includes('SP500') || s.includes('SPX')) return 'ES';
     if (s.includes('YM') || s.includes('DOW')) return 'YM';
