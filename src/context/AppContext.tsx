@@ -9073,15 +9073,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // Em modo WebSocket, o streaming atende o tempo real, mas SE HOUVER GAP verificado, recarga forçada ou ausência de velas,
       // DEVE buscar dados para preencher lacunas de quando o PC esteve desligado/suspenso!
+      const isInitialForPanel = !initialLoadedPanelsRef.current.has(targetPanel.id);
+      const canFetchNoExisting = !hasExisting && (now - lastCandles >= 20000 || isInitialForPanel);
       const shouldFetchCandles = isWs
-        ? (isForced || hasGap || !hasExisting)
-        : (isForced || hasGap || now - lastCandles >= effectiveCandlesInterval || !hasExisting);
+        ? (isForced || hasGap || canFetchNoExisting)
+        : (isForced || hasGap || now - lastCandles >= effectiveCandlesInterval || canFetchNoExisting);
 
       if (!cache.isFetchingCandles && shouldFetchCandles) {
         cache.isFetchingCandles = true;
         cache.lastCandlesFetch = now;
         if (hasGap) (cache as any).lastGapCheckTime = now;
-        if (!hasExisting && checkIsActive()) setIsCandlesLoading(true);
+        if (!hasExisting && checkIsActive() && isInitialForPanel) setIsCandlesLoading(true);
 
         const candleInstanceId = targetSettings.instance_id_screen 
           || targetPanel.instance_id 
@@ -9093,12 +9095,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const isActivePanelNow = checkIsActive();
         const isVisibleMultiPanel = visibleMultiPanelIdsRef.current.includes(targetPanel.id);
         const isPanelDisplayed = isActivePanelNow || isVisibleMultiPanel;
-        const isInitialForPanel = !initialLoadedPanelsRef.current.has(targetPanel.id);
         const effectiveMaxLimit = isPanelDisplayed ? maxCandleLimit : Math.min(maxCandleLimit, 500);
         const lastCandle = hasExisting && cache.candles && cache.candles.length > 0 ? cache.candles[cache.candles.length - 1] : null;
         const deltaSince = (!isForced && hasExisting && !hasGap && !isInitialForPanel && lastCandle?.timestamp) ? lastCandle.timestamp : undefined;
         const queryLimit = (isForced || !hasExisting || (isInitialForPanel && isPanelDisplayed) || hasGap) ? effectiveMaxLimit : 50;
-        const shouldShowSlotGauge = isPanelDisplayed && (!hasExisting || isInitialForPanel || isMissingHistory || queryLimit > 500);
+        const shouldShowSlotGauge = isPanelDisplayed && isInitialForPanel && (!hasExisting || isMissingHistory || queryLimit > 500);
 
         if (shouldShowSlotGauge) {
           (cache as any).loadingProgress = {
@@ -9258,10 +9259,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               runMarketLogicForPanel(targetPanel, targetSettings, cache, mData || cache.marketData, cache.forces || [], cache.gammaLevels || null);
             }
           } else if (isForced || !cache.candles || cache.candles.length === 0) {
-            cache.lastCandlesFetch = 0;
+            cache.lastCandlesFetch = now;
+            initialLoadedPanelsRef.current.add(targetPanel.id);
           }
         }).catch(() => {}).finally(() => {
           cache.isFetchingCandles = false;
+          initialLoadedPanelsRef.current.add(targetPanel.id);
           if ((cache as any).loadingProgress?.isLoading) {
             (cache as any).loadingProgress = {
               ...(cache as any).loadingProgress,
@@ -9271,7 +9274,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             };
           }
           if (checkIsActive()) {
-            setCandlesLoadingProgress(prev => prev.isLoading ? ({ ...prev, isLoading: false, percent: 100, isExplicitDaysChange: false }) : prev);
+            setCandlesLoadingProgress(prev => ({ ...prev, isLoading: false, percent: 100, isExplicitDaysChange: false }));
             setIsCandlesLoading(false);
           } else {
             bumpPanelCacheVersion();
@@ -14807,7 +14810,23 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       cache.marketData = mData;
 
       // 3. Atualização imediata do candle em formação (<1ms)
-      if (cache.candles && cache.candles.length > 0) {
+      if (!cache.candles || cache.candles.length === 0) {
+        const nowIso = detail.updated_at || new Date().toISOString();
+        const firstCandle: Candle = {
+          timestamp: nowIso,
+          open: numPrice,
+          high: numPrice,
+          low: numPrice,
+          close: numPrice,
+          volume: Number(detail.volume || 1)
+        };
+        cache.candles = [firstCandle];
+        const isActive = activePanelRef.current?.id === matchedPanel.id;
+        if (isActive) {
+          setMarketData(mData);
+          setCandles([firstCandle]);
+        }
+      } else {
         const { updatedCandles, hasChanged, isNewBar } = applyRealtimePriceToCandles(cache.candles, numPrice, detail.updated_at);
         if (hasChanged) {
           cache.candles = updatedCandles;

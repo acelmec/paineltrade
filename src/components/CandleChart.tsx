@@ -1065,7 +1065,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     customSignals: appCustomSignals,
     accounts, activeAccount, switchAccount,
     accountStrategies, setAccountStrategies,
-    forces, addLog
+    forces, addLog, refreshMarketData
   } = useApp() as any;
 
   const activePanel = panelProp || appActivePanel;
@@ -9368,53 +9368,84 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           chartData.length === 0 ? 'bg-[#090d16]/95' : 'bg-[#090d16]/75 backdrop-blur-sm'
         }`}>
           <div className="bg-[#111726]/95 border border-slate-700/80 shadow-2xl rounded-2xl p-6 max-w-sm w-full flex flex-col items-center gap-4 animate-in fade-in zoom-in-95 duration-200">
-            {/* SVG Circular Gauge */}
-            <div className="relative w-28 h-28 flex items-center justify-center">
-              <svg className="w-full h-full -rotate-90 transform" viewBox="0 0 100 100">
-                {/* Background Track */}
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="40"
-                  fill="transparent"
-                  stroke="#1e293b"
-                  strokeWidth="8"
-                />
-                {/* Progress Arc */}
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="40"
-                  fill="transparent"
-                  stroke="url(#gauge-gradient)"
-                  strokeWidth="8"
-                  strokeDasharray={251.33}
-                  strokeDashoffset={251.33 - (251.33 * Math.max(5, Math.min(100, loadingProgress?.percent ?? (chartData.length > 0 ? 100 : 20)))) / 100}
-                  strokeLinecap="round"
-                  className="transition-all duration-300 ease-out"
-                />
-                <defs>
-                  <linearGradient id="gauge-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#06b6d4" />
-                    <stop offset="50%" stopColor="#3b82f6" />
-                    <stop offset="100%" stopColor="#10b981" />
-                  </linearGradient>
-                </defs>
-              </svg>
-              {/* Center Percent Text */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-3xl font-black text-white font-mono tracking-tight drop-shadow-md">
-                  {Math.round(loadingProgress?.percent ?? (chartData.length > 0 ? 100 : 25))}%
-                </span>
-              </div>
-            </div>
+            {loadingProgress?.isLoading ? (
+              <>
+                {/* SVG Circular Gauge */}
+                <div className="relative w-28 h-28 flex items-center justify-center">
+                  <svg className="w-full h-full -rotate-90 transform" viewBox="0 0 100 100">
+                    {/* Background Track */}
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r="40"
+                      fill="transparent"
+                      stroke="#1e293b"
+                      strokeWidth="8"
+                    />
+                    {/* Progress Arc */}
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r="40"
+                      fill="transparent"
+                      stroke="url(#gauge-gradient)"
+                      strokeWidth="8"
+                      strokeDasharray={251.33}
+                      strokeDashoffset={251.33 - (251.33 * Math.max(5, Math.min(100, loadingProgress?.percent ?? (chartData.length > 0 ? 100 : 20)))) / 100}
+                      strokeLinecap="round"
+                      className="transition-all duration-300 ease-out"
+                    />
+                    <defs>
+                      <linearGradient id="gauge-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#06b6d4" />
+                        <stop offset="50%" stopColor="#3b82f6" />
+                        <stop offset="100%" stopColor="#10b981" />
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                  {/* Center Percent Text */}
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-3xl font-black text-white font-mono tracking-tight drop-shadow-md">
+                      {Math.round(loadingProgress?.percent ?? (chartData.length > 0 ? 100 : 25))}%
+                    </span>
+                  </div>
+                </div>
 
-            {/* Label */}
-            <div className="flex flex-col items-center">
-              <span className="text-sm font-bold text-slate-100">
-                Carregando Histórico
-              </span>
-            </div>
+                {/* Label */}
+                <div className="flex flex-col items-center">
+                  <span className="text-sm font-bold text-slate-100">
+                    Carregando Histórico
+                  </span>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center text-center space-y-3 py-2">
+                <div className="w-12 h-12 rounded-full bg-blue-950/80 border border-blue-600/50 flex items-center justify-center text-xl shadow-lg">
+                  📊
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-white">
+                    Aguardando Dados: {(activePanel?.name || 'Ativo').toUpperCase()}
+                  </h4>
+                  <p className="text-[11px] text-slate-400 mt-1 max-w-xs leading-relaxed">
+                    Nenhum candle gravado ainda no banco de dados para este ativo. Inicie o robô AxionGatewayEA no seu MT4 ou aguarde o fluxo de ticks da corretora para iniciar o gráfico.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (refreshMarketData) refreshMarketData(undefined, [activePanel?.id], undefined);
+                    }}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg shadow transition active:scale-95 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span>🔄</span>
+                    <span>Tentar Novamente</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
