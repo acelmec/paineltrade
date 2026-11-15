@@ -56,6 +56,17 @@ export const AppContent: React.FC = () => {
   });
   const [collapsed, setCollapsed] = useState<boolean>(true); // Começa fechado (colapsado) por padrão no celular
 
+  // Listener para navegação global disparada de modais ou componentes internos
+  useEffect(() => {
+    const handleNavigate = (e: any) => {
+      if (e?.detail && typeof e.detail === 'string') {
+        setCurrentPage(e.detail);
+      }
+    };
+    window.addEventListener('vortex_navigate', handleNavigate);
+    return () => window.removeEventListener('vortex_navigate', handleNavigate);
+  }, []);
+
   const isSystemAdmin = user?.email?.toLowerCase() === 'admin@vortex.com';
   const canUseMode2 = isSystemAdmin || userPermissions?.allow_panel_mode_2 !== false;
 
