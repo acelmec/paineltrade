@@ -15663,19 +15663,30 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
     return () => clearInterval(interval);
   }, [isAuthenticated, user, activePanel]);
 
-  // Sincronização segura após retorno de suspensão (apenas visibilitychange/online, sem focus de clique de mouse)
+  // Sincronização segura após retorno de suspensão prolongada (> 60 segundos com a aba em segundo plano)
+  // Troca rápida de aba (1s a 30s) NUNCA deve resetar o cache nem exibir o gauge de carregamento
   useEffect(() => {
-    let lastVisibilitySync = 0;
+    let tabHiddenAt = 0;
 
     const handleVisibilityChange = () => {
       const now = Date.now();
-      // Throttling de 10s: só processa se a aba estava oculta e voltou a ficar visível
-      if (document.visibilityState === 'visible' && (now - lastVisibilitySync > 10000)) {
-        lastVisibilitySync = now;
-        console.log('[CONTEXT] 🔄 Aba visível pós-suspensão. Sincronizando relatórios e atualizando histórico do gráfico.');
-        setWakeTrigger(prev => prev + 1);
-        fetchReportsList(true);
-        refreshMarketData();
+      if (document.visibilityState === 'hidden') {
+        tabHiddenAt = now;
+      } else if (document.visibilityState === 'visible') {
+        const hiddenDuration = tabHiddenAt > 0 ? (now - tabHiddenAt) : 0;
+        tabHiddenAt = 0;
+        // Só aciona sincronização se o computador/aba tiver ficado suspenso por mais de 60 segundos
+        if (hiddenDuration > 60000) {
+          console.log(`[CONTEXT] 🔄 Retorno pós-suspensão prolongada (${Math.round(hiddenDuration / 1000)}s). Sincronizando relatórios e dados.`);
+          setWakeTrigger(prev => prev + 1);
+          fetchReportsList(true);
+          // Atualiza dados de mercado sem forçar recarga agressiva nem resetar as velas já renderizadas
+          const curPanels = allPanelsRef.current || [];
+          curPanels.forEach(p => {
+            const pSet = allSettingsRef.current?.[p.id] || settings;
+            if (pSet) executeMarketCycleForPanel(p, pSet).catch(() => {});
+          });
+        }
       }
     };
 

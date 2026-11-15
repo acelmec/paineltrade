@@ -8,6 +8,7 @@ import type { IndicatorConfig } from '../utils/indicatorRegistry';
 import type { WidgetConfig } from '../utils/widgetRegistry';
 import type { DrawingItem, DrawingToolType } from '../types/chartDrawings';
 import type { ChartSlotConfig } from '../types/chartLayout';
+import { AssetSearchSelect } from './AssetSearchSelect';
 
 function getShortIndicatorName(ind: IndicatorConfig): string {
   switch (ind.type) {
@@ -199,26 +200,16 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
             />
           )}
 
-          {/* Seletor de Ativo do Slot */}
-          <select
-            value={effectivePanelId || ''}
-            onChange={(e) => {
-              e.stopPropagation();
-              onChangePanel(e.target.value);
+          {/* Seletor Dinâmico de Ativo com Busca Inteligente por Digitação */}
+          <AssetSearchSelect
+            panels={panels || []}
+            currentPanelId={effectivePanelId || ''}
+            onSelectPanel={(newId) => {
+              onChangePanel(newId);
             }}
-            onClick={(e) => e.stopPropagation()}
-            className={`px-1.5 py-0.5 rounded border text-[11px] font-extrabold outline-none cursor-pointer max-w-[130px] truncate ${selectBg}`}
-            title="Ativo / Painel deste gráfico"
-          >
-            {(panels || []).map((p: any) => {
-              const cleanName = p.name ? p.name.replace(/\s*\([^)]*\)/g, '').trim() : 'Painel';
-              return (
-                <option key={p.id} value={p.id} className="bg-[#181d28] text-slate-100">
-                  {cleanName}
-                </option>
-              );
-            })}
-          </select>
+            compact={true}
+            dropdownWidth="w-64"
+          />
 
           {/* Seletor de Timeframe do Slot */}
           <select

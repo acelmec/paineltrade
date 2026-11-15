@@ -40,6 +40,7 @@ import {
   type MarketMatrixData
 } from '../services/marketMatrixService';
 import { useIsMobile } from '../utils/platform';
+import { AssetSearchSelect } from './AssetSearchSelect';
 
 // Formatadores memoizados de alta performance para o fuso de Brasília (America/Sao_Paulo) no eixo do gráfico
 const spChartTimeFormatter = new Intl.DateTimeFormat('pt-BR', {
@@ -2825,12 +2826,12 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
             lineStyle: 2, // Dashed
             lineVisible: true,
             axisLabelVisible: true,
-            title: 'ASK'
+            title: '' // Sem rótulo 'ASK' na legenda, exibe diretamente o preço na escala
           });
         } catch (_) {}
       } else {
         try {
-          askPriceLineRef.current.applyOptions({ price: askVal, color: '#f43f5e', lineVisible: true });
+          askPriceLineRef.current.applyOptions({ price: askVal, color: '#f43f5e', lineVisible: true, title: '' });
         } catch (_) {}
       }
 
@@ -2844,12 +2845,12 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
             lineStyle: 0, // Solid
             lineVisible: true,
             axisLabelVisible: true,
-            title: 'BID'
+            title: '' // Sem rótulo 'BID' na legenda, exibe diretamente o preço na escala
           });
         } catch (_) {}
       } else {
         try {
-          bidPriceLineRef.current.applyOptions({ price: bidVal, color: '#10b981', lineVisible: true });
+          bidPriceLineRef.current.applyOptions({ price: bidVal, color: '#10b981', lineVisible: true, title: '' });
         } catch (_) {}
       }
     } else {
@@ -9539,38 +9540,16 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         <div ref={toolbarRef} className="flex items-center justify-between gap-1 px-1.5 py-1 bg-[#0f131c] border-b border-slate-800/80 text-[10px] font-sans select-none overflow-x-auto no-scrollbar whitespace-nowrap">
           {/* Left Group: Asset List Box, Timeframe, Quick Action Pills (IA, R, C, S, F, 🖥️) */}
           <div className="flex items-center gap-1 shrink-0">
-            {/* Asset / Panel List Box Dropdown */}
-            <div className="flex items-center gap-0.5 bg-[#121622] hover:bg-[#181e2b] border border-slate-700/80 rounded px-1 py-0.5 text-[10px] font-black text-white tracking-wider uppercase transition-colors shrink-0 shadow-sm">
-              <span className="text-slate-400 text-[10px] pointer-events-none">☰</span>
-              <select
-                value={activePanel?.id || ''}
-                onChange={(e) => {
-                  e.stopPropagation();
-                  if (e.target.value && switchPanel) {
-                    switchPanel(e.target.value);
-                  }
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className="bg-transparent text-white font-black text-[10px] uppercase focus:outline-none cursor-pointer appearance-none pr-3"
-                title="Selecionar Ativo / Painel"
-              >
-                {panels && panels.length > 0 ? (
-                  panels.map((p: any) => {
-                    const cleanName = p.name ? p.name.replace(/\s*\([^)]*\)/g, '').trim() : 'Painel';
-                    return (
-                      <option key={p.id} value={p.id} className="bg-slate-900 text-white font-bold">
-                        {cleanName.toUpperCase()}
-                      </option>
-                    );
-                  })
-                ) : (
-                  <option value={activePanel?.id || 'main'} className="bg-slate-900 text-white font-bold">
-                    {(activePanel?.name || 'NQ').toUpperCase()}
-                  </option>
-                )}
-              </select>
-              <span className="text-slate-400 text-[8px] pointer-events-none -ml-2.5">▼</span>
-            </div>
+            {/* Asset / Panel Search & Select Box */}
+            <AssetSearchSelect
+              panels={panels || []}
+              currentPanelId={activePanel?.id || ''}
+              onSelectPanel={(newId) => {
+                if (newId && switchPanel) switchPanel(newId);
+              }}
+              compact={true}
+              dropdownWidth="w-64"
+            />
 
             {tempViewMode === 'candles' && setTimeframe && (
               <div className="flex items-center bg-blue-600 text-white rounded px-1 py-0.5 text-[9px] font-extrabold shadow-sm shrink-0">
