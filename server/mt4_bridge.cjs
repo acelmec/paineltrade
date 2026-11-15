@@ -178,6 +178,94 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 3.3 GET /market_candles: Retorna histórico de candles M1 para Forex, Metais e Índices
+  if (req.method === 'GET' && (pathname === '/market_candles' || pathname === '/mt4/market_candles')) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    const rawSym = String(query.symbol || 'EURUSD').toUpperCase().split(/[-_(\s]/)[0].trim().replace(/[^A-Z0-9]/g, '');
+    const limit = Math.min(2000, Math.max(50, Number(query.limit || 1000)));
+
+    const yahooMap = {
+      'EURUSD': 'EURUSD=X',
+      'GBPUSD': 'GBPUSD=X',
+      'USDJPY': 'JPY=X',
+      'AUDUSD': 'AUDUSD=X',
+      'USDCAD': 'CAD=X',
+      'USDCHF': 'CHF=X',
+      'NZDUSD': 'NZDUSD=X',
+      'EURGBP': 'EURGBP=X',
+      'EURJPY': 'EURJPY=X',
+      'GBPJPY': 'GBPJPY=X',
+      'XAUUSD': 'GC=F',
+      'GOLD': 'GC=F',
+      'XAGUSD': 'SI=F',
+      'SILVER': 'SI=F',
+      'USOIL': 'CL=F',
+      'WTI': 'CL=F',
+      'US30': '^DJI',
+      'DJ30': '^DJI',
+      'US500': '^GSPC',
+      'SP500': '^GSPC',
+      'USTEC': 'NQ=F',
+      'NAS100': 'NQ=F',
+      'GER40': '^GDAXI',
+      'DAX40': '^GDAXI',
+      'BTCUSD': 'BTC-USD',
+      'ETHUSD': 'ETH-USD'
+    };
+
+    const targetTicker = yahooMap[rawSym] || `${rawSym}=X`;
+    const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(targetTicker)}?interval=1m&range=2d`;
+
+    fetch(yUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      signal: AbortSignal.timeout(5000)
+    })
+      .then(r => r.json())
+      .then(d => {
+        const result = d?.chart?.result?.[0];
+        if (!result || !result.timestamp || !result.indicators?.quote?.[0]) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify([]));
+          return;
+        }
+
+        const timestamps = result.timestamp;
+        const q = result.indicators.quote[0];
+        const candles = [];
+
+        for (let i = 0; i < timestamps.length; i++) {
+          const cClose = q.close[i];
+          if (cClose === null || cClose === undefined || isNaN(cClose) || cClose <= 0) continue;
+          const cOpen = q.open[i] ?? cClose;
+          const cHigh = q.high[i] ?? Math.max(cOpen, cClose);
+          const cLow = q.low[i] ?? Math.min(cOpen, cClose);
+          const cVol = q.volume?.[i] ?? 1;
+
+          candles.push({
+            timestamp: new Date(timestamps[i] * 1000).toISOString(),
+            open: Number(cOpen),
+            high: Number(cHigh),
+            low: Number(cLow),
+            close: Number(cClose),
+            volume: Number(cVol)
+          });
+        }
+
+        const sliced = candles.slice(-limit);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(sliced));
+      })
+      .catch(err => {
+        console.warn(`[MT4-BRIDGE] Erro ao buscar klines para ${rawSym}:`, err.message);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify([]));
+      });
+    return;
+  }
+
   // 4. COMMAND ACK: MT4 confirma que executou o comando
   if (req.method === 'POST' && pathname === '/command_ack') {
     let body = '';

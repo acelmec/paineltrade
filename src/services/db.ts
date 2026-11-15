@@ -3587,12 +3587,16 @@ export async function fetchCandlesSupabase(
   onProgress?.(15, 0, limit);
 
   // 0. Detecção e alimentação nativa de Cripto (Binance Cloud Feed)
-  const symToCheck = (targetPanelObj?.name || targetPanelObj?.symbol || targetPanelObj?.instance_id || queryId || '').toUpperCase();
-  const isCrypto = /USDT|BUSD|USDC/i.test(symToCheck) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(symToCheck);
+  const rawSym = (targetPanelObj?.symbol || targetPanelObj?.name || targetPanelObj?.instance_id || queryId || '').toUpperCase();
+  const baseSym = rawSym.split(/[-_(\s]/)[0].trim().replace(/[^A-Z0-9]/g, '');
+
+  const isCrypto = /USDT|BUSD|USDC/i.test(baseSym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(baseSym);
   if (isCrypto) {
     try {
-      let cleanSym = symToCheck.replace(/[^A-Za-z0-9]/g, '');
-      if (!cleanSym.endsWith('USDT') && !cleanSym.endsWith('BUSD') && !cleanSym.endsWith('USDC')) {
+      let cleanSym = baseSym;
+      if (cleanSym.endsWith('USD') && !cleanSym.endsWith('USDT')) {
+        cleanSym = `${cleanSym}T`; // ETHUSD -> ETHUSDT, BTCUSD -> BTCUSDT
+      } else if (!cleanSym.endsWith('USDT') && !cleanSym.endsWith('BUSD') && !cleanSym.endsWith('USDC')) {
         cleanSym = `${cleanSym}USDT`;
       }
       const { fetchBinanceCandles, subscribeBinanceMarketData } = await import('./binanceService');
@@ -3605,6 +3609,39 @@ export async function fetchCandlesSupabase(
       }
     } catch (e) {
       console.warn('[DB] Falha no feed da Binance para cripto, tentando fallback:', e);
+    }
+  }
+
+  // 0.1 Detecção e alimentação nativa de Forex, Metais & Índices Globais via Bridge / VPS (e fallback para Cripto)
+  const isForexOrCfd = isCrypto || /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(baseSym);
+  if (isForexOrCfd) {
+    try {
+      const { getLocalPlatformConnections } = await import('./connectionsService');
+      const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
+      const activeConn = mtConns.find(c => c.status === 'online') || mtConns[0];
+      const host = (activeConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
+
+      let mRes = await fetch(`${host}/market_candles?symbol=${baseSym}&limit=${limit}`, { signal: AbortSignal.timeout(4000) }).catch(() => null);
+      if (!mRes || !mRes.ok) {
+        mRes = await fetch(`http://localhost:8003/market_candles?symbol=${baseSym}&limit=${limit}`, { signal: AbortSignal.timeout(3000) }).catch(() => null);
+      }
+      if (mRes && mRes.ok) {
+        const text = await mRes.text();
+        let mCandles: Candle[] = [];
+        try {
+          mCandles = JSON.parse(text);
+        } catch {}
+        if (Array.isArray(mCandles) && mCandles.length > 0) {
+          const sanitized = cleanAndSanitizeCandles(mCandles);
+          if (sanitized.length > 0) {
+            onProgress?.(100, sanitized.length, limit);
+            saveLocalCandles(queryId, sanitized);
+            return sanitized;
+          }
+        }
+      }
+    } catch (mErr) {
+      console.warn('[DB] Falha no feed de Forex/CFDs via Bridge, tentando Supabase:', mErr);
     }
   }
 

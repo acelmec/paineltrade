@@ -9331,18 +9331,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         : overrideSettings;
       const effSettings = mergedOverride ? { ...(baseSettings || {}), ...mergedOverride } : baseSettings;
 
+      initialLoadedPanelsRef.current.delete(pId);
       if (panelDataCache.current[pId]) {
         panelDataCache.current[pId].lastCandlesFetch = 0;
         panelDataCache.current[pId].lastGammaFetch = 0;
         panelDataCache.current[pId].lastScreenshotFetch = 0;
         panelDataCache.current[pId].lastForceFetch = 0;
         panelDataCache.current[pId].isFetchingCandles = false;
+        (panelDataCache.current[pId] as any).loadedHistoryDays = 0;
       }
 
-      if (mergedOverride?.chart_history_days !== undefined) {
-        const nextDays = Math.max(3, Number(mergedOverride.chart_history_days) || 3);
+      const isMissingBars = !panelDataCache.current[pId]?.candles || panelDataCache.current[pId].candles.length === 0;
+      if (mergedOverride?.chart_history_days !== undefined || isMissingBars) {
+        const nextDays = Math.max(3, Number(mergedOverride?.chart_history_days || effSettings?.chart_history_days) || 3);
         const nextTotal = Math.min(50000, nextDays * 1440);
-        initialLoadedPanelsRef.current.delete(pId);
         const progressObj = {
           isLoading: true,
           percent: 15,

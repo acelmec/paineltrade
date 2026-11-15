@@ -1,6 +1,7 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { getStreamerInfoForPanel, type StreamerItem } from '../services/vortexStreamer';
+import { getLocalPlatformConnections } from '../services/connectionsService';
 
 interface SidebarProps {
   currentPage: string;
@@ -162,16 +163,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         const activeAccAny = activeAccount as any;
         const feedConfig = (() => {
           if (isMtAccount) {
-            const brokerLabel = activeAccAny?.broker && !['MetaTrader 4', 'MetaTrader 5', 'MetaTrader Server'].includes(activeAccAny.broker) 
-              ? activeAccAny.broker 
-              : 'Túnel VPS';
+            const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
+            const detected = mtConns.flatMap(c => c.detected_accounts_detail || []).find(d => d.account_number === activeAccount?.account_name?.replace(/\D/g, ''));
+            const rawBroker = activeAccAny?.broker || detected?.broker || '';
+            const brokerLabel = rawBroker && !['MetaTrader 4', 'MetaTrader 5', 'MetaTrader Server'].includes(rawBroker)
+              ? rawBroker
+              : 'ActivTrades';
             return {
               label: `Feed MT4 Remoto [${brokerLabel}]`,
               sublabel: activeAccount?.account_name || 'MT4',
               badgeColor: 'bg-emerald-950/50 border-emerald-500/40 text-emerald-300',
               dotColor: 'bg-emerald-400 animate-pulse',
               icon: '🟢',
-              title: `Conexão Remota MT4 ativa (${activeAccount?.account_name || 'MT4'}). Transmitindo cotações e ordens via Túnel/VPS através do robô AxionGatewayEA.`
+              title: `Conexão Remota MT4 ativa (${activeAccount?.account_name || 'MT4'} - ${brokerLabel}). Transmitindo cotações e ordens via Túnel/VPS através do robô AxionGatewayEA.`
             };
           }
           if (isCtraderAccount) {
