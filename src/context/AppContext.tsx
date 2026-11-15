@@ -2131,6 +2131,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   activeAccountRef.current = activeAccount;
   useEffect(() => {
     activeAccountRef.current = activeAccount;
+    if (typeof window !== 'undefined') {
+      if (activeAccount) {
+        localStorage.setItem('vortex_active_account_platform', activeAccount.platform || '');
+        if (activeAccount.platform === 'mt4' || activeAccount.platform === 'mt5') {
+          import('../services/binanceService').then(m => m.unsubscribeBinanceMarketData?.()).catch(() => {});
+        }
+      } else {
+        localStorage.removeItem('vortex_active_account_platform');
+      }
+    }
   }, [activeAccount]);
 
   const [accountStrategies, setAccountStrategies] = useState<AccountStrategy[]>([]);
@@ -2303,7 +2313,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const switchAccount = (acc: BrokerAccount) => {
     activeAccountRef.current = acc;
     setActiveAccount(acc);
-    localStorage.setItem('vortex_active_account_id', acc.id);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('vortex_active_account_id', acc.id);
+      localStorage.setItem('vortex_active_account_platform', acc.platform || '');
+      if (acc.platform === 'mt4' || acc.platform === 'mt5') {
+        import('../services/binanceService').then(m => m.unsubscribeBinanceMarketData?.()).catch(() => {});
+      }
+    }
     syncCopilotForAccountAndPanel(acc, activePanelRef.current || activePanel, true);
   };
 
@@ -13222,10 +13238,23 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       if (mtPositions.length > 0) {
         let changed = false;
         const updatedReports = [...existingReports];
+        const activeTickets = new Set(mtPositions.map((p: any) => Number(p.ticket)));
 
+        // 1. Fecha quaisquer ordens ativas locais desta conta MT4 que não estão mais presentes no MT4
+        updatedReports.forEach((r, idx) => {
+          if (r.account_id === accId && (r.status === 'Em Andamento' || (r.status as any) === 'Pendente')) {
+            const ticket = Number((r as any).ticket || (r.id && r.id.startsWith('mt_') ? r.id.replace('mt_', '') : 0));
+            if (!ticket || !activeTickets.has(ticket)) {
+              updatedReports[idx] = { ...r, status: 'Cancelado' as const, closed_at: new Date().toISOString() };
+              changed = true;
+            }
+          }
+        });
+
+        // 2. Insere ou atualiza as posições reais recebidas do MT4
         mtPositions.forEach((pos: any) => {
           const ticketId = `mt_${pos.ticket}`;
-          const existingIdx = updatedReports.findIndex(r => r.id === ticketId || (r.account_id === accId && (r as any).ticket === pos.ticket));
+          const existingIdx = updatedReports.findIndex(r => r.id === ticketId || (r.account_id === accId && Number((r as any).ticket) === Number(pos.ticket)));
           const pSym = String(pos.symbol || '').toUpperCase();
           const matchedPanel = (allPanelsRef.current || []).find(p => 
             (p.name || '').toUpperCase().includes(pSym) || 
@@ -13235,7 +13264,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
 
           const posPayload: any = {
             id: ticketId,
-            ticket: pos.ticket,
+            ticket: Number(pos.ticket),
             user_id: user.id,
             strategy_id: null,
             account_id: accId,
@@ -13254,7 +13283,8 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
             realized_pnl: Number(pos.profit || 0),
             description: `[${pos.symbol || pSym}] Ordem MT4 #${pos.ticket} (${pos.lots} lotes)`,
             created_at: pos.open_time || new Date().toISOString(),
-            already_dispatched: true
+            already_dispatched: true,
+            is_mt_real: true
           };
 
           if (existingIdx >= 0) {
@@ -13275,11 +13305,12 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
           saveLocalStrategyReports(updatedReports);
         }
       } else {
-        const mtOpen = existingReports.filter(r => r.account_id === accId && (r.id.startsWith('mt_') || (r as any).ticket) && r.status === 'Em Andamento');
+        // Quando o MT4 não possui posições abertas no momento, TODA ordem em andamento ou pendente desta conta MT4 é encerrada
+        const mtOpen = existingReports.filter(r => r.account_id === accId && (r.status === 'Em Andamento' || (r.status as any) === 'Pendente'));
         if (mtOpen.length > 0) {
           const updated = existingReports.map(r => {
-            if (r.account_id === accId && (r.id.startsWith('mt_') || (r as any).ticket) && r.status === 'Em Andamento') {
-              return { ...r, status: 'Gain' as const, closed_at: new Date().toISOString() };
+            if (r.account_id === accId && (r.status === 'Em Andamento' || (r.status as any) === 'Pendente')) {
+              return { ...r, status: 'Cancelado' as const, closed_at: new Date().toISOString() };
             }
             return r;
           });
@@ -13400,10 +13431,11 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         }
 
         // 2. Sincronização contínua de Saldo e Patrimônio da Conta MT4
+        let mtAccInfo: any = null;
         const accRes = await fetch(`${host}/accounts?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
         if (accRes && accRes.ok) {
           const accData = await accRes.json().catch(() => null);
-          const mtAccInfo = (accData?.accounts || []).find((a: any) => 
+          mtAccInfo = (accData?.accounts || []).find((a: any) => 
             String(a.account_number) === String(accNum) || String(a.id) === String(accNum)
           ) || accData?.accounts?.[0];
 
@@ -13421,22 +13453,42 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
           }
         }
 
-        // 3. Sincronização de posições ativas abertas no MT4
-        const posRes = await fetch(`${host}/positions?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+        // 3. Sincronização de posições ativas abertas no MT4 (com fallback para bridge local e dados da conta)
+        let mtPositionsData: any[] | null = null;
+        let posRes = await fetch(`${host}/positions?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+        if (!posRes || !posRes.ok) {
+          posRes = await fetch(`http://localhost:8003/positions?account=${accNum}`, { signal: AbortSignal.timeout(2000) }).catch(() => null);
+        }
         if (posRes && posRes.ok) {
           const posData = await posRes.json().catch(() => null);
           if (posData && Array.isArray(posData.positions)) {
-            syncRemoteMtPositions(acc, posData.positions);
+            mtPositionsData = posData.positions;
           }
+        } else if (mtAccInfo && Array.isArray((mtAccInfo as any).positions)) {
+          mtPositionsData = (mtAccInfo as any).positions;
         }
 
-        // 4. Sincronização de histórico de ordens fechadas no MT4
-        const tradesRes = await fetch(`${host}/trades?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+        if (mtPositionsData !== null) {
+          syncRemoteMtPositions(acc, mtPositionsData);
+        }
+
+        // 4. Sincronização de histórico de ordens fechadas no MT4 (com fallback)
+        let mtTradesData: any[] | null = null;
+        let tradesRes = await fetch(`${host}/trades?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+        if (!tradesRes || !tradesRes.ok) {
+          tradesRes = await fetch(`http://localhost:8003/trades?account=${accNum}`, { signal: AbortSignal.timeout(2000) }).catch(() => null);
+        }
         if (tradesRes && tradesRes.ok) {
           const tradesData = await tradesRes.json().catch(() => null);
-          if (tradesData && Array.isArray(tradesData.trades) && tradesData.trades.length > 0) {
-            syncRemoteMtTrades(acc, tradesData.trades);
+          if (tradesData && Array.isArray(tradesData.trades)) {
+            mtTradesData = tradesData.trades;
           }
+        } else if (mtAccInfo && Array.isArray((mtAccInfo as any).trades)) {
+          mtTradesData = (mtAccInfo as any).trades;
+        }
+
+        if (mtTradesData !== null && mtTradesData.length > 0) {
+          syncRemoteMtTrades(acc, mtTradesData);
         }
       } catch (_) {
         // Silencioso se host momentaneamente offline

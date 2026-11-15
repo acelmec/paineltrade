@@ -658,6 +658,8 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
     return Number(r?.entry_price || 0);
   };
 
+  const isMtAccount = Boolean(activeAccount && (activeAccount.platform === 'mt4' || activeAccount.platform === 'mt5'));
+
   const resolveReportMetrics = (r: any) => {
     const entry = Number(r?.entry_price || 0);
     const qty = Math.max(1, Number(r?.contrato || r?.quantity || 1));
@@ -670,7 +672,10 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
     const pts = (curPrice > 0 && entry > 0 && r?.status === 'Em Andamento')
       ? (r.side === 'COMPRA' ? (curPrice - entry) : (entry - curPrice))
       : 0;
-    const pnl = pts * qty * ptVal;
+    const brokerProfit = (r?.is_mt_real || r?.ticket || (r?.id && String(r.id).startsWith('mt_'))) && r?.pnl_liquido !== undefined
+      ? Number(r.pnl_liquido)
+      : undefined;
+    const pnl = brokerProfit !== undefined ? brokerProfit : (pts * qty * ptVal);
     return { entry, qty, curPrice, ptVal, pts, pnl };
   };
 
@@ -679,6 +684,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
     (r.status === 'Em Andamento' || (r.status as any) === 'Pendente') &&
     r.strategy_name !== 'Execução NT8' &&
     (!activeAccount || !r.account_id || r.account_id === activeAccount.id) &&
+    (!isMtAccount || Boolean((r.id && r.id.startsWith('mt_')) || (r as any).ticket || (r as any).is_mt_real)) &&
     isReportForThisAsset(r)
   );
 
@@ -686,7 +692,8 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   const allAccountActiveReports = (reports || []).filter((r: any) =>
     (r.status === 'Em Andamento' || (r.status as any) === 'Pendente') &&
     r.strategy_name !== 'Execução NT8' &&
-    (!activeAccount || !r.account_id || r.account_id === activeAccount.id)
+    (!activeAccount || !r.account_id || r.account_id === activeAccount.id) &&
+    (!isMtAccount || Boolean((r.id && r.id.startsWith('mt_')) || (r as any).ticket || (r as any).is_mt_real))
   );
 
   const inProgressAccountReports = allAccountActiveReports.filter((r: any) => r.status === 'Em Andamento');
@@ -853,7 +860,8 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
 
       const targetPrice = side === 'COMPRA' ? (liveAsk > 0 ? liveAsk : livePrice) : (liveBid > 0 ? liveBid : livePrice);
       const effectiveEntry = roundToTick(targetPrice, tickSize);
-      const initialStatus = 'Em Andamento';
+      const isMtAcc = Boolean(activeAccount && (activeAccount.platform === 'mt4' || activeAccount.platform === 'mt5'));
+      const initialStatus = isMtAcc ? 'Pendente' : 'Em Andamento';
 
       // Confirmation dialog if enabled
       if (settings?.chart_confirm_manual_trade !== false) {
@@ -1090,7 +1098,9 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
           take_profit: tpPrice,
           exit_price: null,
           status: initialStatus,
-          description: `[${selectedAsset}] Ordem ${stopMode === 'copilot' ? 'COPILOT IA' : stopMode === 'range' ? 'RANGE HL' : 'MERCADO'} ${side} @ ${effectiveEntry.toFixed(2)} (SL: ${slPrice.toFixed(2)} [${slPtsUsed.toFixed(1)}pt] / TP: ${tpPrice.toFixed(2)} [${tpPtsUsed.toFixed(1)}pt]${gatilhoSuffix}${rangeSuffix})`,
+          description: isMtAcc
+            ? `[${selectedAsset}] Ordem enviada ao MT4 #${activeAccount?.account_name} ${side} @ ${effectiveEntry.toFixed(2)} (Aguardando execução do robô...)`
+            : `[${selectedAsset}] Ordem ${stopMode === 'copilot' ? 'COPILOT IA' : stopMode === 'range' ? 'RANGE HL' : 'MERCADO'} ${side} @ ${effectiveEntry.toFixed(2)} (SL: ${slPrice.toFixed(2)} [${slPtsUsed.toFixed(1)}pt] / TP: ${tpPrice.toFixed(2)} [${tpPtsUsed.toFixed(1)}pt]${gatilhoSuffix}${rangeSuffix})`,
           panel_id: effectivePanel?.id || null,
           contrato: effectiveContracts,
           quantity: effectiveContracts,

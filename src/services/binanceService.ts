@@ -290,6 +290,14 @@ let lastBinanceAsk = 0;
 export function subscribeBinanceMarketData(symbol = 'BTCUSDT', isFutures = false): void {
   if (typeof window === 'undefined') return;
 
+  // Se o usuário estiver operando em conta MT4 / MT5 / NT8, bloqueia terminantemente a subscrição da Binance
+  const activePlat = localStorage.getItem('vortex_active_account_platform');
+  if (activePlat && ['mt4', 'mt5', 'nt8'].includes(activePlat.toLowerCase())) {
+    console.log('[BinanceService] ⛔ Subscrição Binance bloqueada para a plataforma ativa:', activePlat);
+    unsubscribeBinanceMarketData();
+    return;
+  }
+
   const cleanSym = symbol.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
   if (activeBinanceWs && activeSubscribedSymbol === cleanSym && activeBinanceWs.readyState === WebSocket.OPEN) {
     return;
@@ -380,6 +388,10 @@ export function subscribeBinanceMarketData(symbol = 'BTCUSDT', isFutures = false
 
     ws.onclose = () => {
       console.log(`[BinanceService] WebSocket fechado para ${cleanSym.toUpperCase()}`);
+      const curPlat = localStorage.getItem('vortex_active_account_platform');
+      if (curPlat && ['mt4', 'mt5', 'nt8'].includes(curPlat.toLowerCase())) {
+        return;
+      }
       if (activeSubscribedSymbol === cleanSym) {
         setTimeout(() => subscribeBinanceMarketData(cleanSym, isFutures), 3000);
       }

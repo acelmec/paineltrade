@@ -305,6 +305,13 @@ void PollAndProcessCommands()
       ArrayResize(data, 0);
       res = WebRequest("GET", url, "Content-Type: application/json\r\n", 500, data, result, resultHeaders);
    }
+   if(res == -1 && StringFind(url, "144.126.141.254") >= 0)
+   {
+      string localUrl = url;
+      StringReplace(localUrl, "144.126.141.254", "127.0.0.1");
+      StringToCharArray(reqBody, data, 0, StringLen(reqBody));
+      res = WebRequest("POST", localUrl, "Content-Type: application/json\r\n", 500, data, result, resultHeaders);
+   }
    if(res == -1)
    {
       int err = GetLastError();

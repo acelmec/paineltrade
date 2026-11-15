@@ -236,6 +236,8 @@ const server = http.createServer((req, res) => {
         leverage: info.leverage || 100,
         platform: info.platform || 'mt4',
         symbols: info.symbols || [],
+        positions: positionsCache.get(acc) || [],
+        trades: tradesHistoryCache.get(acc) || [],
         last_seen: info.lastSeen
       });
     }

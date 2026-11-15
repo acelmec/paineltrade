@@ -120,6 +120,7 @@ export const TradeDock: React.FC = () => {
 
       const acc = accounts?.find((a: any) => a.id === r.account_id);
       if (isNinjaExecutionAccount(acc)) return false;
+      if (acc?.platform === 'mt4' || acc?.platform === 'mt5') return false; // Contas MT4/MT5 são sincronizadas pelo corretor, NUNCA demo simuladas!
       return true;
     }).map((r: any) => {
       const entry = Number(r.entry_price || 0);
@@ -175,6 +176,49 @@ export const TradeDock: React.FC = () => {
       };
     });
 
+    // Posições reais vindas do MetaTrader 4 / 5 exclusivamente via sincronização da conta
+    const realMtOrders = (reports || []).filter((r: any) => {
+      if (r.status !== 'Em Andamento') return false;
+      if (userAccountIds.size > 0 && r.account_id && !userAccountIds.has(r.account_id)) return false;
+
+      const acc = accounts?.find((a: any) => a.id === r.account_id);
+      if (!acc || (acc.platform !== 'mt4' && acc.platform !== 'mt5')) return false;
+
+      // Posição válida deve ter ticket do MT4 ou marcação de execução real sincronizada
+      return Boolean((r.id && r.id.startsWith('mt_')) || (r as any).ticket || (r as any).is_mt_real);
+    }).map((r: any) => {
+      const entry = Number(r.entry_price || 0);
+      const contracts = Number(r.contrato || r.quantity || 1);
+      const acc = accounts?.find((a: any) => a.id === r.account_id);
+
+      let matchedPanel = panels?.find((p: any) => p.id === r.panel_id || p.instance_id === r.instance_id);
+      if (!matchedPanel && r.symbol) {
+        matchedPanel = panels?.find((p: any) => isSameAsset(p.symbol || p.name, r.symbol));
+      }
+
+      let curPrice = 0;
+      if (typeof getPanelPrice === 'function') {
+        curPrice = getPanelPrice(r.panel_id, r.symbol);
+      }
+      if (!curPrice || curPrice <= 0) {
+        curPrice = Number(marketData?.price || 0);
+      }
+
+      const brokerProfit = r.pnl_liquido !== undefined ? Number(r.pnl_liquido) : undefined;
+      const pts = (curPrice > 0 && entry > 0) ? (r.side === 'COMPRA' ? (curPrice - entry) : (entry - curPrice)) : 0;
+      const panelSettings = matchedPanel ? allSettings?.[matchedPanel.id] : settings;
+      const pointVal = resolvePanelPointValue(matchedPanel, panelSettings || settings);
+
+      return {
+        ...r,
+        is_mt_real: true,
+        account_name: acc?.account_name || `MT4 #${(r as any).ticket || r.account_id}`,
+        current_price: curPrice > 0 ? curPrice : undefined,
+        unrealized_points: pts,
+        unrealized_pnl: brokerProfit !== undefined ? brokerProfit : (pts * contracts * pointVal)
+      };
+    });
+
     // Posições reais vindas do NinjaTrader para as contas sincronizadas conectadas
     const realNinjaOrders = (ninjaPositions || []).map((pos: any) => {
       const acc = accounts?.find((a: any) => a.account_name?.trim().toLowerCase() === pos.account?.trim().toLowerCase());
@@ -213,7 +257,7 @@ export const TradeDock: React.FC = () => {
       is_syncing: !ninjaOnline || realNinjaOrders.length === 0
     }));
 
-    return [...demoOrders, ...realNinjaOrders, ...syncPendingOrders];
+    return [...demoOrders, ...realNinjaOrders, ...realMtOrders, ...syncPendingOrders];
   }, [reports, ninjaPositions, accounts, userAccountIds, ninjaOnline, panels, activePanel, settings, allSettings, marketData, getPanelPrice]);
 
   // 2. Ordens Pendentes (Limit / Stop ainda não acionadas) - apenas contas do usuário

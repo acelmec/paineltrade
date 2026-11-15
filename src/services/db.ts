@@ -3596,11 +3596,13 @@ export async function fetchCandlesSupabase(
   const rawSym = (targetPanelObj?.symbol || targetPanelObj?.name || targetPanelObj?.instance_id || queryId || '').toUpperCase();
   const baseSym = rawSym.split(/[-_(\s]/)[0].trim().replace(/[^A-Z0-9]/g, '');
 
-  const isMtFeed = (targetPanelObj as any)?.platform === 'mt4' ||
+  const activePlat = typeof window !== 'undefined' ? (localStorage.getItem('vortex_active_account_platform') || '') : '';
+  const isMtFeed = activePlat === 'mt4' ||
+                   activePlat === 'mt5' ||
+                   (targetPanelObj as any)?.platform === 'mt4' ||
                    (targetPanelObj as any)?.platform === 'mt5' ||
                    (targetPanelObj as any)?.source === 'mt4' ||
-                   (targetPanelObj?.instance_id || '').startsWith('mt4_') ||
-                   (typeof window !== 'undefined' && localStorage.getItem('vortex_active_account_platform') === 'mt4');
+                   (targetPanelObj?.instance_id || '').startsWith('mt4_');
 
   const isCrypto = !isMtFeed && (/USDT|BUSD|USDC/i.test(baseSym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(baseSym));
   if (isCrypto) {

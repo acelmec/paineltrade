@@ -805,6 +805,8 @@ const server = http.createServer((req, res) => {
         isConnected: true,
         platform: 'mt4',
         symbols: info.symbols || [],
+        positions: mt4PositionsCache.get(acc) || [],
+        trades: mt4TradesHistoryCache.get(acc) || [],
         lastSeen: info.lastSeen
       });
     }
