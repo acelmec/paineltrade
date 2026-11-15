@@ -254,6 +254,48 @@ string GetOpenPositionsJson()
 }
 
 //+------------------------------------------------------------------+
+//| SERIALIZAR HISTÓRICO DE NEGÓCIOS FECHADOS EM JSON               |
+//+------------------------------------------------------------------+
+string GetClosedOrdersHistoryJson()
+{
+   if(!HistorySelect(0, TimeCurrent())) return "[]";
+   int total = HistoryDealsTotal();
+   string json = "[";
+   int count = 0;
+   int start = total > 30 ? total - 30 : 0;
+   for(int i = total - 1; i >= start; i--)
+   {
+      ulong ticket = HistoryDealGetTicket(i);
+      if(ticket > 0)
+      {
+         long entryType = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+         if(entryType == DEAL_ENTRY_OUT || entryType == DEAL_ENTRY_OUT_BY)
+         {
+            long type = HistoryDealGetInteger(ticket, DEAL_TYPE);
+            string side = (type == DEAL_TYPE_BUY) ? "COMPRA" : "VENDA";
+            string sym = HistoryDealGetString(ticket, DEAL_SYMBOL);
+            double lots = HistoryDealGetDouble(ticket, DEAL_VOLUME);
+            double price = HistoryDealGetDouble(ticket, DEAL_PRICE);
+            double profit = HistoryDealGetDouble(ticket, DEAL_PROFIT);
+            double comm = HistoryDealGetDouble(ticket, DEAL_COMMISSION);
+            double swap = HistoryDealGetDouble(ticket, DEAL_SWAP);
+            double netPnl = profit + comm + swap;
+            datetime closeTime = (datetime)HistoryDealGetInteger(ticket, DEAL_TIME);
+
+            if(count > 0) json += ",";
+            json += StringFormat(
+               "{\"ticket\":%I64u,\"symbol\":\"%s\",\"side\":\"%s\",\"lots\":%.2f,\"exit_price\":%.5f,\"profit\":%.2f,\"net_profit\":%.2f,\"commission\":%.2f,\"swap\":%.2f,\"close_time\":\"%s\"}",
+               ticket, sym, side, lots, price, profit, netPnl, comm, swap, FormatIsoTimestamp(closeTime)
+            );
+            count++;
+         }
+      }
+   }
+   json += "]";
+   return json;
+}
+
+//+------------------------------------------------------------------+
 //| PROCESSAR COMANDOS DO AXION (ORDENS, SL/TP, FECHAMENTOS)          |
 //+------------------------------------------------------------------+
 void PollAndProcessCommands()
@@ -289,7 +331,11 @@ void PollAndProcessCommands()
    }
 
    string posJson = GetOpenPositionsJson();
-   string reqBody = StringFormat("{\"account\":\"%I64d\",\"positions\":%s}", accLogin, posJson);
+   string histJson = GetClosedOrdersHistoryJson();
+   string reqBody = StringFormat(
+      "{\"account\":\"%I64d\",\"balance\":%.2f,\"equity\":%.2f,\"broker\":\"%s\",\"positions\":%s,\"history\":%s}",
+      accLogin, accBal, accEq, brokerClean, posJson, histJson
+   );
    char data[];
    StringToCharArray(reqBody, data, 0, StringLen(reqBody));
    char result[];

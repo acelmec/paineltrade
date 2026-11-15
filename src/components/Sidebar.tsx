@@ -1,7 +1,5 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { getStreamerInfoForPanel, type StreamerItem } from '../services/vortexStreamer';
-import { getLocalPlatformConnections } from '../services/connectionsService';
 
 interface SidebarProps {
   currentPage: string;
@@ -27,39 +25,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setAiEnabled,
     isAnalyzing,
     marketData,
-    activePanel,
-    activeAccount,
     isRestrictedSession,
     setIsCopilotModalOpen,
     planDetails,
     canAccessAlgorithmCreator,
     canAccessCopilotAI,
     canAccessCopyTrading,
-    canAccessReplay,
-    settings,
-    allSettings
+    canAccessReplay
   } = useApp();
-
-  const [streamerInfo, setStreamerInfo] = useState<{ isLocal: boolean; stream: StreamerItem | null }>({ isLocal: false, stream: null });
-
-  useEffect(() => {
-    let isMounted = true;
-    const checkStream = async () => {
-      if (!activePanel) return;
-      try {
-        const activePanelSettings = (activePanel?.id && allSettings ? allSettings[activePanel.id] : null) || settings;
-        const info = await getStreamerInfoForPanel(activePanel, activePanelSettings);
-        if (isMounted) setStreamerInfo(info);
-      } catch {}
-    };
-
-    checkStream();
-    const interval = setInterval(checkStream, 2500);
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, [activePanel, settings, allSettings]);
 
   const isAdmin = user?.email?.toLowerCase() === 'admin@vortex.com';
   const isCopyOnly = planDetails?.isCopyTraderOnly === true;
@@ -152,112 +125,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="menu-sublabel text-[10px] text-slate-500">Recolher/Expandir</div>
         </div>
       </div>
-
-      {/* Status da Conexão / Feed de Mercado Dinâmico conforme Conta Ativa */}
-      {!isCopyOnly && (() => {
-        const isMtAccount = activeAccount?.platform === 'mt4' || activeAccount?.platform === 'mt5';
-        const isCtraderAccount = activeAccount?.platform === 'ctrader';
-        const isBinanceAccount = activeAccount?.platform === 'binance';
-        const isNt8Account = activeAccount?.platform === 'nt8';
-
-        const activeAccAny = activeAccount as any;
-        const feedConfig = (() => {
-          if (isMtAccount) {
-            const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
-            const detected = mtConns.flatMap(c => c.detected_accounts_detail || []).find(d => d.account_number === activeAccount?.account_name?.replace(/\D/g, ''));
-            const rawBroker = activeAccAny?.broker || detected?.broker || '';
-            const brokerLabel = rawBroker && !['MetaTrader 4', 'MetaTrader 5', 'MetaTrader Server'].includes(rawBroker)
-              ? rawBroker
-              : 'ActivTrades';
-            return {
-              label: `Feed MT4 Remoto [${brokerLabel}]`,
-              sublabel: activeAccount?.account_name || 'MT4',
-              badgeColor: 'bg-emerald-950/50 border-emerald-500/40 text-emerald-300',
-              dotColor: 'bg-emerald-400 animate-pulse',
-              icon: '🟢',
-              title: `Conexão Remota MT4 ativa (${activeAccount?.account_name || 'MT4'} - ${brokerLabel}). Transmitindo cotações e ordens via Túnel/VPS através do robô AxionGatewayEA.`
-            };
-          }
-          if (isCtraderAccount) {
-            const brokerLabel = activeAccAny?.broker || 'cTrader';
-            return {
-              label: `Feed cTrader [${brokerLabel}]`,
-              sublabel: activeAccount?.account_name || 'cTrader',
-              badgeColor: 'bg-emerald-950/50 border-emerald-500/40 text-emerald-300',
-              dotColor: 'bg-emerald-400 animate-pulse',
-              icon: '🟢',
-              title: `Conexão cTrader ativa (${activeAccount?.account_name}). Transmitindo cotações e ordens em tempo real via Open API / FIX.`
-            };
-          }
-          if (isBinanceAccount) {
-            return {
-              label: 'Feed Binance Spot Cloud',
-              sublabel: activeAccount?.account_name || 'Binance',
-              badgeColor: 'bg-amber-950/50 border-amber-500/40 text-amber-300',
-              dotColor: 'bg-amber-400',
-              icon: '🟡',
-              title: 'Cotações de Cripto em tempo real direto da Binance Spot API.'
-            };
-          }
-          if (streamerInfo.isLocal) {
-            return {
-              label: `Feed NT8 Local ${streamerInfo.stream?.symbol ? '(' + streamerInfo.stream.symbol + ')' : ''}`,
-              sublabel: 'Porta 8002',
-              badgeColor: 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300',
-              dotColor: 'bg-emerald-400 animate-pulse',
-              icon: '🟢',
-              title: `NinjaTrader 8 conectado na porta 8002 | Streamer ativo (${streamerInfo.stream?.symbol || 'Multi-Asset'}).`
-            };
-          }
-          if (isNt8Account) {
-            return {
-              label: 'Feed NT8 Túnel Cloud',
-              sublabel: activeAccount?.account_name || 'Túnel',
-              badgeColor: 'bg-purple-950/40 border-purple-500/40 text-purple-300',
-              dotColor: 'bg-purple-400',
-              icon: '🟣',
-              title: 'NinjaTrader 8 conectado via Túnel Remoto Cloud.'
-            };
-          }
-          return {
-            label: 'Feed Axion Cloud',
-            sublabel: 'Relay Cloud',
-            badgeColor: 'bg-slate-800/40 border-slate-700/40 text-slate-400',
-            dotColor: 'bg-sky-400',
-            icon: '☁️',
-            title: 'Consumindo cotações e histórico via Feed Axion Cloud.'
-          };
-        })();
-
-        return (
-          <div className="px-4 py-2 border-b border-slate-800/80 flex flex-col gap-1.5">
-            {!collapsed ? (
-              <div 
-                className={`flex items-center justify-between px-2.5 py-1.5 rounded border text-[10px] font-medium transition ${feedConfig.badgeColor}`}
-                title={feedConfig.title}
-              >
-                <div className="flex items-center gap-1.5 truncate">
-                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${feedConfig.dotColor}`}></span>
-                  <span className="truncate">{feedConfig.label}</span>
-                </div>
-                <span className="text-[9px] opacity-75 font-mono shrink-0 ml-1 truncate max-w-[50px]">
-                  {feedConfig.sublabel}
-                </span>
-              </div>
-            ) : (
-              <div className="flex justify-center">
-                <div 
-                  onClick={() => setCollapsed(false)}
-                  className="w-7 h-7 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-300 cursor-pointer hover:bg-slate-800 transition active:scale-95"
-                  title={feedConfig.title}
-                >
-                  {feedConfig.icon}
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })()}
 
       {/* Menu Items */}
       <div className="flex-1 py-2 overflow-y-auto overflow-x-hidden min-h-0 custom-scrollbar">

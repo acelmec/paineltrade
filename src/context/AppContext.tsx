@@ -50,6 +50,7 @@ import {
   roundToTick,
   fetchAtmStrategiesSupabase,
   getLocalBrokerAccounts,
+  updateAccountSupabase,
   normalizeStrategyStages,
   fetchOptionsMarketSupabase,
   isNinjaExecutionAccount,
@@ -13268,6 +13269,71 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       }
     };
 
+    const syncRemoteMtTrades = (account: any, trades: any[]) => {
+      if (!account || !Array.isArray(trades) || trades.length === 0) return;
+      const accId = account.id;
+      const existingReports = [...(reportsRef.current || [])];
+      let changed = false;
+
+      trades.forEach((trade: any) => {
+        const ticket = Number(trade.ticket);
+        if (!ticket) return;
+        const netProfit = Number(trade.net_profit ?? trade.profit ?? 0);
+        const tradeStatus: 'Gain' | 'Stop' = netProfit >= 0 ? 'Gain' : 'Stop';
+
+        const existingIdx = existingReports.findIndex(
+          r => (r.account_id === accId || !r.account_id) && ((r as any).ticket === ticket || r.id === `mt_${ticket}`)
+        );
+
+        if (existingIdx >= 0) {
+          const current = existingReports[existingIdx];
+          if (current.status === 'Em Andamento' || current.status !== tradeStatus || current.pnl_liquido !== netProfit) {
+            existingReports[existingIdx] = {
+              ...current,
+              status: tradeStatus,
+              exit_price: Number(trade.exit_price || current.exit_price || 0),
+              pnl_liquido: netProfit,
+              realized_pnl: Number(trade.profit || 0),
+              closed_at: trade.close_time || new Date().toISOString()
+            };
+            changed = true;
+          }
+        } else {
+          const newReport: StrategyReport = {
+            id: `mt_${ticket}`,
+            ticket: ticket,
+            user_id: user?.id || 'local',
+            strategy_id: null,
+            panel_id: activePanelRef.current?.id || 'default',
+            instance_id: (trade.symbol || '').toLowerCase(),
+            symbol: trade.symbol || activePanelRef.current?.name || 'MT4',
+            account_id: accId,
+            strategy_name: `MT4 #${ticket}`,
+            side: trade.side === 'COMPRA' ? 'COMPRA' : 'VENDA',
+            status: tradeStatus,
+            quantity: Number(trade.lots || 1),
+            contrato: Number(trade.lots || 1),
+            entry_price: Number(trade.entry_price || trade.exit_price || 0),
+            exit_price: Number(trade.exit_price || 0),
+            stop_loss: Number(trade.sl || 0),
+            take_profit: Number(trade.tp || 0),
+            pnl_liquido: netProfit,
+            realized_pnl: Number(trade.profit || 0),
+            description: `Trade MT4 #${ticket} (${trade.symbol})`,
+            created_at: trade.open_time || trade.close_time || new Date().toISOString(),
+            closed_at: trade.close_time || new Date().toISOString()
+          };
+          existingReports.unshift(newReport);
+          changed = true;
+        }
+      });
+
+      if (changed) {
+        reportsRef.current = existingReports;
+        setReports(existingReports);
+      }
+    };
+
     const fetchRemoteMtQuotes = async () => {
       const acc = activeAccountRef.current;
       const isMtAcc = acc?.platform === 'mt4' || acc?.platform === 'mt5';
@@ -13278,6 +13344,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
         const activeConn = mtConns.find(c => c.status === 'online') || mtConns[0];
         const host = (activeConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
+        const accNum = (acc?.account_name || '').replace(/\D/g, '') || acc?.id;
 
         // 1. Cotações Bid/Ask em tempo real
         const res = await fetch(`${host}/quotes`, { signal: AbortSignal.timeout(2500) });
@@ -13307,13 +13374,43 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
           }
         }
 
-        // 2. Sincronização de posições ativas abertas no MT4
-        const accNum = (acc?.account_name || '').replace(/\D/g, '') || acc?.id;
+        // 2. Sincronização contínua de Saldo e Patrimônio da Conta MT4
+        const accRes = await fetch(`${host}/accounts?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+        if (accRes && accRes.ok) {
+          const accData = await accRes.json().catch(() => null);
+          const mtAccInfo = (accData?.accounts || []).find((a: any) => 
+            String(a.account_number) === String(accNum) || String(a.id) === String(accNum)
+          ) || accData?.accounts?.[0];
+
+          if (mtAccInfo && mtAccInfo.balance !== undefined) {
+            const newBal = Number(mtAccInfo.balance);
+            const newEq = Number(mtAccInfo.equity || newBal);
+            if (newBal > 0 && (acc.balance !== newBal || acc.equity !== newEq)) {
+              acc.balance = newBal;
+              acc.equity = newEq;
+              activeAccountRef.current = { ...acc };
+              setActiveAccount({ ...acc });
+              setAccounts(prev => prev.map(a => a.id === acc.id ? { ...a, balance: newBal, equity: newEq } : a));
+              updateAccountSupabase(acc.id, { balance: newBal, equity: newEq }).catch(() => {});
+            }
+          }
+        }
+
+        // 3. Sincronização de posições ativas abertas no MT4
         const posRes = await fetch(`${host}/positions?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
         if (posRes && posRes.ok) {
           const posData = await posRes.json().catch(() => null);
           if (posData && Array.isArray(posData.positions)) {
             syncRemoteMtPositions(acc, posData.positions);
+          }
+        }
+
+        // 4. Sincronização de histórico de ordens fechadas no MT4
+        const tradesRes = await fetch(`${host}/trades?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+        if (tradesRes && tradesRes.ok) {
+          const tradesData = await tradesRes.json().catch(() => null);
+          if (tradesData && Array.isArray(tradesData.trades) && tradesData.trades.length > 0) {
+            syncRemoteMtTrades(acc, tradesData.trades);
           }
         }
       } catch (_) {

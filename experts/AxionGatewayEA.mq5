@@ -198,6 +198,104 @@ void SendStreamerPayload(string json)
 }
 
 //+------------------------------------------------------------------+
+//| OBTER SÍMBOLOS DO MARKET WATCH PARA SINCRONIZAÇÃO                |
+//+------------------------------------------------------------------+
+string GetMarketWatchSymbols()
+{
+   string list = "";
+   int total = SymbolsTotal(true);
+   int maxCount = total > 40 ? 40 : total;
+   for(int i = 0; i < maxCount; i++)
+   {
+      string s = SymbolName(i, true);
+      if(s != "")
+      {
+         if(list != "") list += ",";
+         list += s;
+      }
+   }
+   return list;
+}
+
+//+------------------------------------------------------------------+
+//| SERIALIZAR POSIÇÕES ABERTAS (ORDENS ATIVAS) EM JSON              |
+//+------------------------------------------------------------------+
+string GetOpenPositionsJson()
+{
+   int total = PositionsTotal();
+   string json = "[";
+   int count = 0;
+   for(int i = 0; i < total; i++)
+   {
+      string sym = PositionGetSymbol(i);
+      if(sym != "")
+      {
+         ulong ticket = PositionGetInteger(POSITION_TICKET);
+         long type = PositionGetInteger(POSITION_TYPE);
+         string side = (type == POSITION_TYPE_BUY) ? "COMPRA" : "VENDA";
+         double lots = PositionGetDouble(POSITION_VOLUME);
+         double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+         double sl = PositionGetDouble(POSITION_SL);
+         double tp = PositionGetDouble(POSITION_TP);
+         double profit = PositionGetDouble(POSITION_PROFIT);
+         long magic = PositionGetInteger(POSITION_MAGIC);
+         datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
+
+         if(count > 0) json += ",";
+         json += StringFormat(
+            "{\"ticket\":%I64u,\"symbol\":\"%s\",\"side\":\"%s\",\"lots\":%.2f,\"entry_price\":%.5f,\"sl\":%.5f,\"tp\":%.5f,\"profit\":%.2f,\"magic\":%I64d,\"open_time\":\"%s\"}",
+            ticket, sym, side, lots, entry, sl, tp, profit, magic, FormatIsoTimestamp(openTime)
+         );
+         count++;
+      }
+   }
+   json += "]";
+   return json;
+}
+
+//+------------------------------------------------------------------+
+//| SERIALIZAR HISTÓRICO DE NEGÓCIOS FECHADOS EM JSON               |
+//+------------------------------------------------------------------+
+string GetClosedOrdersHistoryJson()
+{
+   if(!HistorySelect(0, TimeCurrent())) return "[]";
+   int total = HistoryDealsTotal();
+   string json = "[";
+   int count = 0;
+   int start = total > 30 ? total - 30 : 0;
+   for(int i = total - 1; i >= start; i--)
+   {
+      ulong ticket = HistoryDealGetTicket(i);
+      if(ticket > 0)
+      {
+         long entryType = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+         if(entryType == DEAL_ENTRY_OUT || entryType == DEAL_ENTRY_OUT_BY)
+         {
+            long type = HistoryDealGetInteger(ticket, DEAL_TYPE);
+            string side = (type == DEAL_TYPE_BUY) ? "COMPRA" : "VENDA";
+            string sym = HistoryDealGetString(ticket, DEAL_SYMBOL);
+            double lots = HistoryDealGetDouble(ticket, DEAL_VOLUME);
+            double price = HistoryDealGetDouble(ticket, DEAL_PRICE);
+            double profit = HistoryDealGetDouble(ticket, DEAL_PROFIT);
+            double comm = HistoryDealGetDouble(ticket, DEAL_COMMISSION);
+            double swap = HistoryDealGetDouble(ticket, DEAL_SWAP);
+            double netPnl = profit + comm + swap;
+            datetime closeTime = (datetime)HistoryDealGetInteger(ticket, DEAL_TIME);
+
+            if(count > 0) json += ",";
+            json += StringFormat(
+               "{\"ticket\":%I64u,\"symbol\":\"%s\",\"side\":\"%s\",\"lots\":%.2f,\"exit_price\":%.5f,\"profit\":%.2f,\"net_profit\":%.2f,\"commission\":%.2f,\"swap\":%.2f,\"close_time\":\"%s\"}",
+               ticket, sym, side, lots, price, profit, netPnl, comm, swap, FormatIsoTimestamp(closeTime)
+            );
+            count++;
+         }
+      }
+   }
+   json += "]";
+   return json;
+}
+
+//+------------------------------------------------------------------+
 //| PROCESSAR COMANDOS DO AXION (ORDENS, SL/TP, FECHAMENTOS)          |
 //+------------------------------------------------------------------+
 void PollAndProcessCommands()
@@ -224,11 +322,31 @@ void PollAndProcessCommands()
                 "&leverage=" + IntegerToString(accLev);
    if(InpPairingToken != "") url += "&token=" + InpPairingToken;
 
+   static datetime lastSymbolsSend = 0;
+   if(TimeCurrent() - lastSymbolsSend > 30)
+   {
+      lastSymbolsSend = TimeCurrent();
+      string mw = GetMarketWatchSymbols();
+      if(mw != "") url += "&symbols=" + mw;
+   }
+
+   string posJson = GetOpenPositionsJson();
+   string histJson = GetClosedOrdersHistoryJson();
+   string reqBody = StringFormat(
+      "{\"account\":\"%I64d\",\"balance\":%.2f,\"equity\":%.2f,\"broker\":\"%s\",\"positions\":%s,\"history\":%s}",
+      accLogin, accBal, accEq, brokerClean, posJson, histJson
+   );
    char data[];
+   StringToCharArray(reqBody, data, 0, StringLen(reqBody));
    char result[];
    string resultHeaders;
    ResetLastError();
-   int res = WebRequest("GET", url, "Content-Type: application/json\r\n", 500, data, result, resultHeaders);
+   int res = WebRequest("POST", url, "Content-Type: application/json\r\n", 500, data, result, resultHeaders);
+   if(res == -1)
+   {
+      ArrayResize(data, 0);
+      res = WebRequest("GET", url, "Content-Type: application/json\r\n", 500, data, result, resultHeaders);
+   }
    if(res == -1)
    {
       int err = GetLastError();

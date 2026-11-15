@@ -4894,6 +4894,7 @@ export interface BrokerAccount {
   tradovate_account_id?: number | null;
   account_name: string;
   balance: number;
+  equity?: number;
   initial_balance: number;
   currency: string;
   is_master: boolean;

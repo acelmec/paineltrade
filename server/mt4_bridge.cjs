@@ -12,6 +12,7 @@ const PORT = process.env.MT4_PORT || 8003;
 const quotesCache = new Map(); // symbol -> { price, bid, ask, volume, updated_at }
 const accountsConnected = new Map(); // accountNumber -> { lastSeen: Date, symbol: string }
 const accountsPositions = new Map(); // accountNumber -> Array<{ ticket, symbol, side, lots, entry_price, sl, tp, profit, open_time }>
+const accountsTradesHistory = new Map(); // accountNumber -> Array<{ ticket, symbol, side, lots, entry_price, exit_price, profit, net_profit, open_time, close_time }>
 
 // Fila de comandos pendentes por conta
 // accountId/number -> Array<{ id, action, symbol, direction, side, lots, stop_loss, take_profit, ticket }>
@@ -119,6 +120,9 @@ const server = http.createServer((req, res) => {
         if (Array.isArray(bodyData.positions)) {
           accountsPositions.set(accNum, bodyData.positions);
         }
+        if (Array.isArray(bodyData.history)) {
+          accountsTradesHistory.set(accNum, bodyData.history);
+        }
       }
 
       // Busca próximo comando pendente para a conta ou comando global
@@ -178,6 +182,25 @@ const server = http.createServer((req, res) => {
       account: accNum,
       positions: posList,
       total: posList.length
+    }));
+    return;
+  }
+
+  // 3.02 GET /trades ou /mt4/trades: Retorna histórico de ordens fechadas da conta
+  if (req.method === 'GET' && (pathname === '/trades' || pathname === '/mt4/trades')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    const accNum = String(query.account || '').trim().replace(/\D/g, '') || String(query.account || '').trim();
+    let historyList = [];
+    if (accNum && accountsTradesHistory.has(accNum)) {
+      historyList = accountsTradesHistory.get(accNum);
+    } else if (accountsTradesHistory.size > 0) {
+      historyList = Array.from(accountsTradesHistory.values())[0] || [];
+    }
+    res.end(JSON.stringify({
+      success: true,
+      account: accNum,
+      trades: historyList,
+      total: historyList.length
     }));
     return;
   }

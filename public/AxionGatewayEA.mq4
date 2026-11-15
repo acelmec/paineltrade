@@ -228,6 +228,37 @@ string GetOpenPositionsJson()
 }
 
 //+------------------------------------------------------------------+
+//| SERIALIZAR HISTÓRICO DE ORDENS FECHADAS EM JSON                  |
+//+------------------------------------------------------------------+
+string GetClosedOrdersHistoryJson()
+{
+   int total = OrdersHistoryTotal();
+   string json = "[";
+   int count = 0;
+   int start = total > 30 ? total - 30 : 0;
+   for(int i = total - 1; i >= start; i--)
+   {
+      if(OrderSelect(i, SELECT_BY_POS, MODE_HISTORY))
+      {
+         int type = OrderType();
+         if(type == OP_BUY || type == OP_SELL)
+         {
+            if(count > 0) json += ",";
+            string side = (type == OP_BUY) ? "COMPRA" : "VENDA";
+            double netPnl = OrderProfit() + OrderCommission() + OrderSwap();
+            json += StringFormat(
+               "{\"ticket\":%d,\"symbol\":\"%s\",\"side\":\"%s\",\"lots\":%.2f,\"entry_price\":%.5f,\"exit_price\":%.5f,\"sl\":%.5f,\"tp\":%.5f,\"profit\":%.2f,\"net_profit\":%.2f,\"commission\":%.2f,\"swap\":%.2f,\"magic\":%d,\"open_time\":\"%s\",\"close_time\":\"%s\"}",
+               OrderTicket(), OrderSymbol(), side, OrderLots(), OrderOpenPrice(), OrderClosePrice(), OrderStopLoss(), OrderTakeProfit(), OrderProfit(), netPnl, OrderCommission(), OrderSwap(), OrderMagicNumber(), FormatIsoTimestamp(OrderOpenTime()), FormatIsoTimestamp(OrderCloseTime())
+            );
+            count++;
+         }
+      }
+   }
+   json += "]";
+   return json;
+}
+
+//+------------------------------------------------------------------+
 //| PROCESSAR COMANDOS DO AXION (ORDENS, SL/TP, FECHAMENTOS)          |
 //+------------------------------------------------------------------+
 void PollAndProcessCommands()
@@ -255,7 +286,11 @@ void PollAndProcessCommands()
    }
 
    string posJson = GetOpenPositionsJson();
-   string reqBody = StringFormat("{\"account\":\"%d\",\"positions\":%s}", AccountNumber(), posJson);
+   string histJson = GetClosedOrdersHistoryJson();
+   string reqBody = StringFormat(
+      "{\"account\":\"%d\",\"balance\":%.2f,\"equity\":%.2f,\"broker\":\"%s\",\"positions\":%s,\"history\":%s}",
+      AccountNumber(), AccountBalance(), AccountEquity(), AccountCompany(), posJson, histJson
+   );
    char data[];
    StringToCharArray(reqBody, data, 0, StringLen(reqBody));
    char result[];

@@ -59,6 +59,7 @@ const ML_SCRIPT_PATH = path.join(__dirname, '..', 'ml_pipeline', 'pattern_analyz
 const mt4QuotesCache = new Map(); // symbol -> { price, bid, ask, volume, updated_at }
 const mt4AccountsConnected = new Map(); // accountNumber -> { lastSeen: Date, symbol: string }
 const mt4PositionsCache = new Map(); // accountNumber -> Array<{ ticket, symbol, side, lots, entry_price, sl, tp, profit, open_time }>
+const mt4TradesHistoryCache = new Map(); // accountNumber -> Array<{ ticket, symbol, side, lots, entry_price, exit_price, profit, net_profit, open_time, close_time }>
 const mt4PendingCommands = new Map(); // accountId/number -> Array<{ id, action, symbol, direction, side, lots, stop_loss, take_profit, ticket }>
 
 let mlRunState = {
@@ -688,6 +689,9 @@ const server = http.createServer((req, res) => {
         if (Array.isArray(bodyData.positions)) {
           mt4PositionsCache.set(accNum, bodyData.positions);
         }
+        if (Array.isArray(bodyData.history)) {
+          mt4TradesHistoryCache.set(accNum, bodyData.history);
+        }
       }
 
       const queue = mt4PendingCommands.get(accNum) || mt4PendingCommands.get('all') || [];
@@ -745,6 +749,25 @@ const server = http.createServer((req, res) => {
       account: accNum,
       positions: posList,
       total: posList.length
+    }));
+    return;
+  }
+
+  // 1.02 GET /trades ou /mt4/trades: Retorna histórico de ordens fechadas da conta
+  if (req.method === 'GET' && (pathname === '/trades' || pathname === '/mt4/trades')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    const accNum = String(url.searchParams.get('account') || '').trim().replace(/\D/g, '') || String(url.searchParams.get('account') || '').trim();
+    let historyList = [];
+    if (accNum && mt4TradesHistoryCache.has(accNum)) {
+      historyList = mt4TradesHistoryCache.get(accNum);
+    } else if (mt4TradesHistoryCache.size > 0) {
+      historyList = Array.from(mt4TradesHistoryCache.values())[0] || [];
+    }
+    res.end(JSON.stringify({
+      success: true,
+      account: accNum,
+      trades: historyList,
+      total: historyList.length
     }));
     return;
   }

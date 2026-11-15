@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import { useIsMobile } from '../utils/platform';
 import { CandleChart } from './CandleChart';
 import { ChartWidgetsOverlay } from './ChartWidgetsOverlay';
+import { isStreamerWsConnected } from '../services/vortexStreamer';
 import type { IndicatorConfig } from '../utils/indicatorRegistry';
 import type { WidgetConfig } from '../utils/widgetRegistry';
 import type { DrawingItem, DrawingToolType } from '../types/chartDrawings';
@@ -102,7 +103,7 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
   isMidnightTheme,
   showWidgets = true,
 }) => {
-  const { panels, activePanel, getPanelSnapshot, ensurePanelDataLoaded, ensurePanelHistoryDays, allSettings, settings, saveSettings } = useApp() as any;
+  const { panels, activePanel, getPanelSnapshot, ensurePanelDataLoaded, ensurePanelHistoryDays, allSettings, settings, saveSettings, activeAccount } = useApp() as any;
   const isMobile = useIsMobile();
   const slotContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -267,6 +268,54 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
             <option value={15} className="bg-[#181d28] text-slate-200">15d</option>
             <option value={30} className="bg-[#181d28] text-slate-200">30d</option>
           </select>
+
+          {/* Badge de Conexão Dedicada deste Gráfico */}
+          {(() => {
+            const sym = (slotPanel?.symbol || slotPanel?.name || '').toUpperCase();
+            const isCrypto = /USDT|BUSD|USDC/i.test(sym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(sym);
+            const isMt = (slotPanel as any)?.platform === 'mt4' || (slotPanel as any)?.platform === 'mt5' || (slotPanel as any)?.source === 'mt4' || (slotPanel?.instance_id || '').startsWith('mt4_') || (activeAccount?.platform === 'mt4' && /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX|BTC|ETH)/i.test(sym));
+            const isNt8 = !isMt && (slotPanel?.platform === 'ninjatrader' || isStreamerWsConnected());
+
+            let label = 'Axion Feed';
+            let dotColor = 'bg-sky-400';
+            let badgeStyle = 'bg-sky-950/40 border-sky-500/30 text-sky-300';
+            let title = 'Consumindo cotações e histórico via Feed Axion Cloud';
+
+            if (isMt) {
+              const broker = (activeAccount as any)?.broker && !['MetaTrader 4', 'MetaTrader 5', 'MetaTrader Server'].includes((activeAccount as any)?.broker)
+                ? (activeAccount as any)?.broker
+                : ((slotPanel as any)?.broker || 'ActivTrades');
+              label = `MT4 ${broker}`;
+              dotColor = 'bg-emerald-400 animate-pulse';
+              badgeStyle = 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300';
+              title = `Conexão Remota MT4 (${broker}) via Túnel VPS`;
+            } else if (isNt8) {
+              label = 'NT8 Local';
+              dotColor = 'bg-emerald-400 animate-pulse';
+              badgeStyle = 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300';
+              title = 'Transmissão em tempo real do NinjaTrader 8 Local (:8002)';
+            } else if (activeAccount?.platform === 'binance' || isCrypto) {
+              label = 'Binance Spot';
+              dotColor = 'bg-amber-400';
+              badgeStyle = 'bg-amber-950/40 border-amber-500/30 text-amber-300';
+              title = 'Cotações de Cripto em tempo real direto da Binance Spot';
+            } else if (activeAccount?.platform === 'ctrader') {
+              label = 'cTrader';
+              dotColor = 'bg-purple-400';
+              badgeStyle = 'bg-purple-950/40 border-purple-500/30 text-purple-300';
+              title = 'Conexão cTrader Spotware Open API / FIX';
+            }
+
+            return (
+              <div
+                className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold flex items-center gap-1.5 shrink-0 select-none ${badgeStyle}`}
+                title={title}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
+                <span>{label}</span>
+              </div>
+            );
+          })()}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
