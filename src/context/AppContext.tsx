@@ -10450,14 +10450,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       // ⚡ DISPARO INSTANTÂNEO DE ORDENS METATRADER 4 & 5 (HTTP PORTA 80)
-      const isMtAcc = (localAcc?.platform === 'mt4' || localAcc?.platform === 'mt5') && !payload.already_dispatched && finalStatus === 'Em Andamento';
+      const isMtAcc = (localAcc?.platform === 'mt4' || localAcc?.platform === 'mt5') && !payload.already_dispatched && (finalStatus === 'Em Andamento' || finalStatus === 'Pendente');
       if (isMtAcc && localAcc) {
         payload.already_dispatched = true;
         try {
           const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
           const activeMtConn = mtConns.find(c => c.status === 'online') || mtConns[0];
           const mtHost = (activeMtConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
-          const targetNumber = (localAcc.account_name || '').replace(/\D/g, '') || localAcc.account_name;
+          const cleanAccStr = (localAcc.account_name || '').replace(/^(?:MT4|MT5|MetaTrader\s*[45]?)\s*[-_#]?\s*/i, '').trim();
+          const targetNumber = cleanAccStr.replace(/\D/g, '') || (localAcc.account_name || '').replace(/\D/g, '') || localAcc.account_name;
+
+          const entryP = Number(payload.entry_price || 0);
+          const rawSl = Number(payload.stop_loss || 0);
+          const rawTp = Number(payload.take_profit || 0);
+          const slPts = (entryP > 0 && rawSl > 0) ? Math.abs(entryP - rawSl) : 0;
+          const tpPts = (entryP > 0 && rawTp > 0) ? Math.abs(rawTp - entryP) : 0;
 
           const orderPayload = JSON.stringify({
             id: reportId,
@@ -10467,8 +10474,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             direction: payload.side === 'COMPRA' || payload.side === 'BUY' ? 1 : 2,
             side: payload.side,
             lots: Number(payload.contrato || (payload as any).quantity || 0.01),
-            stop_loss: Number(payload.stop_loss || 0),
-            take_profit: Number(payload.take_profit || 0)
+            stop_loss: rawSl,
+            take_profit: rawTp,
+            sl_points: Number(slPts.toFixed(2)),
+            tp_points: Number(tpPts.toFixed(2))
           });
 
           // Envio redundante: Dispara para a VPS oficial e para a ponte local (:8003) caso esteja rodando localmente
@@ -13242,17 +13251,33 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       if (!acc || !user) return;
       const accId = acc.id;
       const existingReports = reportsRef.current || [];
+      const nowMs = Date.now();
+      const isRecentOrder = (createdAt: string) => {
+        const t = new Date(createdAt).getTime();
+        return !isNaN(t) && (nowMs - t < 25000); // Janela de carência de 25s para execução e confirmação no MT4
+      };
 
       if (mtPositions.length > 0) {
         let changed = false;
         const updatedReports = [...existingReports];
         const activeTickets = new Set(mtPositions.map((p: any) => Number(p.ticket)));
 
-        // 1. Fecha quaisquer ordens ativas locais desta conta MT4 que não estão mais presentes no MT4
+        // 1. Fecha ordens ativas locais desta conta MT4 que já não existem mais no MT4 (respeitando carência para novas ordens)
         updatedReports.forEach((r, idx) => {
           if (r.account_id === accId && (r.status === 'Em Andamento' || (r.status as any) === 'Pendente')) {
             const ticket = Number((r as any).ticket || (r.id && r.id.startsWith('mt_') ? r.id.replace('mt_', '') : 0));
-            if (!ticket || !activeTickets.has(ticket)) {
+            if (!ticket) {
+              // Ordem pendente sem ticket: só cancela se exceder 25s de espera
+              if (!isRecentOrder(r.created_at)) {
+                updatedReports[idx] = {
+                  ...r,
+                  status: 'Cancelado' as const,
+                  closed_at: new Date().toISOString(),
+                  description: `[${r.symbol}] Ordem não executada no MetaTrader (tempo limite de confirmação excedido ou rejeitada pela corretora)`
+                };
+                changed = true;
+              }
+            } else if (!activeTickets.has(ticket)) {
               updatedReports[idx] = { ...r, status: 'Cancelado' as const, closed_at: new Date().toISOString() };
               changed = true;
             }
@@ -13313,15 +13338,23 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
           saveLocalStrategyReports(updatedReports);
         }
       } else {
-        // Quando o MT4 não possui posições abertas no momento, TODA ordem em andamento ou pendente desta conta MT4 é encerrada
-        const mtOpen = existingReports.filter(r => r.account_id === accId && (r.status === 'Em Andamento' || (r.status as any) === 'Pendente'));
-        if (mtOpen.length > 0) {
-          const updated = existingReports.map(r => {
-            if (r.account_id === accId && (r.status === 'Em Andamento' || (r.status as any) === 'Pendente')) {
-              return { ...r, status: 'Cancelado' as const, closed_at: new Date().toISOString() };
+        // Quando o MT4 não possui posições abertas no momento, encerra ordens que já expiraram a janela de carência
+        let hasChanges = false;
+        const updated = existingReports.map(r => {
+          if (r.account_id === accId && (r.status === 'Em Andamento' || (r.status as any) === 'Pendente')) {
+            if (!isRecentOrder(r.created_at)) {
+              hasChanges = true;
+              return {
+                ...r,
+                status: 'Cancelado' as const,
+                closed_at: new Date().toISOString(),
+                description: `[${r.symbol}] Ordem não executada no MetaTrader (tempo limite de confirmação excedido ou rejeitada pela corretora)`
+              };
             }
-            return r;
-          });
+          }
+          return r;
+        });
+        if (hasChanges) {
           reportsRef.current = updated;
           setReports(updated);
           saveLocalStrategyReports(updated);

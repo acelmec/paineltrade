@@ -650,74 +650,129 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // --- ROTAS DO CONECTOR METATRADER 4 / METATRADER 5 (PORTA 80 PADRÃO) ---
-  // 1. GET ou POST /commands (MT4 faz polling de ordens, sincroniza saldo e posições abertas)
-  if ((req.method === 'GET' || req.method === 'POST') && pathname === '/commands') {
-    let body = '';
-    const handleCommandsHub = () => {
-      let bodyData = {};
-      try { bodyData = JSON.parse(body || '{}'); } catch {}
+// --- ROTAS DO CONECTOR METATRADER 4 / METATRADER 5 (PORTA 80 PADRÃO) ---
+function cleanAccountNumber(acc) {
+  if (!acc) return '';
+  const str = String(acc).trim();
+  const stripped = str.replace(/^(?:MT4|MT5|MetaTrader\s*[45]?)\s*[-_#]?\s*/i, '').trim();
+  const digits = stripped.replace(/\D/g, '');
+  if (digits) return digits;
+  return str;
+}
 
-      const accNum = String(bodyData.account || url.searchParams.get('account') || '').trim();
-      if (accNum) {
-        const balance = parseFloat(url.searchParams.get('balance') || bodyData.balance || '0');
-        const equity = parseFloat(url.searchParams.get('equity') || bodyData.equity || '0');
-        let broker = url.searchParams.get('broker') || bodyData.broker || 'MetaTrader 4';
-        try { broker = decodeURIComponent(broker); } catch (_) {}
-        const currency = url.searchParams.get('currency') || bodyData.currency || 'USD';
-        const isDemo = url.searchParams.get('demo') === '1' || bodyData.demo === '1' || bodyData.demo === true;
-        const leverage = parseInt(url.searchParams.get('leverage') || bodyData.leverage || '100', 10);
+function getMt4Queue(accNum) {
+  const clean = cleanAccountNumber(accNum);
+  if (clean && mt4PendingCommands.has(clean) && mt4PendingCommands.get(clean).length > 0) {
+    return mt4PendingCommands.get(clean);
+  }
+  if (accNum && mt4PendingCommands.has(accNum) && mt4PendingCommands.get(accNum).length > 0) {
+    return mt4PendingCommands.get(accNum);
+  }
+  if (clean && mt4PendingCommands.has(`4${clean}`) && mt4PendingCommands.get(`4${clean}`).length > 0) {
+    return mt4PendingCommands.get(`4${clean}`);
+  }
+  return mt4PendingCommands.get('all') || [];
+}
 
-        const rawSymbols = url.searchParams.get('symbols') || url.searchParams.get('market_watch') || '';
-        const existing = mt4AccountsConnected.get(accNum) || {};
-        const parsedSymbols = rawSymbols ? rawSymbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : (existing.symbols || []);
+// 1. GET ou POST /commands (MT4 faz polling de ordens, sincroniza saldo e posições abertas)
+if ((req.method === 'GET' || req.method === 'POST') && pathname === '/commands') {
+  let body = '';
+  const handleCommandsHub = () => {
+    let bodyData = {};
+    try { bodyData = JSON.parse(body || '{}'); } catch {}
 
-        mt4AccountsConnected.set(accNum, {
-          account: accNum,
-          account_name: `MT4 #${accNum}`,
-          balance: balance > 0 ? balance : (existing.balance || 0),
-          equity: equity > 0 ? equity : (existing.equity || 0),
-          broker: broker || existing.broker || 'MetaTrader 4',
-          currency: currency || existing.currency || 'USD',
-          is_demo: isDemo,
-          leverage: leverage || existing.leverage || 100,
-          lastSeen: new Date().toISOString(),
-          symbol: url.searchParams.get('symbol') || existing.symbol || 'ACTIVE',
-          symbols: parsedSymbols.length > 0 ? parsedSymbols : (existing.symbols || [])
+    const rawAcc = String(bodyData.account || url.searchParams.get('account') || '').trim();
+    const accNum = cleanAccountNumber(rawAcc);
+    if (accNum) {
+      const balance = parseFloat(url.searchParams.get('balance') || bodyData.balance || '0');
+      const equity = parseFloat(url.searchParams.get('equity') || bodyData.equity || '0');
+      let broker = url.searchParams.get('broker') || bodyData.broker || 'MetaTrader 4';
+      try { broker = decodeURIComponent(broker); } catch (_) {}
+      const currency = url.searchParams.get('currency') || bodyData.currency || 'USD';
+      const isDemo = url.searchParams.get('demo') === '1' || bodyData.demo === '1' || bodyData.demo === true;
+      const leverage = parseInt(url.searchParams.get('leverage') || bodyData.leverage || '100', 10);
+
+      const rawSymbols = url.searchParams.get('symbols') || url.searchParams.get('market_watch') || '';
+      const existing = mt4AccountsConnected.get(accNum) || mt4AccountsConnected.get(rawAcc) || {};
+      const parsedSymbols = rawSymbols ? rawSymbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : (existing.symbols || []);
+
+      const accInfo = {
+        account: accNum,
+        account_name: `MT4 #${accNum}`,
+        balance: balance > 0 ? balance : (existing.balance || 0),
+        equity: equity > 0 ? equity : (existing.equity || 0),
+        broker: broker || existing.broker || 'MetaTrader 4',
+        currency: currency || existing.currency || 'USD',
+        is_demo: isDemo,
+        leverage: leverage || existing.leverage || 100,
+        lastSeen: new Date().toISOString(),
+        symbol: url.searchParams.get('symbol') || existing.symbol || 'ACTIVE',
+        symbols: parsedSymbols.length > 0 ? parsedSymbols : (existing.symbols || [])
+      };
+      mt4AccountsConnected.set(accNum, accInfo);
+      if (rawAcc && rawAcc !== accNum) mt4AccountsConnected.set(rawAcc, accInfo);
+
+      if (Array.isArray(bodyData.positions)) {
+        mt4PositionsCache.set(accNum, bodyData.positions);
+        if (rawAcc && rawAcc !== accNum) mt4PositionsCache.set(rawAcc, bodyData.positions);
+      }
+      if (Array.isArray(bodyData.history)) {
+        mt4TradesHistoryCache.set(accNum, bodyData.history);
+        if (rawAcc && rawAcc !== accNum) mt4TradesHistoryCache.set(rawAcc, bodyData.history);
+      }
+
+      // Suporte a lote de cotações enviado no body de /commands para todos os ativos do Market Watch
+      if (Array.isArray(bodyData.quotes)) {
+        for (const item of bodyData.quotes) {
+          const sym = (item.symbol || '').toUpperCase();
+          const bid = Number(item.bid || 0);
+          const ask = Number(item.ask || bid);
+          if (sym && bid > 0) {
+            const qObj = {
+              symbol: sym,
+              price: Number(item.price || (bid + ask) * 0.5),
+              bid: bid,
+              ask: ask,
+              volume: Number(item.volume || 1),
+              updated_at: item.updated_at || new Date().toISOString()
+            };
+            mt4QuotesCache.set(sym, qObj);
+            broadcast({
+              type: 'market_data',
+              instance_id: sym.toLowerCase(),
+              symbol: sym,
+              data: qObj,
+              ts_relay: Date.now()
+            });
+          }
+        }
+      }
+
+      const qSym = (url.searchParams.get('symbol') || bodyData.symbol || existing.symbol || '').toUpperCase();
+      const qBid = Number(url.searchParams.get('bid') || bodyData.bid || 0);
+      const qAsk = Number(url.searchParams.get('ask') || bodyData.ask || 0);
+      if (qSym && (qBid > 0 || qAsk > 0)) {
+        mt4QuotesCache.set(qSym, {
+          symbol: qSym,
+          price: qBid || qAsk,
+          bid: qBid,
+          ask: qAsk,
+          volume: 1,
+          updated_at: new Date().toISOString()
         });
-
-        if (Array.isArray(bodyData.positions)) {
-          mt4PositionsCache.set(accNum, bodyData.positions);
-        }
-        if (Array.isArray(bodyData.history)) {
-          mt4TradesHistoryCache.set(accNum, bodyData.history);
-        }
-
-        const qSym = (url.searchParams.get('symbol') || bodyData.symbol || existing.symbol || '').toUpperCase();
-        const qBid = Number(url.searchParams.get('bid') || bodyData.bid || 0);
-        const qAsk = Number(url.searchParams.get('ask') || bodyData.ask || 0);
-        if (qSym && (qBid > 0 || qAsk > 0)) {
-          mt4QuotesCache.set(qSym, {
-            symbol: qSym,
-            price: qBid || qAsk,
-            bid: qBid,
-            ask: qAsk,
-            volume: 1,
-            updated_at: new Date().toISOString()
-          });
-        }
       }
+    }
 
-      const queue = mt4PendingCommands.get(accNum) || mt4PendingCommands.get('all') || [];
-      if (queue.length > 0) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(queue[0]));
-        return;
-      }
-
+    const queue = getMt4Queue(accNum);
+    if (queue.length > 0) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({}));
-    };
+      res.end(JSON.stringify(queue[0]));
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({}));
+  };
 
     if (req.method === 'POST') {
       req.on('data', chunk => { body += chunk; });
@@ -846,19 +901,19 @@ const server = http.createServer((req, res) => {
       try {
         const payload = JSON.parse(body || '{}');
         const cmdId = payload.id;
-        const accNum = String(payload.account || '').trim();
+        const rawAcc = String(payload.account || '').trim();
+        const accNum = cleanAccountNumber(rawAcc);
         const status = payload.status;
+        const reason = payload.reason || '';
 
-        console.log(`✅ [MT4-HUB] Ordem ${cmdId} confirmada pelo MT4 (${accNum}) status: ${status}`);
+        console.log(`✅ [MT4-HUB] Ordem ${cmdId} confirmada pelo MT4 (${accNum}) status: ${status} ${reason ? `motivo: ${reason}` : ''}`);
 
-        if (accNum && mt4PendingCommands.has(accNum)) {
-          const list = mt4PendingCommands.get(accNum).filter(c => c.id !== cmdId);
-          mt4PendingCommands.set(accNum, list);
-        }
-        if (mt4PendingCommands.has('all')) {
-          const list = mt4PendingCommands.get('all').filter(c => c.id !== cmdId);
-          mt4PendingCommands.set('all', list);
-        }
+        [accNum, rawAcc, `4${accNum}`, 'all'].forEach(k => {
+          if (k && mt4PendingCommands.has(k)) {
+            const list = mt4PendingCommands.get(k).filter(c => c.id !== cmdId);
+            mt4PendingCommands.set(k, list);
+          }
+        });
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
@@ -877,6 +932,38 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       try {
         const data = JSON.parse(body || '{}');
+
+        // Suporte a lote de cotações de todos os ativos do Market Watch
+        if (Array.isArray(data.quotes) || Array.isArray(data)) {
+          const list = Array.isArray(data.quotes) ? data.quotes : data;
+          for (const item of list) {
+            const sym = (item.symbol || '').toUpperCase();
+            const bid = Number(item.bid || 0);
+            const ask = Number(item.ask || bid);
+            if (sym && bid > 0) {
+              const qObj = {
+                symbol: sym,
+                price: Number(item.price || (bid + ask) * 0.5),
+                bid: bid,
+                ask: ask,
+                volume: Number(item.volume || 1),
+                updated_at: item.updated_at || new Date().toISOString()
+              };
+              mt4QuotesCache.set(sym, qObj);
+              broadcast({
+                type: 'market_data',
+                instance_id: sym.toLowerCase(),
+                symbol: sym,
+                data: qObj,
+                ts_relay: Date.now()
+              });
+            }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, count: list.length }));
+          return;
+        }
+
         const sym = (data.symbol || '').toUpperCase();
         if (sym) {
           mt4QuotesCache.set(sym, {
@@ -915,7 +1002,8 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       try {
         const payload = JSON.parse(body || '{}');
-        const accNum = String(payload.account || payload.account_name || 'all').trim();
+        const rawAcc = String(payload.account || payload.account_name || 'all').trim();
+        const accNum = cleanAccountNumber(rawAcc);
         const cmdId = payload.id || `cmd_${Date.now()}`;
 
         const cmd = {
@@ -930,20 +1018,14 @@ const server = http.createServer((req, res) => {
           ticket: Number(payload.ticket || 0)
         };
 
-        if (!mt4PendingCommands.has(accNum)) {
-          mt4PendingCommands.set(accNum, []);
-        }
-        mt4PendingCommands.get(accNum).push(cmd);
-
-        // Também enfileira em 'all' para garantir entrega ao robô caso consulte sem parâmetro de conta
-        if (accNum !== 'all') {
-          if (!mt4PendingCommands.has('all')) {
-            mt4PendingCommands.set('all', []);
+        [accNum, rawAcc, 'all'].forEach(k => {
+          if (k) {
+            if (!mt4PendingCommands.has(k)) mt4PendingCommands.set(k, []);
+            mt4PendingCommands.get(k).push(cmd);
           }
-          mt4PendingCommands.get('all').push(cmd);
-        }
+        });
 
-        console.log(`🚀 [MT4-HUB] Ordem enfileirada para MT4 (${accNum}):`, cmd);
+        console.log(`🚀 [MT4-HUB] Ordem enfileirada para MT4 (${accNum} / ${rawAcc}):`, cmd);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, command_id: cmdId }));
       } catch (err) {

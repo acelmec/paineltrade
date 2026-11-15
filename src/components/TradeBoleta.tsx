@@ -1158,7 +1158,8 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
           const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
           const activeMtConn = mtConns.find(c => c.status === 'online') || mtConns[0];
           const mtHost = (activeMtConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
-          const targetNumber = (activeAccount.account_name || '').replace(/\D/g, '') || activeAccount.account_name;
+          const cleanAccStr = (activeAccount.account_name || '').replace(/^(?:MT4|MT5|MetaTrader\s*[45]?)\s*[-_#]?\s*/i, '').trim();
+          const targetNumber = cleanAccStr.replace(/\D/g, '') || (activeAccount.account_name || '').replace(/\D/g, '') || activeAccount.account_name;
 
           fetch(`${mtHost}/order`, {
             method: 'POST',

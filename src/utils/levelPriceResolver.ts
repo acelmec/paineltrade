@@ -24,7 +24,8 @@ export function resolveLevelPrice(
         return;
       }
       const n = parseFloat(String(val));
-      if (!isNaN(n) && n > 0 && !allLevels.includes(n)) {
+      // Proteção de sanidade: o nível estrutural DEVE estar dentro de 25% da cotação do ativo (evita que níveis de NQ afetem BTC ou vice-versa)
+      if (!isNaN(n) && n > 0 && (entryRef <= 0 || Math.abs(n - entryRef) / entryRef < 0.25) && !allLevels.includes(n)) {
         allLevels.push(Number(n.toFixed(2)));
       }
     };

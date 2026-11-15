@@ -55,6 +55,29 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+function cleanAccountNumber(acc) {
+  if (!acc) return '';
+  const str = String(acc).trim();
+  const stripped = str.replace(/^(?:MT4|MT5|MetaTrader\s*[45]?)\s*[-_#]?\s*/i, '').trim();
+  const digits = stripped.replace(/\D/g, '');
+  if (digits) return digits;
+  return str;
+}
+
+function getMt4Queue(accNum) {
+  const clean = cleanAccountNumber(accNum);
+  if (clean && pendingCommands.has(clean) && pendingCommands.get(clean).length > 0) {
+    return pendingCommands.get(clean);
+  }
+  if (accNum && pendingCommands.has(accNum) && pendingCommands.get(accNum).length > 0) {
+    return pendingCommands.get(accNum);
+  }
+  if (clean && pendingCommands.has(`4${clean}`) && pendingCommands.get(`4${clean}`).length > 0) {
+    return pendingCommands.get(`4${clean}`);
+  }
+  return pendingCommands.get('all') || [];
+}
+
   // 2. STREAMER: Recebe Ticks e Candles M1 do MT4
   if (req.method === 'POST' && pathname === '/streamer') {
     let body = '';
@@ -67,6 +90,30 @@ const server = http.createServer((req, res) => {
           return;
         }
         const data = JSON.parse(body);
+
+        // Suporte a lote de cotações de todos os ativos do Market Watch
+        if (Array.isArray(data.quotes) || Array.isArray(data)) {
+          const list = Array.isArray(data.quotes) ? data.quotes : data;
+          for (const item of list) {
+            const sym = (item.symbol || '').toUpperCase();
+            const bid = Number(item.bid || 0);
+            const ask = Number(item.ask || bid);
+            if (sym && bid > 0) {
+              quotesCache.set(sym, {
+                symbol: sym,
+                price: Number(item.price || (bid + ask) * 0.5),
+                bid: bid,
+                ask: ask,
+                volume: Number(item.volume || 1),
+                updated_at: item.updated_at || new Date().toISOString()
+              });
+            }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, count: list.length }));
+          return;
+        }
+
         const sym = (data.symbol || '').toUpperCase();
         if (sym) {
           quotesCache.set(sym, {
@@ -96,13 +143,14 @@ const server = http.createServer((req, res) => {
       let bodyData = {};
       try { bodyData = JSON.parse(body || '{}'); } catch {}
 
-      const accNum = String(bodyData.account || query.account || '').trim();
+      const rawAcc = String(bodyData.account || query.account || '').trim();
+      const accNum = cleanAccountNumber(rawAcc);
       if (accNum) {
         const rawSymbols = query.symbols || query.market_watch || '';
-        const existing = accountsConnected.get(accNum) || {};
+        const existing = accountsConnected.get(accNum) || accountsConnected.get(rawAcc) || {};
         const parsedSymbols = rawSymbols ? rawSymbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : (existing.symbols || []);
 
-        accountsConnected.set(accNum, {
+        const accInfo = {
           ...existing,
           account_name: query.account_name || bodyData.account_name || existing.account_name || `MT4/MT5 #${accNum}`,
           lastSeen: new Date().toISOString(),
@@ -115,13 +163,36 @@ const server = http.createServer((req, res) => {
           is_demo: query.demo !== undefined ? (String(query.demo) === '1' || String(query.demo) === 'true') : (existing.is_demo ?? true),
           leverage: query.leverage ? Number(query.leverage) : (existing.leverage || 100),
           platform: query.platform || existing.platform || 'mt4'
-        });
+        };
+        accountsConnected.set(accNum, accInfo);
+        if (rawAcc && rawAcc !== accNum) accountsConnected.set(rawAcc, accInfo);
 
         if (Array.isArray(bodyData.positions)) {
           accountsPositions.set(accNum, bodyData.positions);
+          if (rawAcc && rawAcc !== accNum) accountsPositions.set(rawAcc, bodyData.positions);
         }
         if (Array.isArray(bodyData.history)) {
           accountsTradesHistory.set(accNum, bodyData.history);
+          if (rawAcc && rawAcc !== accNum) accountsTradesHistory.set(rawAcc, bodyData.history);
+        }
+
+        // Suporte a lote de cotações enviado no body de /commands para todos os ativos do Market Watch
+        if (Array.isArray(bodyData.quotes)) {
+          for (const item of bodyData.quotes) {
+            const sym = (item.symbol || '').toUpperCase();
+            const bid = Number(item.bid || 0);
+            const ask = Number(item.ask || bid);
+            if (sym && bid > 0) {
+              quotesCache.set(sym, {
+                symbol: sym,
+                price: Number(item.price || (bid + ask) * 0.5),
+                bid: bid,
+                ask: ask,
+                volume: Number(item.volume || 1),
+                updated_at: item.updated_at || new Date().toISOString()
+              });
+            }
+          }
         }
 
         const qSym = (query.symbol || bodyData.symbol || existing.symbol || '').toUpperCase();
@@ -140,7 +211,7 @@ const server = http.createServer((req, res) => {
       }
 
       // Busca próximo comando pendente para a conta ou comando global
-      const queue = pendingCommands.get(accNum) || pendingCommands.get('all') || [];
+      const queue = getMt4Queue(accNum);
       if (queue.length > 0) {
         const nextCmd = queue[0]; // Mantém na fila até que MT4 mande ack
         res.writeHead(200, { 'Content-Type': 'application/json' });

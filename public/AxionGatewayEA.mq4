@@ -115,6 +115,34 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
+//| SERIALIZAR COTAÇÕES BID/ASK DE TODOS ATIVOS DO MARKET WATCH      |
+//+------------------------------------------------------------------+
+string GetMarketWatchQuotesJson()
+{
+   int total = SymbolsTotal(true);
+   if(total <= 0) return "[]";
+   int maxCount = total > 50 ? 50 : total;
+   string json = "[";
+   int count = 0;
+   datetime nowUtc = TimeGMT();
+   string nowIso = FormatIsoTimestamp(nowUtc);
+   for(int i = 0; i < maxCount; i++)
+   {
+      string s = SymbolName(i, true);
+      if(s == "") continue;
+      double bid = MarketInfo(s, MODE_BID);
+      double ask = MarketInfo(s, MODE_ASK);
+      if(bid <= 0 || ask <= 0) continue;
+      if(count > 0) json += ",";
+      json += StringFormat("{\"symbol\":\"%s\",\"bid\":%.5f,\"ask\":%.5f,\"price\":%.5f,\"updated_at\":\"%s\"}",
+                           s, bid, ask, (bid + ask) * 0.5, nowIso);
+      count++;
+   }
+   json += "]";
+   return json;
+}
+
+//+------------------------------------------------------------------+
 //| TRANSMISSÃO DE DADOS (STREAMER)                                  |
 //+------------------------------------------------------------------+
 void BroadcastMarketData()
@@ -147,6 +175,19 @@ void BroadcastMarketData()
       );
       SendStreamerPayload(jsonBar);
    }
+
+   // 3. Transmissão periódica das cotações de todos os ativos do Market Watch
+   static ulong lastMwBroadcastMs = 0;
+   if(nowMs - lastMwBroadcastMs >= 350)
+   {
+      lastMwBroadcastMs = nowMs;
+      string mwQuotes = GetMarketWatchQuotesJson();
+      if(mwQuotes != "[]" && mwQuotes != "")
+      {
+         string mwJson = StringFormat("{\"type\":\"quotes_batch\",\"quotes\":%s}", mwQuotes);
+         SendStreamerPayload(mwJson);
+      }
+   }
 }
 
 void OnTick()
@@ -160,6 +201,20 @@ void OnTick()
 void OnTimer()
 {
    PollAndProcessCommands();
+
+   // Garante envio contínuo das cotações de todos os ativos do Market Watch mesmo se não houver ticks no gráfico atual
+   static ulong lastTimerMwMs = 0;
+   ulong nowMs = GetTickCount();
+   if(nowMs - lastTimerMwMs >= 400)
+   {
+      lastTimerMwMs = nowMs;
+      string mwQuotes = GetMarketWatchQuotesJson();
+      if(mwQuotes != "[]" && mwQuotes != "")
+      {
+         string mwJson = StringFormat("{\"type\":\"quotes_batch\",\"quotes\":%s}", mwQuotes);
+         SendStreamerPayload(mwJson);
+      }
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -175,7 +230,13 @@ void SendStreamerPayload(string json)
    char result[];
    string resultHeaders;
    ResetLastError();
-   WebRequest("POST", url, headers, 100, data, result, resultHeaders);
+   int res = WebRequest("POST", url, headers, 150, data, result, resultHeaders);
+   if(res == -1 && StringFind(url, "144.126.141.254") >= 0)
+   {
+      string localUrl = url;
+      StringReplace(localUrl, "144.126.141.254", "127.0.0.1");
+      WebRequest("POST", localUrl, headers, 150, data, result, resultHeaders);
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -290,9 +351,10 @@ void PollAndProcessCommands()
 
    string posJson = GetOpenPositionsJson();
    string histJson = GetClosedOrdersHistoryJson();
+   string quotesJson = GetMarketWatchQuotesJson();
    string reqBody = StringFormat(
-      "{\"account\":\"%d\",\"symbol\":\"%s\",\"bid\":%.5f,\"ask\":%.5f,\"price\":%.5f,\"balance\":%.2f,\"equity\":%.2f,\"broker\":\"%s\",\"positions\":%s,\"history\":%s}",
-      AccountNumber(), _Symbol, Bid, Ask, Bid, AccountBalance(), AccountEquity(), AccountCompany(), posJson, histJson
+      "{\"account\":\"%d\",\"symbol\":\"%s\",\"bid\":%.5f,\"ask\":%.5f,\"price\":%.5f,\"balance\":%.2f,\"equity\":%.2f,\"broker\":\"%s\",\"positions\":%s,\"history\":%s,\"quotes\":%s}",
+      AccountNumber(), _Symbol, Bid, Ask, Bid, AccountBalance(), AccountEquity(), AccountCompany(), posJson, histJson, quotesJson
    );
    char data[];
    StringToCharArray(reqBody, data, 0, StringLen(reqBody));
@@ -359,10 +421,19 @@ void PollAndProcessCommands()
 
       double slPrice = StringToDouble(ExtractJsonValue(response, "stop_loss"));
       double tpPrice = StringToDouble(ExtractJsonValue(response, "take_profit"));
+      double slPts = StringToDouble(ExtractJsonValue(response, "sl_points"));
+      double tpPts = StringToDouble(ExtractJsonValue(response, "tp_points"));
 
-      ExecuteMarketOrder(sym, dir, lot, slPrice, tpPrice);
+      bool ok = ExecuteMarketOrder(sym, dir, lot, slPrice, tpPrice, slPts, tpPts);
       lastExecutedCommandId = cmdId;
-      ConfirmCommandExecuted(cmdId, "success");
+      if(ok)
+      {
+         ConfirmCommandExecuted(cmdId, "success");
+      }
+      else
+      {
+         ConfirmCommandExecuted(cmdId, "rejected", "OrderSend falhou com erro #" + IntegerToString(GetLastError()));
+      }
    }
    // 2. Modificação Dinâmica de SL/TP
    else if(action == "modify" || action == "modify_order")
@@ -394,7 +465,7 @@ void PollAndProcessCommands()
 //+------------------------------------------------------------------+
 //| EXECUÇÃO DE ORDEM A MERCADO                                      |
 //+------------------------------------------------------------------+
-bool ExecuteMarketOrder(const string sym, int direction, double lot, double sl, double tp)
+bool ExecuteMarketOrder(const string sym, int direction, double lot, double sl, double tp, double slPts = 0, double tpPts = 0)
 {
    string orderSym = sym;
    if(orderSym == "" || MarketInfo(orderSym, MODE_ASK) == 0)
@@ -402,39 +473,80 @@ bool ExecuteMarketOrder(const string sym, int direction, double lot, double sl, 
       orderSym = _Symbol;
    }
 
+   int digits = (int)MarketInfo(orderSym, MODE_DIGITS);
+   double point = MarketInfo(orderSym, MODE_POINT);
    double ask = MarketInfo(orderSym, MODE_ASK);
    double bid = MarketInfo(orderSym, MODE_BID);
    double price = (direction == 1) ? ask : bid;
    int cmd = (direction == 1) ? OP_BUY : OP_SELL;
    color arrowColor = (direction == 1) ? clrBlue : clrRed;
 
+   // 1 ponto do Axion = 1.0 (unidade inteira à esquerda da casa decimal).
+   // Se informado sl_points / tp_points do Axion, calcula a partir do preço de mercado de execução no MT4!
+   double finalSl = sl;
+   double finalTp = tp;
+
+   if(slPts > 0)
+   {
+      finalSl = (direction == 1) ? (price - slPts * 1.0) : (price + slPts * 1.0);
+   }
+   if(tpPts > 0)
+   {
+      finalTp = (direction == 1) ? (price + tpPts * 1.0) : (price - tpPts * 1.0);
+   }
+
+   // Garante distância mínima de StopLevel da corretora
+   double stopLevelPoints = MarketInfo(orderSym, MODE_STOPLEVEL);
+   double minStopDist = stopLevelPoints * point;
+   if(minStopDist > 0)
+   {
+      if(finalSl > 0)
+      {
+         double curSlDist = MathAbs(price - finalSl);
+         if(curSlDist < minStopDist)
+         {
+            finalSl = (direction == 1) ? (price - minStopDist) : (price + minStopDist);
+         }
+      }
+      if(finalTp > 0)
+      {
+         double curTpDist = MathAbs(finalTp - price);
+         if(curTpDist < minStopDist)
+         {
+            finalTp = (direction == 1) ? (price + minStopDist) : (price - minStopDist);
+         }
+      }
+   }
+
+   // Normalização obrigatória para os dígitos decimais do símbolo
+   price = NormalizeDouble(price, digits);
+   if(finalSl > 0) finalSl = NormalizeDouble(finalSl, digits);
+   if(finalTp > 0) finalTp = NormalizeDouble(finalTp, digits);
+
    ResetLastError();
-   int ticket = OrderSend(orderSym, cmd, lot, price, InpSlippagePoints, sl, tp, "Axion Web Order", InpMagicNumber, 0, arrowColor);
+   int ticket = OrderSend(orderSym, cmd, lot, price, InpSlippagePoints, finalSl, finalTp, "Axion Web Order", InpMagicNumber, 0, arrowColor);
    if(ticket > 0)
    {
-      Print("✅ [AxionGatewayEA MT4] Ordem executada com sucesso! Ticket: ", ticket, " | Lote: ", lot, " | Ativo: ", orderSym);
+      Print("✅ [AxionGatewayEA MT4] Ordem executada com sucesso! Ticket: ", ticket, " | Lote: ", lot, " | Ativo: ", orderSym, " | Preço: ", price, " | SL: ", finalSl, " | TP: ", finalTp);
       return true;
    }
 
    int err = GetLastError();
    Print("⚠️ [AxionGatewayEA MT4] Falha inicial ao executar ordem (#", err, "). Tentando contingência sem SL/TP...");
 
-   // Se falhou por erro de stops (130) ou rejeição de execução com stops acoplados, abre a mercado e ajusta via modify
-   if(err == 130 || err == 138 || err == 129 || sl > 0 || tp > 0)
+   // Contingência caso a corretora rejeite ordem a mercado com SL/TP acoplados
+   price = (direction == 1) ? MarketInfo(orderSym, MODE_ASK) : MarketInfo(orderSym, MODE_BID);
+   price = NormalizeDouble(price, digits);
+   ticket = OrderSend(orderSym, cmd, lot, price, InpSlippagePoints * 2, 0, 0, "Axion Web Order", InpMagicNumber, 0, arrowColor);
+   if(ticket > 0)
    {
-      ResetLastError();
-      price = (direction == 1) ? MarketInfo(orderSym, MODE_ASK) : MarketInfo(orderSym, MODE_BID);
-      ticket = OrderSend(orderSym, cmd, lot, price, InpSlippagePoints * 2, 0, 0, "Axion Web Order", InpMagicNumber, 0, arrowColor);
-      if(ticket > 0)
+      Print("✅ [AxionGatewayEA MT4] Ordem aberta a mercado sem SL/TP! Ticket: ", ticket, ". Ajustando SL e TP via modify...");
+      if(finalSl > 0 || finalTp > 0)
       {
-         Print("✅ [AxionGatewayEA MT4] Ordem aberta a mercado sem SL/TP! Ticket: ", ticket, ". Ajustando SL e TP...");
-         if(sl > 0 || tp > 0)
-         {
-            Sleep(200);
-            ModifyPositionSLTP(ticket, sl, tp);
-         }
-         return true;
+         Sleep(250);
+         ModifyPositionSLTP(ticket, finalSl, finalTp);
       }
+      return true;
    }
 
    Print("❌ [AxionGatewayEA MT4] Falha definitiva ao executar ordem: Erro #", GetLastError());
@@ -449,12 +561,16 @@ bool ModifyPositionSLTP(int ticket, double sl, double tp)
    if(ticket <= 0) return false;
    if(OrderSelect(ticket, SELECT_BY_TICKET))
    {
+      int digits = (int)MarketInfo(OrderSymbol(), MODE_DIGITS);
+      double normSl = (sl > 0) ? NormalizeDouble(sl, digits) : 0;
+      double normTp = (tp > 0) ? NormalizeDouble(tp, digits) : 0;
       ResetLastError();
-      if(OrderModify(ticket, OrderOpenPrice(), sl, tp, 0, clrYellow))
+      if(OrderModify(ticket, OrderOpenPrice(), normSl, normTp, 0, clrYellow))
       {
-         Print("🔄 [AxionGatewayEA MT4] SL/TP modificado no Ticket: ", ticket, " -> SL: ", sl, " | TP: ", tp);
+         Print("🔄 [AxionGatewayEA MT4] SL/TP modificado no Ticket: ", ticket, " -> SL: ", normSl, " | TP: ", normTp);
          return true;
       }
+      Print("⚠️ [AxionGatewayEA MT4] Falha ao modificar SL/TP no Ticket ", ticket, ": Erro #", GetLastError());
    }
    return false;
 }
@@ -466,7 +582,9 @@ bool CloseSingleTicket(int ticket)
 {
    if(OrderSelect(ticket, SELECT_BY_TICKET))
    {
+      int digits = (int)MarketInfo(OrderSymbol(), MODE_DIGITS);
       double closePrice = (OrderType() == OP_BUY) ? MarketInfo(OrderSymbol(), MODE_BID) : MarketInfo(OrderSymbol(), MODE_ASK);
+      closePrice = NormalizeDouble(closePrice, digits);
       return OrderClose(ticket, OrderLots(), closePrice, InpSlippagePoints, clrWhite);
    }
    return false;
@@ -493,15 +611,21 @@ void CloseAllPositions()
 //+------------------------------------------------------------------+
 //| CONFIRMAR EXECUÇÃO DE COMANDO                                    |
 //+------------------------------------------------------------------+
-void ConfirmCommandExecuted(string cmdId, string status)
+void ConfirmCommandExecuted(string cmdId, string status, string reason = "")
 {
    if(cmdId == "") return;
    string url = InpGatewayUrl + "/command_ack";
-   string payload = StringFormat("{\"id\":\"%s\",\"status\":\"%s\",\"account\":%d}", cmdId, status, AccountNumber());
+   string payload = StringFormat("{\"id\":\"%s\",\"status\":\"%s\",\"reason\":\"%s\",\"account\":%d}", cmdId, status, reason, AccountNumber());
    char data[];
    StringToCharArray(payload, data, 0, StringLen(payload));
    char result[];
    string resultHeaders;
    ResetLastError();
-   WebRequest("POST", url, "Content-Type: application/json\r\n", 300, data, result, resultHeaders);
+   int res = WebRequest("POST", url, "Content-Type: application/json\r\n", 300, data, result, resultHeaders);
+   if(res == -1 && StringFind(url, "144.126.141.254") >= 0)
+   {
+      string localUrl = url;
+      StringReplace(localUrl, "144.126.141.254", "127.0.0.1");
+      WebRequest("POST", localUrl, "Content-Type: application/json\r\n", 300, data, result, resultHeaders);
+   }
 }
