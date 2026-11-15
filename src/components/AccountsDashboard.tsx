@@ -372,6 +372,8 @@ export const AccountsDashboard: React.FC = () => {
       } catch (bErr) {
         console.warn('[AccountsDashboard] Auto-sync Binance ao salvar:', bErr);
       }
+    } else if (['mt4', 'mt5', 'ctrader'].includes(formPlatform)) {
+      autoSyncedSymbols = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD', 'US30'];
     }
 
     if (editingAccount) {
@@ -513,8 +515,16 @@ export const AccountsDashboard: React.FC = () => {
           p.instance_id?.toLowerCase() === sym.toLowerCase()
         );
         if (!exists) {
-          const tick = sym.startsWith('BTC') ? 0.10 : 0.01;
-          await createPanelAction(sym, sym.toLowerCase(), 1.0, tick, 50, 100);
+          let tick = 0.01;
+          let point = 1.0;
+          let sl = 40;
+          let tp = 80;
+          if (sym === 'EURUSD' || sym === 'GBPUSD') { tick = 0.00001; point = 100000; sl = 0.0020; tp = 0.0040; }
+          else if (sym === 'USDJPY') { tick = 0.001; point = 1000; sl = 0.30; tp = 0.60; }
+          else if (sym === 'XAUUSD') { tick = 0.01; point = 100; sl = 5.0; tp = 10.0; }
+          else if (sym === 'US30') { tick = 1.0; point = 1.0; sl = 80; tp = 160; }
+          else if (sym.startsWith('BTC')) { tick = 0.10; point = 1.0; sl = 400; tp = 800; }
+          await createPanelAction(sym, sym.toLowerCase(), point, tick, sl, tp);
         }
       }
     }

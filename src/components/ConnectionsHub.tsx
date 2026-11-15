@@ -642,7 +642,7 @@ export const ConnectionsHub: React.FC<ConnectionsHubProps> = ({ onSelectConnecti
               </div>
 
               {/* Token de Pareamento (se aplicável para MT4/MT5/NT8) */}
-              {selectedPresetType !== 'binance_api' && selectedPresetType !== 'ctrader_vps' && (
+              {selectedPresetType !== 'binance_api' && !selectedPresetType.startsWith('ctrader') && (
                 <div>
                   <label className="text-xs font-bold text-slate-300 block mb-1">
                     Token de Pareamento de Nuvem (Pairing Token):
@@ -660,8 +660,34 @@ export const ConnectionsHub: React.FC<ConnectionsHubProps> = ({ onSelectConnecti
                 </div>
               )}
 
+              {/* cTrader FIX API Credentials (se aplicável) */}
+              {selectedPresetType === 'ctrader_fix' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">SenderCompID (Login FIX):</label>
+                    <input
+                      type="text"
+                      value={formApiKey}
+                      onChange={e => setFormApiKey(e.target.value)}
+                      placeholder="Ex: demo.pepperstone.5374622"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">Senha da Conta FIX:</label>
+                    <input
+                      type="password"
+                      value={formApiSecret}
+                      onChange={e => setFormApiSecret(e.target.value)}
+                      placeholder="Senha da conta cTrader"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono"
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* cTrader Open API Keys (se aplicável) */}
-              {selectedPresetType === 'ctrader_vps' && (
+              {(selectedPresetType === 'ctrader_api' || selectedPresetType === 'ctrader_vps') && (
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-xs font-bold text-slate-300 block mb-1">Account ID cTrader:</label>
@@ -669,7 +695,7 @@ export const ConnectionsHub: React.FC<ConnectionsHubProps> = ({ onSelectConnecti
                       type="text"
                       value={formApiKey}
                       onChange={e => setFormApiKey(e.target.value)}
-                      placeholder="Ex: 1234567"
+                      placeholder="Ex: 5374622"
                       className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono"
                     />
                   </div>

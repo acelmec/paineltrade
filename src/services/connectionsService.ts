@@ -23,7 +23,7 @@ export interface PlatformConnection {
   user_id?: string;
   subscription_id?: string;
   platform: 'nt8' | 'mt4' | 'mt5' | 'ctrader' | 'binance';
-  connection_type: 'nt8_local' | 'nt8_tunnel' | 'mt4_vps' | 'mt5_vps' | 'ctrader_vps' | 'binance_api';
+  connection_type: 'nt8_local' | 'nt8_tunnel' | 'mt4_vps' | 'mt5_vps' | 'ctrader_fix' | 'ctrader_api' | 'ctrader_vps' | 'binance_api';
   name: string;
   host_url: string;
   pairing_token?: string;
@@ -85,13 +85,22 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     description: 'Gateway oficial na VPS na porta 80 padrão para o robô AxionGatewayEA.mq5 do MetaTrader 5.'
   },
   {
-    type: 'ctrader_vps',
+    type: 'ctrader_fix',
+    platform: 'ctrader',
+    name: 'Conexão cTrader (FIX API Direta)',
+    host_url: 'demo.cfixapi.com:5212',
+    pairing_token: 'TRADE',
+    icon: '🟪',
+    description: 'Conexão institucional FIX API direta com a corretora (Pepperstone, IC Markets) sem esperar aprovação de KYC.'
+  },
+  {
+    type: 'ctrader_api',
     platform: 'ctrader',
     name: 'Conexão cTrader (Spotware Open API)',
     host_url: 'https://api.spotware.com',
     pairing_token: '',
-    icon: '🟪',
-    description: 'Integração 100% direta com a cTrader Cloud via Spotware Open API (sem necessidade de robô ou VPS).'
+    icon: '🌐',
+    description: 'Conexão oficial em nuvem via Spotware Open API com Access Token.'
   },
   {
     type: 'binance_api',
@@ -377,7 +386,73 @@ export async function testConnectionPing(conn: PlatformConnection): Promise<{
     }
   }
 
-  // 2.5 cTrader Spotware Open API (Nuvem Direta)
+  // 2.5 cTrader FIX API Direta (via Hub VPS)
+  if (conn.connection_type === 'ctrader_fix' || (conn.platform === 'ctrader' && (conn.host_url?.includes('cfixapi') || conn.api_key?.includes('pepperstone')))) {
+    const senderCompId = (conn.api_key || '').trim();
+    const password = (conn.api_secret || '').trim();
+    const fixHost = (conn.host_url || 'demo.cfixapi.com:5212').trim();
+
+    if (!senderCompId || !password) {
+      return {
+        online: false,
+        latencyMs: 0,
+        message: 'Preencha o SenderCompID (ex: demo.pepperstone.5374622) e a Senha da conta FIX'
+      };
+    }
+
+    try {
+      const vpsTarget = 'http://144.126.141.254';
+      const fixRes = await fetch(`${vpsTarget}/ctrader_fix/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host: fixHost,
+          senderCompId,
+          password
+        }),
+        signal: AbortSignal.timeout(5000)
+      });
+
+      const fixJson = await fixRes.json().catch(() => ({}));
+      const latency = Date.now() - start;
+
+      if (fixJson.online || fixJson.success) {
+        const accNum = fixJson.account || senderCompId.split('.').pop() || '5374622';
+        const detectedDetail: DetectedAccountDetail[] = [{
+          id: `ctrader_fix_${accNum}`,
+          account_number: accNum,
+          name: `cTrader FIX #${accNum}`,
+          balance: 10000,
+          equity: 10000,
+          broker: 'Pepperstone (FIX API)',
+          currency: 'USD',
+          platform: 'ctrader'
+        }];
+
+        return {
+          online: true,
+          latencyMs: latency,
+          message: `cTrader FIX API Online • Conta #${accNum} • Logon Aceito (${latency}ms)`,
+          detectedAccounts: [accNum],
+          detectedAccountsDetail: detectedDetail
+        };
+      } else {
+        return {
+          online: false,
+          latencyMs: latency,
+          message: fixJson.error || 'Falha ao autenticar FIX API'
+        };
+      }
+    } catch (err: any) {
+      return {
+        online: false,
+        latencyMs: 0,
+        message: `Falha ao testar FIX API via Hub: ${err.message}`
+      };
+    }
+  }
+
+  // 2.6 cTrader Spotware Open API (Nuvem Direta)
   if (conn.platform === 'ctrader') {
     const accountId = (conn.api_key || conn.pairing_token || '').trim();
     const token = (conn.api_secret || '').trim();

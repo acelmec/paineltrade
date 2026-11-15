@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { PRESET_ATM_STRATEGIES, type ATMStrategy, type ATMBracket } from '../utils/atmRegistry';
 import { ATMStrategyModal } from './ATMStrategyModal';
+import { ImportAssetsModal } from './ImportAssetsModal';
 import { getAccountManualStrategyId, updateStrategyReportLevelsSupabase, updateStrategyReportStatusSupabase, isNinjaExecutionAccount, mirrorToLocalServer, resolveAccountExecutionSymbol, resolvePanelTickSize, resolvePanelPointValue, isSameAsset, roundToTick, fetchAtmStrategiesSupabase } from '../services/db';
 import { resolveLevelPrice, calculateRangeHlLevels } from '../utils/levelPriceResolver';
 import { checkNinjaStatus, fetchNinjaPositionsAndOrders } from '../services/ninjaGateway';
@@ -53,9 +54,11 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
     setReports,
     updateReportLevelsAction,
     checkOperationalLimits,
-    getPanelPrice
+    getPanelPrice,
+    switchPanel
   } = useApp() as any;
 
+  const [isImportAssetsOpen, setIsImportAssetsOpen] = useState(false);
   const isMobile = useIsMobile();
 
   const effectivePanel = targetPanel || (panels || []).find((p: any) => p.name === selectedAsset || p.symbol === selectedAsset) || activePanel;
@@ -1424,15 +1427,46 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
               : undefined
           }
         >
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 min-w-0">
             {isFloating && (
               <span className="text-slate-500 text-[11px] font-mono select-none" title="Arraste para mover">
                 ⋮⋮
               </span>
             )}
-            <span className="text-xs font-black tracking-wider uppercase text-slate-100">
-              {selectedAsset || 'TRADE'}
-            </span>
+            <div className="flex items-center gap-1 min-w-0">
+              <select
+                value={effectivePanel?.id || ''}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  if (switchPanel && e.target.value) {
+                    switchPanel(e.target.value);
+                  }
+                }}
+                className="bg-transparent text-xs font-black tracking-wider uppercase text-slate-100 cursor-pointer outline-none border border-slate-700/60 hover:border-slate-500 rounded px-1 py-0.5 bg-slate-900/90 max-w-[130px] truncate"
+                title="Clique para alternar o ativo"
+              >
+                {(panels || []).map((p: any) => {
+                  const cleanName = p.name ? p.name.replace(/\s*\([^)]*\)/g, '').trim() : 'Ativo';
+                  return (
+                    <option key={p.id} value={p.id} className="bg-slate-900 text-white font-bold">
+                      {cleanName.toUpperCase()}
+                    </option>
+                  );
+                })}
+              </select>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsImportAssetsOpen(true);
+                }}
+                className="px-1.5 py-0.5 rounded bg-sky-950/80 hover:bg-sky-900 text-sky-300 border border-sky-700/60 shadow-sm flex items-center gap-1 text-[10px] font-bold transition active:scale-95"
+                title="Importar Ativos da Corretora / MT4 / Forex (EURUSD, XAUUSD, US30...)"
+              >
+                <span>⚡</span>
+                <span className="hidden sm:inline text-[9px]">Ativos</span>
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center gap-1">
@@ -1548,6 +1582,32 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
           )}
         </div>
         )}
+
+        {/* Banner de Sincronização de Ativos MT4 / Forex / CFDs */}
+        {(!isFloating || !isCompact) && (() => {
+          const isMtOrCtrader = ['mt4', 'mt5', 'ctrader'].includes((activeAccount?.platform || '').toLowerCase());
+          const hasForex = (panels || []).some((p: any) => {
+            const s = (p.name || p.symbol || p.instance_id || '').toUpperCase();
+            return s.includes('EUR') || s.includes('GBP') || s.includes('JPY') || s.includes('XAU') || s.includes('US30');
+          });
+          if (!isMtOrCtrader || hasForex) return null;
+
+          return (
+            <div className="p-2 rounded-lg bg-sky-950/60 border border-sky-600/50 flex items-center justify-between gap-2 shadow-sm animate-in fade-in">
+              <div className="text-[10px] text-sky-200 leading-tight">
+                <span className="font-bold text-sky-100 block">⚡ Ativos da Corretora MT4</span>
+                Carregue EURUSD, XAUUSD, US30 e outros pares da sua conta.
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsImportAssetsOpen(true)}
+                className="px-2.5 py-1 bg-sky-600 hover:bg-sky-500 text-white text-[10px] font-black rounded shadow transition active:scale-95 shrink-0"
+              >
+                Importar Ativos
+              </button>
+            </div>
+          );
+        })()}
 
         {/* 2. CARD DE POSIÇÃO ATUAL | CONTRATOS | STATUS (DESTAQUE NO TOPO) - Ocultado no modo simplificado/compacto */}
         {(!isFloating || !isCompact) && (() => {
@@ -2511,6 +2571,12 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
           refreshAtmList();
         }}
         currentATM={activeATM}
+      />
+
+      {/* Import Assets Modal */}
+      <ImportAssetsModal
+        isOpen={isImportAssetsOpen}
+        onClose={() => setIsImportAssetsOpen(false)}
       />
     </div>
   );

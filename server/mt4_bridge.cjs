@@ -91,12 +91,16 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && pathname === '/commands') {
     const accNum = String(query.account || '').trim();
     if (accNum) {
+      const rawSymbols = query.symbols || query.market_watch || '';
+      const parsedSymbols = rawSymbols ? rawSymbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : (existing.symbols || []);
+
       const existing = accountsConnected.get(accNum) || {};
       accountsConnected.set(accNum, {
         ...existing,
         account_name: query.account_name || existing.account_name || `MT4/MT5 #${accNum}`,
         lastSeen: new Date().toISOString(),
         symbol: query.symbol || existing.symbol || 'ACTIVE',
+        symbols: parsedSymbols.length > 0 ? parsedSymbols : (existing.symbols || []),
         balance: query.balance ? Number(query.balance) : (existing.balance || 0),
         equity: query.equity ? Number(query.equity) : (existing.equity || 0),
         broker: query.broker || existing.broker || 'MetaTrader Server',
@@ -137,6 +141,7 @@ const server = http.createServer((req, res) => {
         is_demo: info.is_demo ?? true,
         leverage: info.leverage || 100,
         platform: info.platform || 'mt4',
+        symbols: info.symbols || [],
         last_seen: info.lastSeen
       });
     }
@@ -144,6 +149,31 @@ const server = http.createServer((req, res) => {
       success: true,
       total: accList.length,
       accounts: accList
+    }));
+    return;
+  }
+
+  // 3.2 GET /symbols ou /mt4/symbols: Retorna símbolos detectados
+  if (req.method === 'GET' && (pathname === '/symbols' || pathname === '/mt4/symbols')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    const allDetectedSymbols = new Set();
+    for (const [, info] of accountsConnected.entries()) {
+      if (Array.isArray(info.symbols)) {
+        info.symbols.forEach(s => allDetectedSymbols.add(s));
+      }
+      if (info.symbol && info.symbol !== 'ACTIVE') {
+        allDetectedSymbols.add(info.symbol.toUpperCase());
+      }
+    }
+    const standardForexList = [
+      'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'NZDUSD',
+      'EURGBP', 'EURJPY', 'GBPJPY', 'XAUUSD', 'XAGUSD', 'USOIL', 'US30', 'US500', 'USTEC', 'GER40', 'BTCUSD', 'ETHUSD'
+    ];
+    res.end(JSON.stringify({
+      success: true,
+      detected_symbols: Array.from(allDetectedSymbols),
+      standard_symbols: standardForexList,
+      total_detected: allDetectedSymbols.size
     }));
     return;
   }

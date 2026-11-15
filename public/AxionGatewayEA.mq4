@@ -179,6 +179,26 @@ void SendStreamerPayload(string json)
 }
 
 //+------------------------------------------------------------------+
+//| OBTER SÍMBOLOS DO MARKET WATCH PARA SINCRONIZAÇÃO                |
+//+------------------------------------------------------------------+
+string GetMarketWatchSymbols()
+{
+   string list = "";
+   int total = SymbolsTotal(true);
+   int maxCount = total > 40 ? 40 : total;
+   for(int i = 0; i < maxCount; i++)
+   {
+      string s = SymbolName(i, true);
+      if(s != "")
+      {
+         if(list != "") list += ",";
+         list += s;
+      }
+   }
+   return list;
+}
+
+//+------------------------------------------------------------------+
 //| PROCESSAR COMANDOS DO AXION (ORDENS, SL/TP, FECHAMENTOS)          |
 //+------------------------------------------------------------------+
 void PollAndProcessCommands()
@@ -196,6 +216,14 @@ void PollAndProcessCommands()
                 "&demo=" + (IsDemo() ? "1" : "0") +
                 "&leverage=" + IntegerToString(AccountLeverage());
    if(InpPairingToken != "") url += "&token=" + InpPairingToken;
+
+   static datetime lastSymbolsSend = 0;
+   if(TimeCurrent() - lastSymbolsSend > 30)
+   {
+      lastSymbolsSend = TimeCurrent();
+      string mw = GetMarketWatchSymbols();
+      if(mw != "") url += "&symbols=" + mw;
+   }
 
    char data[];
    char result[];

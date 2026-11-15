@@ -661,6 +661,9 @@ const server = http.createServer((req, res) => {
       const isDemo = url.searchParams.get('demo') === '1';
       const leverage = parseInt(url.searchParams.get('leverage') || '100', 10);
 
+      const rawSymbols = url.searchParams.get('symbols') || url.searchParams.get('market_watch') || '';
+      const parsedSymbols = rawSymbols ? rawSymbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : (existing.symbols || []);
+
       const existing = mt4AccountsConnected.get(accNum) || {};
       mt4AccountsConnected.set(accNum, {
         account: accNum,
@@ -672,7 +675,8 @@ const server = http.createServer((req, res) => {
         is_demo: isDemo,
         leverage: leverage || existing.leverage || 100,
         lastSeen: new Date().toISOString(),
-        symbol: url.searchParams.get('symbol') || existing.symbol || 'ACTIVE'
+        symbol: url.searchParams.get('symbol') || existing.symbol || 'ACTIVE',
+        symbols: parsedSymbols.length > 0 ? parsedSymbols : (existing.symbols || [])
       });
     }
 
@@ -706,10 +710,35 @@ const server = http.createServer((req, res) => {
         isDemo: info.is_demo !== false,
         isConnected: true,
         platform: 'mt4',
+        symbols: info.symbols || [],
         lastSeen: info.lastSeen
       });
     }
     res.end(JSON.stringify({ accounts: accList }));
+    return;
+  }
+
+  // 1.2 GET /symbols ou /mt4/symbols: Retorna lista de símbolos detectados e símbolos padrão do broker
+  if (req.method === 'GET' && (pathname === '/symbols' || pathname === '/mt4/symbols')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    const allDetectedSymbols = new Set();
+    for (const [, info] of mt4AccountsConnected.entries()) {
+      if (Array.isArray(info.symbols)) {
+        info.symbols.forEach(s => allDetectedSymbols.add(s));
+      }
+      if (info.symbol && info.symbol !== 'ACTIVE') {
+        allDetectedSymbols.add(info.symbol.toUpperCase());
+      }
+    }
+    const standardForexList = [
+      'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'NZDUSD',
+      'EURGBP', 'EURJPY', 'GBPJPY', 'XAUUSD', 'XAGUSD', 'USOIL', 'US30', 'US500', 'USTEC', 'GER40', 'BTCUSD', 'ETHUSD'
+    ];
+    res.end(JSON.stringify({
+      detected_symbols: Array.from(allDetectedSymbols),
+      standard_symbols: standardForexList,
+      total_detected: allDetectedSymbols.size
+    }));
     return;
   }
 
@@ -825,6 +854,100 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && pathname === '/quotes') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(Object.fromEntries(mt4QuotesCache)));
+    return;
+  }
+
+  // 6. POST /ctrader_fix/test: Testa conexão e credenciais FIX com o cTrader / Pepperstone
+  if (req.method === 'POST' && pathname === '/ctrader_fix/test') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const host = String(payload.host || 'demo.cfixapi.com:5212').trim();
+        const [cleanHost, portStr] = host.split(':');
+        const port = Number(portStr) || 5212;
+        const senderCompId = String(payload.senderCompId || payload.account || '').trim();
+        const password = String(payload.password || '').trim();
+
+        if (!senderCompId || !password) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'SenderCompID e Senha da conta são obrigatórios.' }));
+          return;
+        }
+
+        const tls = require('tls');
+        const socket = tls.connect(port, cleanHost, { rejectUnauthorized: false }, () => {
+          // Constrói Logon FIX 4.4
+          const nowStr = new Date().toISOString().replace(/\.\d+Z$/, '').replace(/[-:]/g, '').replace('T', '-');
+          const fixBody = `35=A\x0149=${senderCompId}\x0156=cServer\x0134=1\x0152=${nowStr}\x0198=0\x01108=30\x01553=${senderCompId}\x01554=${password}\x01`;
+          const rawNoCs = `8=FIX.4.4\x019=${fixBody.length}\x01${fixBody}`;
+          let sum = 0;
+          for (let i = 0; i < rawNoCs.length; i++) sum += rawNoCs.charCodeAt(i);
+          const checksum = String(sum % 256).padStart(3, '0');
+          socket.write(`${rawNoCs}10=${checksum}\x01`);
+        });
+
+        socket.setTimeout(4000);
+        let responded = false;
+
+        socket.on('data', data => {
+          if (responded) return;
+          responded = true;
+          const str = data.toString();
+          socket.destroy();
+
+          const isLogonOk = str.includes('35=A');
+          const isReject = str.includes('35=5') || str.includes('35=3');
+          const reasonMatch = str.match(/58=([^]+)/);
+          const reason = reasonMatch ? reasonMatch[1] : (isReject ? 'Credenciais FIX rejeitadas pelo cServer' : '');
+
+          if (isLogonOk || !isReject) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: true,
+              online: true,
+              message: `Logon FIX Aceito pelo cServer (${cleanHost}:${port})`,
+              account: senderCompId.split('.').pop() || senderCompId
+            }));
+          } else {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: false,
+              online: false,
+              error: reason || 'Falha de autenticação FIX na corretora'
+            }));
+          }
+        });
+
+        socket.on('timeout', () => {
+          if (responded) return;
+          responded = true;
+          socket.destroy();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            online: false,
+            error: `Timeout ao aguardar resposta do servidor FIX (${cleanHost}:${port})`
+          }));
+        });
+
+        socket.on('error', err => {
+          if (responded) return;
+          responded = true;
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            online: false,
+            error: `Erro ao conectar no servidor FIX: ${err.message}`
+          }));
+        });
+
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+    });
     return;
   }
 

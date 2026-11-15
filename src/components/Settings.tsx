@@ -5,6 +5,7 @@ import { speakText } from '../services/tts';
 import { getStableManualStrategyId, getAccountManualStrategyId, generateAccountManualStrategyId, resolvePanelTickSize, resolvePanelPointValue } from '../services/db';
 import { sanitizeTimeMask } from '../utils/date';
 import { PatternMLSettings } from './PatternMLSettings';
+import { ImportAssetsModal } from './ImportAssetsModal';
 interface SettingsProps {
   initialTab?: 'geral' | 'ia_voz' | 'recursos' | 'fontes' | 'telegram' | 'prompts' | 'noticias' | 'prompt_geral' | 'remodelagem_ml';
 }
@@ -24,6 +25,7 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
   const [confirmPasswordVal, setConfirmPasswordVal] = useState<string>('');
   const [passwordChangeMsg, setPasswordChangeMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [isChangingPassword, setIsChangingPassword] = useState<boolean>(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -3549,20 +3551,31 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
               <p className="text-xs text-slate-400">Configure seus painéis ativos e os IDs de instâncias do Supabase.</p>
             </div>
             {!isAddingPanel && !editingPanelId && isAdmin && (
-              <button
-                onClick={() => {
-                  setPanelNameInput('');
-                  setPanelInstanceInput('');
-                  setPanelPointValueInput('1.0');
-                  setPanelTickSizeInput('0.25');
-                  setPanelDefaultSlInput('50');
-                  setPanelDefaultTpInput('50');
-                  setIsAddingPanel(true);
-                }}
-                className="bg-blue-600 hover:bg-blue-750 text-white font-bold px-3 py-1.5 rounded text-xs transition active:scale-95"
-              >
-                ➕ Novo Painel
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsImportModalOpen(true)}
+                  className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-3 py-1.5 rounded text-xs transition active:scale-95 flex items-center gap-1 shadow-sm"
+                >
+                  <span>⚡</span>
+                  <span>Importar Ativos MT4 / Forex</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPanelNameInput('');
+                    setPanelInstanceInput('');
+                    setPanelPointValueInput('1.0');
+                    setPanelTickSizeInput('0.25');
+                    setPanelDefaultSlInput('50');
+                    setPanelDefaultTpInput('50');
+                    setIsAddingPanel(true);
+                  }}
+                  className="bg-blue-600 hover:bg-blue-750 text-white font-bold px-3 py-1.5 rounded text-xs transition active:scale-95"
+                >
+                  ➕ Novo Painel
+                </button>
+              </div>
             )}
           </div>
 
@@ -4119,6 +4132,12 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
       {isAdmin && activeTab === 'remodelagem_ml' && (
         <PatternMLSettings />
       )}
+
+      {/* Modal de Importação de Ativos */}
+      <ImportAssetsModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+      />
     </div>
   );
 };
