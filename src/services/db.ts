@@ -3854,16 +3854,17 @@ export async function fetchCandlesSupabase(
   const hasBrokerSuffix = rawSym.includes(' - ') && !rawSym.includes('BINANCE');
 
   const activePlat = typeof window !== 'undefined' ? (localStorage.getItem('vortex_active_account_platform') || '') : '';
-  const isMtFeed = activePlat === 'mt4' ||
+  const isBinanceAccount = activePlat === 'binance' || (targetPanelObj as any)?.platform === 'binance' || rawSym.includes('BINANCE');
+  const isMtFeed = !isBinanceAccount && (activePlat === 'mt4' ||
                    activePlat === 'mt5' ||
                    hasBrokerSuffix ||
                    (targetPanelObj as any)?.platform === 'mt4' ||
                    (targetPanelObj as any)?.platform === 'mt5' ||
                    (targetPanelObj as any)?.source === 'mt4' ||
-                   (targetPanelObj?.instance_id || '').startsWith('mt4_');
+                   (targetPanelObj?.instance_id || '').startsWith('mt4_'));
 
-  const isCryptoAsset = /USDT|BUSD|USDC/i.test(baseSym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(baseSym);
-  const isForexOrCfd = isCryptoAsset || /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(baseSym);
+  const isCryptoAsset = isBinanceAccount || /USDT|BUSD|USDC/i.test(baseSym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK|NEAR|SUI|PEPE)/i.test(baseSym);
+  const isForexOrCfd = !isBinanceAccount && (isCryptoAsset || /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(baseSym));
 
   if (isMtFeed) {
     // Garante que o WebSocket da Binance seja imediatamente desativado para nunca colidir com o Bid/Ask da corretora MT4/MT5
@@ -3872,7 +3873,7 @@ export async function fetchCandlesSupabase(
     } catch {}
   }
 
-  // 0.1 Para Criptoativos (BTCUSD, ETHUSD, SOLUSD, etc.), prioridade máxima para a Binance REST API
+  // 0.1 Para Criptoativos (BTCUSDT, ETHUSDT, SOLUSDT, etc.), prioridade máxima para a Binance REST API
   // A Binance fornece histórico contínuo M1 autêntico em tempo real (sem delay de 1m nem flat dashes com segundos do Yahoo)
   if (isCryptoAsset) {
     try {
@@ -3882,14 +3883,16 @@ export async function fetchCandlesSupabase(
       } else if (!cleanSym.endsWith('USDT') && !cleanSym.endsWith('BUSD') && !cleanSym.endsWith('USDC')) {
         cleanSym = `${cleanSym}USDT`;
       }
+
+      const isFutures = isBinanceAccount || rawSym.includes('FUTUR') || rawSym.includes('PERP');
       const { fetchBinanceCandles, subscribeBinanceMarketData, unsubscribeBinanceMarketData } = await import('./binanceService');
-      const binanceCandles = await fetchBinanceCandles(cleanSym, '1m', Math.max(limit, 1000), false);
+      const binanceCandles = await fetchBinanceCandles(cleanSym, '1m', Math.max(limit, 1000), Boolean(isFutures));
       if (binanceCandles && binanceCandles.length > 0) {
         onProgress?.(100, binanceCandles.length, limit);
         saveLocalCandles(queryId, binanceCandles);
         // Se a conta ou ativo for MT4/Corretora, o WebSocket da Binance NUNCA é ativado para não colidir com o Bid/Ask da corretora
         if (!isMtFeed) {
-          subscribeBinanceMarketData(cleanSym, false);
+          subscribeBinanceMarketData(cleanSym, Boolean(isFutures));
         } else {
           unsubscribeBinanceMarketData();
         }

@@ -14,6 +14,20 @@ export interface SuggestedAssetItem {
 }
 
 export const PRESET_MARKET_ASSETS: SuggestedAssetItem[] = [
+  // Criptomoedas Principais (Binance Spot & Futuros USDT-M)
+  { symbol: 'BTCUSDT', name: 'Bitcoin / Tether USDT', category: 'Cripto', tickSize: 0.10, pointValue: 1.0, defaultSl: 400, defaultTp: 800 },
+  { symbol: 'ETHUSDT', name: 'Ethereum / Tether USDT', category: 'Cripto', tickSize: 0.01, pointValue: 1.0, defaultSl: 30, defaultTp: 60 },
+  { symbol: 'SOLUSDT', name: 'Solana / Tether USDT', category: 'Cripto', tickSize: 0.01, pointValue: 1.0, defaultSl: 3.0, defaultTp: 6.0 },
+  { symbol: 'BNBUSDT', name: 'BNB / Tether USDT', category: 'Cripto', tickSize: 0.01, pointValue: 1.0, defaultSl: 5.0, defaultTp: 10.0 },
+  { symbol: 'XRPUSDT', name: 'Ripple / Tether USDT', category: 'Cripto', tickSize: 0.0001, pointValue: 1.0, defaultSl: 0.05, defaultTp: 0.10 },
+  { symbol: 'DOGEUSDT', name: 'Dogecoin / Tether USDT', category: 'Cripto', tickSize: 0.00001, pointValue: 1.0, defaultSl: 0.01, defaultTp: 0.02 },
+  { symbol: 'ADAUSDT', name: 'Cardano / Tether USDT', category: 'Cripto', tickSize: 0.0001, pointValue: 1.0, defaultSl: 0.04, defaultTp: 0.08 },
+  { symbol: 'AVAXUSDT', name: 'Avalanche / Tether USDT', category: 'Cripto', tickSize: 0.01, pointValue: 1.0, defaultSl: 1.0, defaultTp: 2.0 },
+  { symbol: 'LINKUSDT', name: 'Chainlink / Tether USDT', category: 'Cripto', tickSize: 0.001, pointValue: 1.0, defaultSl: 0.50, defaultTp: 1.0 },
+  { symbol: 'NEARUSDT', name: 'Near Protocol / Tether USDT', category: 'Cripto', tickSize: 0.001, pointValue: 1.0, defaultSl: 0.30, defaultTp: 0.60 },
+  { symbol: 'SUIUSDT', name: 'Sui / Tether USDT', category: 'Cripto', tickSize: 0.0001, pointValue: 1.0, defaultSl: 0.10, defaultTp: 0.20 },
+  { symbol: 'PEPEUSDT', name: 'Pepe / Tether USDT', category: 'Cripto', tickSize: 0.00000001, pointValue: 1.0, defaultSl: 0.000001, defaultTp: 0.000002 },
+
   // Forex Majors
   { symbol: 'EURUSD', name: 'Euro / US Dollar', category: 'Forex', tickSize: 0.00001, pointValue: 100000, defaultSl: 0.0020, defaultTp: 0.0040 },
   { symbol: 'GBPUSD', name: 'British Pound / US Dollar', category: 'Forex', tickSize: 0.00001, pointValue: 100000, defaultSl: 0.0025, defaultTp: 0.0050 },
@@ -35,11 +49,7 @@ export const PRESET_MARKET_ASSETS: SuggestedAssetItem[] = [
   { symbol: 'US30', name: 'Dow Jones CFD', category: 'Índices', tickSize: 1.0, pointValue: 1.0, defaultSl: 80, defaultTp: 160 },
   { symbol: 'US500', name: 'S&P 500 CFD', category: 'Índices', tickSize: 0.10, pointValue: 10, defaultSl: 15, defaultTp: 30 },
   { symbol: 'USTEC', name: 'Nasdaq 100 CFD', category: 'Índices', tickSize: 0.25, pointValue: 20, defaultSl: 40, defaultTp: 80 },
-  { symbol: 'GER40', name: 'DAX 40 CFD', category: 'Índices', tickSize: 0.50, pointValue: 25, defaultSl: 35, defaultTp: 70 },
-
-  // Criptomoedas
-  { symbol: 'BTCUSD', name: 'Bitcoin / US Dollar', category: 'Cripto', tickSize: 0.10, pointValue: 1.0, defaultSl: 400, defaultTp: 800 },
-  { symbol: 'ETHUSD', name: 'Ethereum / US Dollar', category: 'Cripto', tickSize: 0.01, pointValue: 1.0, defaultSl: 30, defaultTp: 60 }
+  { symbol: 'GER40', name: 'DAX 40 CFD', category: 'Índices', tickSize: 0.50, pointValue: 25, defaultSl: 35, defaultTp: 70 }
 ];
 
 interface ImportAssetsModalProps {
@@ -56,8 +66,13 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [importProgress, setImportProgress] = useState<{ current: number; total: number; name: string } | null>(null);
+  const [customSymbol, setCustomSymbol] = useState('');
 
   const [brokerSuffix, setBrokerSuffix] = useState<string>(() => {
+    if (activeAccount?.platform === 'binance') {
+      const isFut = (activeAccount.connection_host && (activeAccount.connection_host.includes('future') || activeAccount.connection_host.includes('fapi'))) || (activeAccount.account_name || '').toLowerCase().includes('futuro');
+      return isFut ? 'Binance Futuros' : 'Binance';
+    }
     if (activeAccount?.broker && activeAccount.broker !== 'MetaTrader 4' && activeAccount.broker !== 'MetaTrader Server') {
       return activeAccount.broker;
     }
@@ -67,6 +82,21 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
     if (activeAccount?.platform === 'mt4' || activeAccount?.platform === 'mt5') return 'ActivTrades';
     return '';
   });
+
+  // Atualiza brokerSuffix quando o modal abre ou a conta ativa muda
+  useEffect(() => {
+    if (activeAccount?.platform === 'binance') {
+      const isFut = (activeAccount.connection_host && (activeAccount.connection_host.includes('future') || activeAccount.connection_host.includes('fapi'))) || (activeAccount.account_name || '').toLowerCase().includes('futuro');
+      setBrokerSuffix(isFut ? 'Binance Futuros' : 'Binance');
+    } else if (activeAccount?.broker && !['MetaTrader 4', 'MetaTrader Server', 'MetaTrader 5'].includes(activeAccount.broker)) {
+      setBrokerSuffix(activeAccount.broker);
+    } else {
+      const accName = (activeAccount?.account_name || '').toUpperCase();
+      if (accName.includes('ACTIVE') || accName.includes('ACTIVETRADE') || accName.includes('ACTIVTRADES')) setBrokerSuffix('ActivTrades');
+      else if (accName.includes('PEPPER')) setBrokerSuffix('Pepperstone');
+      else if (activeAccount?.platform === 'mt4' || activeAccount?.platform === 'mt5') setBrokerSuffix('ActivTrades');
+    }
+  }, [activeAccount, isOpen]);
 
   // Separação estrita:
   // 1) Ativos Padrão do Axion (incluídos pelo Admin e que usam Supabase) -> PROTEGIDOS (não podem ser excluídos)
@@ -100,15 +130,52 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
   useEffect(() => {
     if (isOpen) {
       const toSelect = new Set<string>();
-      PRESET_MARKET_ASSETS.forEach(item => {
-        if (!existingSet.has(item.symbol.toUpperCase())) {
-          toSelect.add(item.symbol);
-        }
-      });
+      if (activeAccount?.platform === 'binance') {
+        PRESET_MARKET_ASSETS.filter(item => item.category === 'Cripto').forEach(item => {
+          if (!existingSet.has(item.symbol.toUpperCase())) {
+            toSelect.add(item.symbol);
+          }
+        });
+      } else {
+        PRESET_MARKET_ASSETS.forEach(item => {
+          if (!existingSet.has(item.symbol.toUpperCase())) {
+            toSelect.add(item.symbol);
+          }
+        });
+      }
       setSelectedSymbols(toSelect);
-      fetchLiveBrokerSymbols();
+      if (activeAccount?.platform !== 'binance') {
+        fetchLiveBrokerSymbols();
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, activeAccount]);
+
+  const handleAddCustomSymbol = () => {
+    const raw = customSymbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!raw) return;
+    const finalSym = (!raw.endsWith('USDT') && !raw.endsWith('BUSD') && !raw.endsWith('USDC') && activeAccount?.platform === 'binance')
+      ? `${raw}USDT`
+      : raw;
+
+    if (!PRESET_MARKET_ASSETS.some(a => a.symbol === finalSym)) {
+      PRESET_MARKET_ASSETS.unshift({
+        symbol: finalSym,
+        name: `${finalSym} (Cripto Par)`,
+        category: 'Cripto',
+        tickSize: finalSym.startsWith('BTC') ? 0.10 : (finalSym.startsWith('ETH') ? 0.01 : 0.001),
+        pointValue: 1.0,
+        defaultSl: 50,
+        defaultTp: 100
+      });
+    }
+
+    setSelectedSymbols(prev => {
+      const next = new Set(prev);
+      next.add(finalSym);
+      return next;
+    });
+    setCustomSymbol('');
+  };
 
   const handleDeleteSyncedPanels = async (panelsToRemove: any[], symLabel?: string) => {
     if (!deletePanelAction || panelsToRemove.length === 0) return;
@@ -348,6 +415,30 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
           </div>
         </div>
 
+        {/* Banner Informativo se a Conta Ativa for Binance */}
+        {activeAccount?.platform === 'binance' && (
+          <div className="mx-5 my-2.5 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-xl shrink-0">🟡</span>
+              <div>
+                <div className="font-black text-amber-300">Conta Binance Conectada ({activeAccount.account_name})</div>
+                <div className="text-[10px] text-slate-300">Selecione os pares de cripto (ex: BTCUSDT, ETHUSDT) para carregar o gráfico ao vivo e boleta.</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                handleSelectAll('Cripto');
+                const isFut = (activeAccount.connection_host && (activeAccount.connection_host.includes('future') || activeAccount.connection_host.includes('fapi'))) || (activeAccount.account_name || '').toLowerCase().includes('futuro');
+                setBrokerSuffix(isFut ? 'Binance Futuros' : 'Binance');
+              }}
+              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg text-xs shadow transition active:scale-95 shrink-0 cursor-pointer"
+            >
+              ⚡ Selecionar Pares Binance
+            </button>
+          </div>
+        )}
+
         {/* Filtros e Ações Rápidas */}
         <div className="px-5 py-2.5 bg-slate-950/40 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -358,6 +449,13 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
               className="px-2 py-0.5 rounded bg-blue-950/80 hover:bg-blue-900 text-blue-300 border border-blue-700/60 font-bold text-[10px]"
             >
               Todos
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectAll('Cripto')}
+              className="px-2 py-0.5 rounded bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-700/60 font-bold text-[10px]"
+            >
+              🟡 Cripto (Binance)
             </button>
             <button
               type="button"
@@ -391,6 +489,37 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
           <div className="text-[11px] font-bold text-sky-400">
             {selectedSymbols.size} selecionado(s)
           </div>
+        </div>
+
+        {/* Adicionar Par Cripto Personalizado */}
+        <div className="px-5 py-2 bg-slate-900/60 border-b border-slate-800/80 flex items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 flex-1">
+            <span className="text-[11px] font-bold text-slate-300 shrink-0">➕ Par Personalizado:</span>
+            <input
+              type="text"
+              value={customSymbol}
+              onChange={(e) => setCustomSymbol(e.target.value.toUpperCase())}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAddCustomSymbol();
+                }
+              }}
+              placeholder="Ex: SOLUSDT, BNBUSDT, PEPEUSDT"
+              className="bg-slate-950 border border-slate-700 focus:border-amber-400 rounded px-2.5 py-1 text-xs text-white uppercase outline-none flex-1 max-w-xs shadow-inner"
+            />
+            <button
+              type="button"
+              onClick={handleAddCustomSymbol}
+              disabled={!customSymbol.trim()}
+              className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-slate-950 rounded font-black text-xs transition cursor-pointer shadow"
+            >
+              Adicionar
+            </button>
+          </div>
+          <span className="text-[10px] text-slate-400 hidden sm:inline">
+            Adiciona qualquer par USDT ao catálogo.
+          </span>
         </div>
 
         {/* Lista de Ativos Agrupados */}

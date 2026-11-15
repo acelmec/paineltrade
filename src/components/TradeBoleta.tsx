@@ -1493,11 +1493,25 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                   setIsImportAssetsOpen(true);
                 }}
                 className="px-1.5 py-0.5 rounded bg-sky-950/80 hover:bg-sky-900 text-sky-300 border border-sky-700/60 shadow-sm flex items-center gap-1 text-[10px] font-bold transition active:scale-95"
-                title="Importar Ativos da Corretora / MT4 / Forex (EURUSD, XAUUSD, US30...)"
+                title="Importar Ativos da Corretora / MT4 / Binance (BTCUSDT, ETHUSDT, EURUSD, XAUUSD...)"
               >
                 <span>⚡</span>
                 <span className="hidden sm:inline text-[9px]">Ativos</span>
               </button>
+              {activeAccount?.platform === 'binance' && !(panels || []).some((p: any) => /USDT|BUSD|BINANCE/i.test(p.name || '') || /USDT|BUSD|BINANCE/i.test(p.instance_id || '')) && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsImportAssetsOpen(true);
+                  }}
+                  className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 text-[10px] font-black transition active:scale-95 flex items-center gap-1 animate-pulse"
+                  title="Importar Pares de Cripto da Binance (BTCUSDT, ETHUSDT...)"
+                >
+                  <span>🟡</span>
+                  <span>Importar Criptos Binance</span>
+                </button>
+              )}
             </div>
           </div>
 

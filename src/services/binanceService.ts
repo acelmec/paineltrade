@@ -274,20 +274,45 @@ export async function fetchBinanceCandles(
   symbol = 'BTCUSDT',
   interval = '1m',
   limit = 1000,
-  isFutures = false
+  isFutures = false,
+  hostUrl?: string
 ): Promise<Candle[]> {
   try {
     const cleanSym = symbol.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-    const baseUrl = isFutures ? BINANCE_FUTURES_REST_URL : getBinanceSpotRestUrl();
+    const isDemo = Boolean(hostUrl && hostUrl.includes('testnet'));
+
+    // 1. Tenta a rota resolvida com suporte a proxy local
+    const baseUrl = resolveBinanceBaseRestUrl(hostUrl, isFutures, isDemo);
     const endpoint = isFutures ? '/fapi/v1/klines' : '/api/v3/klines';
     const url = `${baseUrl}${endpoint}?symbol=${cleanSym}&interval=${interval}&limit=${limit}`;
 
     let res = await fetch(url).catch(() => null);
+
+    // 2. Se falhar (ex: Testnet com histórico vazio ou erro no proxy testnet), tenta o proxy de produção
     if (!res || !res.ok) {
-      if (!isFutures && baseUrl !== BINANCE_SPOT_REST_URL) {
-        res = await fetch(`${BINANCE_SPOT_REST_URL}${endpoint}?symbol=${cleanSym}&interval=${interval}&limit=${limit}`).catch(() => null);
-      }
+      const prodProxy = isFutures ? '/binance-fapi' : '/binance-api';
+      const prodUrl = typeof window !== 'undefined'
+        ? `${window.location.origin}${prodProxy}${endpoint}?symbol=${cleanSym}&interval=${interval}&limit=${limit}`
+        : `${isFutures ? BINANCE_FUTURES_REST_URL : BINANCE_SPOT_REST_URL}${endpoint}?symbol=${cleanSym}&interval=${interval}&limit=${limit}`;
+      res = await fetch(prodUrl).catch(() => null);
     }
+
+    // 3. Fallback cruzado: se Futuros falhar, tenta Spot
+    if (!res || !res.ok) {
+      const spotFallback = typeof window !== 'undefined'
+        ? `${window.location.origin}/binance-api/api/v3/klines?symbol=${cleanSym}&interval=${interval}&limit=${limit}`
+        : `${BINANCE_SPOT_REST_URL}/api/v3/klines?symbol=${cleanSym}&interval=${interval}&limit=${limit}`;
+      res = await fetch(spotFallback).catch(() => null);
+    }
+
+    // 4. Último fallback: chamada direta à API pública da Binance
+    if (!res || !res.ok) {
+      const directUrl = isFutures
+        ? `https://fapi.binance.com/fapi/v1/klines?symbol=${cleanSym}&interval=${interval}&limit=${limit}`
+        : `https://api.binance.com/api/v3/klines?symbol=${cleanSym}&interval=${interval}&limit=${limit}`;
+      res = await fetch(directUrl).catch(() => null);
+    }
+
     if (!res || !res.ok) return [];
 
     const data = await res.json();
