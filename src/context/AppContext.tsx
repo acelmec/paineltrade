@@ -104,6 +104,7 @@ import {
   reconnectCloudChannel
 } from '../services/ninjaGateway';
 import { fetchStreamerMarketData, isStreamerWsConnected } from '../services/vortexStreamer';
+import { getLocalPlatformConnections } from '../services/connectionsService';
 import { PRESET_ATM_STRATEGIES, resolveAlgorithmAtm, type ATMStrategy, type ATMBracket } from '../utils/atmRegistry';
 
 function extractPriceActionFromCandles(candles: Candle[]) {
@@ -10390,6 +10391,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         } else {
           console.warn('[CONTEXT] Ordem local bloqueada para o NinjaTrader: Stop Loss e Take Profit são obrigatórios.');
+        }
+      }
+
+      // ⚡ DISPARO INSTANTÂNEO DE ORDENS METATRADER 4 & 5 (HTTP PORTA 80)
+      const isMtAcc = (localAcc?.platform === 'mt4' || localAcc?.platform === 'mt5') && !payload.already_dispatched && finalStatus === 'Em Andamento';
+      if (isMtAcc && localAcc) {
+        payload.already_dispatched = true;
+        try {
+          const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
+          const activeMtConn = mtConns.find(c => c.status === 'online') || mtConns[0];
+          const mtHost = (activeMtConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
+          const targetNumber = (localAcc.account_name || '').replace(/\D/g, '') || localAcc.account_name;
+
+          fetch(`${mtHost}/order`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: reportId,
+              account: targetNumber,
+              symbol: resolvedSymbol,
+              direction: payload.side === 'COMPRA' || payload.side === 'BUY' ? 1 : 2,
+              side: payload.side,
+              lots: Number(payload.contrato || (payload as any).quantity || 0.01),
+              stop_loss: Number(payload.stop_loss || 0),
+              take_profit: Number(payload.take_profit || 0)
+            })
+          }).then(r => r.json()).then(data => {
+            console.log(`🚀 [MT-ORDER] Ordem enviada ao MetaTrader (${targetNumber}) com sucesso:`, data);
+          }).catch(err => {
+            console.warn(`⚠️ [MT-ORDER] Falha ao despachar ordem para o MetaTrader:`, err.message);
+          });
+        } catch (e: any) {
+          console.warn('[MT-ORDER] Erro ao enviar ordem para MT4/MT5:', e.message);
         }
       }
 

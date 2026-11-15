@@ -5,6 +5,7 @@ import { ATMStrategyModal } from './ATMStrategyModal';
 import { getAccountManualStrategyId, updateStrategyReportLevelsSupabase, updateStrategyReportStatusSupabase, isNinjaExecutionAccount, mirrorToLocalServer, resolveAccountExecutionSymbol, resolvePanelTickSize, resolvePanelPointValue, isSameAsset, roundToTick, fetchAtmStrategiesSupabase } from '../services/db';
 import { resolveLevelPrice, calculateRangeHlLevels } from '../utils/levelPriceResolver';
 import { checkNinjaStatus, fetchNinjaPositionsAndOrders } from '../services/ninjaGateway';
+import { getLocalPlatformConnections } from '../services/connectionsService';
 import { useIsMobile } from '../utils/platform';
 
 interface TradeBoletaProps {
@@ -87,12 +88,12 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   const panelNinjaAccounts = (accounts || []).filter((a: any) => isNinjaExecutionAccount(a));
   const syncedNinjaAccountsCount = panelNinjaAccounts.length;
 
-  // A Boleta opera EXCLUSIVAMENTE com Contas Demo Axion
+  // Contas operacionais disponíveis na Boleta: Demo Axion, MT4, MT5, Binance e cTrader (exceto Contas Execução NT8)
   const boletaAccounts = (accounts || []).filter((acc: any) =>
-    acc.platform !== 'nt8' && !acc.send_localhost && !isNinjaExecutionAccount(acc)
+    acc.platform !== 'nt8' && !isNinjaExecutionAccount(acc)
   );
 
-  // Garante que a boleta selecione sempre uma Conta Demo válida
+  // Garante que a boleta selecione sempre uma Conta Operacional válida
   useEffect(() => {
     if (boletaAccounts.length > 0) {
       const isCurrentValid = boletaAccounts.some((a: any) => a.id === activeAccount?.id);
@@ -1127,6 +1128,27 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
         setActiveNinjaPosition(null);
       }
 
+      // Se for conta MetaTrader 4 ou 5, despacha encerramento imediato para o EA
+      const isMtAcc = activeAccount?.platform === 'mt4' || activeAccount?.platform === 'mt5';
+      if (isMtAcc && activeAccount?.account_name) {
+        try {
+          const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
+          const activeMtConn = mtConns.find(c => c.status === 'online') || mtConns[0];
+          const mtHost = (activeMtConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
+          const targetNumber = (activeAccount.account_name || '').replace(/\D/g, '') || activeAccount.account_name;
+
+          fetch(`${mtHost}/order`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'flat',
+              account: targetNumber,
+              symbol: resolveAccountExecutionSymbol(activeAccount, selectedAsset)
+            })
+          }).catch(e => console.warn('[MT-FLAT] Erro ao enviar flat:', e));
+        } catch (_) {}
+      }
+
       // 1. Zera imediatamente no estado local (0ms delay)
       const closedAt = new Date().toISOString();
       const openIds = new Set(openReports.map((r: any) => r.id));
@@ -1480,7 +1502,13 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
         {(!isFloating || !isCompact) && (
         <div className={`${bCardBg} p-1.5 rounded-lg border space-y-1`}>
           <div className="flex items-center justify-between">
-            <label className={`text-[10px] ${bLabelColor} uppercase tracking-wider block`}>CONTA DEMO AXION</label>
+            <label className={`text-[10px] ${bLabelColor} uppercase tracking-wider block font-bold`}>
+              {activeAccount?.platform === 'mt4' ? 'CONTA METATRADER 4' :
+               activeAccount?.platform === 'mt5' ? 'CONTA METATRADER 5' :
+               activeAccount?.platform === 'binance' ? 'CONTA BINANCE SPOT' :
+               activeAccount?.account_type === 'internal_demo' ? 'CONTA DEMO AXION' :
+               'CONTA OPERACIONAL'}
+            </label>
             {syncedNinjaAccountsCount > 0 && (
               <span
                 className="text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1.5 bg-blue-950/80 text-blue-300 border border-blue-700/50 shadow-sm"
@@ -1493,7 +1521,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
           </div>
           {boletaAccounts.length === 0 ? (
             <div className="p-2 text-center text-[10px] text-amber-300 bg-amber-950/40 border border-amber-600/40 rounded">
-              Nenhuma Conta Demo disponível. Cadastre uma Conta Demo em 'Gestão de Contas'.
+              Nenhuma conta operacional disponível. Cadastre ou sincronize uma conta em 'Gestão de Contas'.
             </div>
           ) : (
             <select
@@ -1505,10 +1533,10 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
               className={`w-full ${bInnerInputBg} border text-[10px] font-bold py-1 px-2 rounded outline-none cursor-pointer truncate`}
             >
               {boletaAccounts.map((acc: any) => {
-                const platformLabel = acc.account_type === 'internal_demo' ? 'DEMO AXION' : 'DEMO';
+                const platformLabel = (acc.platform || (acc.account_type === 'internal_demo' ? 'DEMO AXION' : 'DEMO')).toUpperCase();
                 return (
                   <option key={acc.id} value={acc.id} className={isLightTheme ? 'bg-white text-slate-900' : 'bg-slate-900 text-white'}>
-                    {acc.account_name} ({platformLabel})
+                    {acc.account_name} [{platformLabel}]
                   </option>
                 );
               })}
