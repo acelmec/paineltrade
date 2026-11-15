@@ -1420,6 +1420,31 @@ if ((req.method === 'GET' || req.method === 'POST') && pathname === '/commands')
 
         if (pathname === '/market_data' || pathname === '/sinal_local') {
           marketDataCache.set(instanceId, item);
+          if (String(instanceId).startsWith('mt4_sync') && item.account) {
+            const cleanAcc = cleanAccountNumber(item.account);
+            if (cleanAcc) {
+              marketDataCache.set(`mt4_sync_${cleanAcc}`, item);
+              if (Array.isArray(item.positions)) mt4PositionsCache.set(cleanAcc, item.positions);
+              if (Array.isArray(item.history)) mt4TradesCache.set(cleanAcc, item.history);
+            }
+            if (Array.isArray(item.quotes)) {
+              for (const q of item.quotes) {
+                const sym = String(q.symbol || '').toUpperCase();
+                const bid = Number(q.bid || 0);
+                const ask = Number(q.ask || bid);
+                if (sym && bid > 0) {
+                  mt4QuotesCache.set(sym, {
+                    symbol: sym,
+                    price: Number(q.price || bid),
+                    bid,
+                    ask,
+                    volume: 1,
+                    updated_at: q.updated_at || new Date().toISOString()
+                  });
+                }
+              }
+            }
+          }
           broadcast({
             type: 'market_data',
             instance_id: instanceId,

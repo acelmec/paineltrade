@@ -2225,9 +2225,13 @@ export async function fetchStrategyReportsSupabase(): Promise<StrategyReport[]> 
 
       data.forEach((r: any) => {
         const local = localStatusMap.get(r.id);
-        // Se localmente a ordem já foi encerrada/cancelada e o banco ainda está 'Em Andamento', respeita o encerramento local recente
-        if (local && (local.status === 'Cancelado' || local.status === 'Gain' || local.status === 'Stop') && r.status === 'Em Andamento') {
-          map.set(r.id, { ...r, status: local.status, exit_price: local.exit_price, closed_at: local.closed_at });
+        // Se localmente a ordem já foi encerrada/cancelada e o banco ainda está 'Em Andamento' ou 'Pendente', respeita o encerramento local
+        if (local && (local.status === 'Cancelado' || local.status === 'Gain' || local.status === 'Stop') && (r.status === 'Em Andamento' || (r.status as any) === 'Pendente')) {
+          map.set(r.id, { ...r, ...local, status: local.status, exit_price: local.exit_price ?? r.exit_price, closed_at: local.closed_at ?? r.closed_at });
+        } else if (local && local.status === 'Em Andamento' && (r.status as any) === 'Pendente') {
+          map.set(r.id, { ...r, ...local, status: 'Em Andamento' });
+        } else if (local && ((local as any).ticket || (local as any).is_mt_real || (local as any).pnl_liquido !== undefined)) {
+          map.set(r.id, { ...local, ...r, ticket: (local as any).ticket, is_mt_real: (local as any).is_mt_real, pnl_liquido: (local as any).pnl_liquido, realized_pnl: (local as any).realized_pnl });
         } else {
           map.set(r.id, r);
         }
@@ -2430,6 +2434,48 @@ export async function insertStrategyReportSupabase(
 // Apenas contas com platform 'nt8' ou 'mt5', send_localhost=true ou contas padrão NinjaTrader.
 // Contas axion puras (sem flag local e sem nome Ninja) NUNCA vão ao NinjaTrader.
 // ─────────────────────────────────────────────────────────────────────────────
+export function isMtExecutionAccount(acc: any): boolean {
+  if (!acc) return false;
+  const platform = (acc.platform || '').toLowerCase();
+  return platform === 'mt4' || platform === 'mt5';
+}
+
+export function extractMtAccountNumber(acc: any): string {
+  if (!acc) return '';
+  const rawName = String(acc.account_name || acc.name || acc.id || '').trim();
+  const stripped = rawName.replace(/^(?:MT4|MT5|MetaTrader\s*[45]?)\s*[-_#]?\s*/i, '').trim();
+  const digits = stripped.replace(/\D/g, '');
+  return digits || rawName.replace(/\D/g, '') || rawName;
+}
+
+export function dispatchMtGatewayCommand(acc: any, cmdPayload: Record<string, any>): void {
+  if (!acc || !isMtExecutionAccount(acc)) return;
+  try {
+    let rawConns: any[] = [];
+    try {
+      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('vortex_platform_connections_local') : null;
+      if (saved) rawConns = JSON.parse(saved);
+    } catch {}
+    const mtConns = (Array.isArray(rawConns) ? rawConns : []).filter((c: any) => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
+    const activeMtConn = mtConns.find((c: any) => c.status === 'online') || mtConns[0];
+    const mtHost = (activeMtConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
+    const targetNumber = extractMtAccountNumber(acc);
+    const bodyStr = JSON.stringify({
+      ...cmdPayload,
+      account: targetNumber,
+      account_name: acc.account_name
+    });
+    const hosts = [mtHost, 'http://localhost:8003'].filter((h, i, arr) => h && arr.indexOf(h) === i);
+    hosts.forEach(h => {
+      fetch(`${h}/order`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: bodyStr
+      }).catch(() => {});
+    });
+  } catch {}
+}
+
 export function isNinjaExecutionAccount(acc: any): boolean {
   if (!acc) return false;
   const platform = (acc.platform || '').toLowerCase();
@@ -2805,6 +2851,7 @@ export async function triggerCopyTradingForMaster(masterReport: any, originalPay
         // Portanto, SÓ enviamos /sinal_local se a Master NÃO for conta Ninja e a Slave for Ninja.
         const isMasterNinja = isNinjaExecutionAccount(masterAccount);
         const isSlaveNinja = isNinjaExecutionAccount(slaveAccount);
+        const isSlaveMt = isMtExecutionAccount(slaveAccount);
         const alreadyDispatched = Boolean((originalPayload as any)?.already_dispatched_to_slaves);
 
         let dispatchSuccess = true;
@@ -2825,6 +2872,21 @@ export async function triggerCopyTradingForMaster(masterReport: any, originalPay
             dispatchSuccess = false;
             dispatchError = dispatchRes.error || dispatchRes.data?.error || 'Falha ao despachar ordem para o NinjaTrader';
           }
+        } else if (isSlaveMt && !alreadyDispatched) {
+          const slaveMaxLots = Number(slaveAccount.manual_max_lots || 0);
+          const finalSlaveLots = slaveMaxLots > 0 ? Math.min(slaveQty, slaveMaxLots) : slaveQty;
+          dispatchMtGatewayCommand(slaveAccount, {
+            id: childId,
+            action: 'order',
+            symbol: childSymbol,
+            direction: (originalPayload.side === 'COMPRA' || originalPayload.side === 'BUY') ? 1 : 2,
+            side: originalPayload.side || 'COMPRA',
+            lots: finalSlaveLots,
+            stop_loss: finalSl,
+            take_profit: finalTp,
+            sl_points: Number(stopPoints.toFixed(2)),
+            tp_points: Number(takePoints.toFixed(2))
+          });
         }
 
         if (!dispatchSuccess) {
@@ -2909,7 +2971,7 @@ export async function updateStrategyReportStatusSupabase(
   const isLocalExecutionAccount = isNinjaExecutionAccount(targetAcc);
   const shouldMirrorFlat = !skipLocalMirror && (status === 'Cancelado' || forceNinjaFlat === true);
 
-  // ⚡ DISPARO INSTANTÂNEO (0ms): Espelha encerramento no NinjaTrader para conta principal se for 'Cancelado' ou encerramento forçado por TrailStop/BE
+  // ⚡ DISPARO INSTANTÂNEO (0ms): Espelha encerramento no NinjaTrader ou MetaTrader 4/5 para conta principal se for 'Cancelado' ou encerramento forçado por TrailStop/BE
   if (isLocalExecutionAccount && shouldMirrorFlat) {
     mirrorToLocalServer('/sinal_local/status', { 
       id, 
@@ -2920,9 +2982,17 @@ export async function updateStrategyReportStatusSupabase(
       exit_price: exitPrice, 
       closed_at: closedAt 
     });
+  } else if (isMtExecutionAccount(targetAcc) && shouldMirrorFlat) {
+    const rawTicket = Number((reportObj as any)?.ticket || (id && id.startsWith('mt_') ? id.replace('mt_', '') : 0));
+    dispatchMtGatewayCommand(targetAcc, {
+      id: `close_${id}_${Date.now()}`,
+      action: 'close',
+      ticket: rawTicket > 0 ? rawTicket : 0,
+      symbol: targetSymbol || reportObj?.symbol || ''
+    });
   }
 
-  // 🔗 COPY TRADING DISPARO INSTANTÂNEO: Espelha encerramento para todas as contas SLAVE com execução no NinjaTrader
+  // 🔗 COPY TRADING DISPARO INSTANTÂNEO: Espelha encerramento para todas as contas SLAVE com execução no NinjaTrader ou MetaTrader 4/5
   if (shouldMirrorFlat) {
     const processedSlaveAccounts = new Set<string>();
 
@@ -2945,10 +3015,23 @@ export async function updateStrategyReportStatusSupabase(
             closed_at: closedAt
           });
         }
+      } else if (slaveAcc && isMtExecutionAccount(slaveAcc)) {
+        const slaveSymbol = resolveAccountExecutionSymbol(slaveAcc, slaveRep.symbol || undefined);
+        const dedupeKey = `${slaveAcc.account_name}::${slaveSymbol}`;
+        if (!processedSlaveAccounts.has(dedupeKey)) {
+          processedSlaveAccounts.add(dedupeKey);
+          const slaveTicket = Number((slaveRep as any)?.ticket || (slaveRep.id && slaveRep.id.startsWith('mt_') ? slaveRep.id.replace('mt_', '') : 0));
+          dispatchMtGatewayCommand(slaveAcc, {
+            id: `close_${slaveRep.id}_${Date.now()}`,
+            action: 'close',
+            ticket: slaveTicket > 0 ? slaveTicket : 0,
+            symbol: slaveSymbol
+          });
+        }
       }
     }
 
-    // 2. Slaves configuradas nas regras de Copy Trading ativas vinculadas a esta conta MASTER (ex: Master Demo -> Slaves NT8)
+    // 2. Slaves configuradas nas regras de Copy Trading ativas vinculadas a esta conta MASTER (ex: Master Demo -> Slaves NT8 / MT4 / MT5)
     const masterAccId = targetAcc?.id || reportObj?.account_id;
     const masterAccName = targetAcc?.account_name || (reportObj as any)?.account_name;
     const copyConfigs = getLocalCopyTradingConfigs();
@@ -2971,6 +3054,18 @@ export async function updateStrategyReportStatusSupabase(
             action: 'flat',
             exit_price: exitPrice,
             closed_at: closedAt
+          });
+        }
+      } else if (slaveAcc && isMtExecutionAccount(slaveAcc) && slaveAcc.is_active !== false) {
+        const slaveSymbol = resolveAccountExecutionSymbol(slaveAcc, reportObj?.symbol || undefined);
+        const dedupeKey = `${slaveAcc.account_name}::${slaveSymbol}`;
+        if (!processedSlaveAccounts.has(dedupeKey)) {
+          processedSlaveAccounts.add(dedupeKey);
+          dispatchMtGatewayCommand(slaveAcc, {
+            id: `close_slave_${slaveAcc.id}_${Date.now()}`,
+            action: 'close',
+            ticket: 0,
+            symbol: slaveSymbol
           });
         }
       }
@@ -3082,9 +3177,27 @@ export async function updateStrategyReportLevelsSupabase(
     });
   };
 
-  // ⚡ DISPARO INSTANTÂNEO (0ms): Espelha nova posição de SL/TP para a conta Master (se for Ninja/Local)
+  const dispatchLevelsToMt = (rep: any, acc: any) => {
+    if (!acc || !isMtExecutionAccount(acc)) return;
+    const repSymbol = resolveAccountExecutionSymbol(acc, rep?.symbol || undefined);
+    const slP = Number(updatePayload.stop_loss || 0);
+    const tpP = Number(updatePayload.take_profit || 0);
+    const rawTicket = Number(rep?.ticket || (rep?.id && String(rep.id).startsWith('mt_') ? String(rep.id).replace('mt_', '') : 0));
+    dispatchMtGatewayCommand(acc, {
+      id: `mod_${rep?.id || 'mt'}_${Date.now()}`,
+      action: 'modify',
+      ticket: rawTicket > 0 ? rawTicket : 0,
+      symbol: repSymbol,
+      stop_loss: slP,
+      take_profit: tpP
+    });
+  };
+
+  // ⚡ DISPARO INSTANTÂNEO (0ms): Espelha nova posição de SL/TP para a conta Master (se for Ninja/Local ou MetaTrader 4/5)
   if (reportObj && targetAcc && isNinjaExecutionAccount(targetAcc)) {
     dispatchLevelsToNinja(reportObj, targetAcc);
+  } else if (reportObj && targetAcc && isMtExecutionAccount(targetAcc)) {
+    dispatchLevelsToMt(reportObj, targetAcc);
   }
 
   // 🔗 COPY TRADING DISPARO INSTANTÂNEO: Espelha nova posição de SL/TP para todas as contas SLAVE vinculadas
@@ -3097,10 +3210,13 @@ export async function updateStrategyReportLevelsSupabase(
     if (slaveAcc && isNinjaExecutionAccount(slaveAcc)) {
       processedLevelSlaves.add(slaveAcc.account_name);
       dispatchLevelsToNinja(slaveRep, slaveAcc);
+    } else if (slaveAcc && isMtExecutionAccount(slaveAcc)) {
+      processedLevelSlaves.add(slaveAcc.account_name);
+      dispatchLevelsToMt(slaveRep, slaveAcc);
     }
   }
 
-  // 2. Slaves configuradas em regras de copy ativas vinculadas a esta Master (ex: Master Demo -> Slaves NT8)
+  // 2. Slaves configuradas em regras de copy ativas vinculadas a esta Master (ex: Master Demo -> Slaves NT8 / MT4 / MT5)
   const masterAccId = targetAcc?.id || reportObj?.account_id;
   const masterAccName = targetAcc?.account_name || (reportObj as any)?.account_name;
   const copyConfigs = getLocalCopyTradingConfigs();
@@ -3114,6 +3230,9 @@ export async function updateStrategyReportLevelsSupabase(
     if (slaveAcc && isNinjaExecutionAccount(slaveAcc) && slaveAcc.is_active !== false && !processedLevelSlaves.has(slaveAcc.account_name)) {
       processedLevelSlaves.add(slaveAcc.account_name);
       dispatchLevelsToNinja(reportObj, slaveAcc);
+    } else if (slaveAcc && isMtExecutionAccount(slaveAcc) && slaveAcc.is_active !== false && !processedLevelSlaves.has(slaveAcc.account_name)) {
+      processedLevelSlaves.add(slaveAcc.account_name);
+      dispatchLevelsToMt(reportObj, slaveAcc);
     }
   }
 
@@ -7113,10 +7232,14 @@ export function getReportPnL(op: StrategyReport, panels?: any[]): number {
   if (op.status !== 'Gain' && op.status !== 'Stop' && op.status !== 'Cancelado') return 0;
   if (op.status === 'Cancelado' && (op.exit_price === null || op.exit_price === undefined)) return 0;
 
-  // 1. Prioridade absoluta para PnL Real de Contas Sincronizadas
+  // 1. Prioridade absoluta para PnL Real de Contas Sincronizadas (NinjaTrader / MetaTrader 4 / MetaTrader 5)
   if ((op as any).realized_pnl !== undefined && (op as any).realized_pnl !== null) {
     const rPnl = Number((op as any).realized_pnl);
     if (!isNaN(rPnl)) return rPnl;
+  }
+  if ((op as any).pnl_liquido !== undefined && (op as any).pnl_liquido !== null) {
+    const pPnl = Number((op as any).pnl_liquido);
+    if (!isNaN(pPnl)) return pPnl;
   }
   if (op.description) {
     const matchPnl = op.description.match(/\[PNL:\s*([+-]?\d+(?:\.\d+)?)\]/i);
@@ -7236,9 +7359,13 @@ export function calculateAccountDrawdownMetrics(
   // Calcular PnL flutuante das posições em aberto ("Em Andamento")
   let floatingPnL = 0;
   const openOps = accountOps.filter(op => op.status === 'Em Andamento');
-  if (openOps.length > 0 && panels && panels.length > 0) {
+  if (openOps.length > 0) {
     for (const op of openOps) {
-      if (op.entry_price) {
+      if ((op as any).pnl_liquido !== undefined && (op as any).pnl_liquido !== null && !isNaN(Number((op as any).pnl_liquido))) {
+        floatingPnL += Number((op as any).pnl_liquido);
+        continue;
+      }
+      if (op.entry_price && panels && panels.length > 0) {
         let matchedPanel = panels.find(p => p.id === op.panel_id || (op.instance_id && p.instance_id === op.instance_id));
         if (!matchedPanel && op.symbol) {
           const cleanSym = op.symbol.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -7351,6 +7478,12 @@ export function calculateAccountDrawdownMetrics(
       currentBalance = account.balance;
       currentEquity = currentBalance;
     }
+  } else if (isMtExecutionAccount(account) && account.balance && account.balance > 0) {
+    // ⭐️ PARA CONTAS METATRADER 4 / 5: O Saldo e Patrimônio reais sincronizados do terminal têm prioridade
+    currentBalance = Number(account.balance);
+    currentEquity = Number((account as any).equity || (currentBalance + floatingPnL));
+    highWatermark = Math.max(account.high_watermark || initialBal, currentBalance, currentEquity);
+    eodBaseline = account.eod_baseline_balance || initialBal;
   }
 
   // Intraday Trailing Drawdown (HWM): Diferença entre o maior patrimônio atingido e o patrimônio/equidade atual
@@ -7582,7 +7715,7 @@ export function validateAccountTradingRules(
 
   // 4. Regra de Posição Única por Ativo e Controle de Múltiplos Sinais
   const openAccountOps = reports.filter(
-    r => r.account_id === account.id && r.status === 'Em Andamento'
+    r => r.account_id === account.id && (r.status === 'Em Andamento' || (r.status as any) === 'Pendente')
   );
 
   const targetSymbol = params.symbol || params.assetName || '';

@@ -684,7 +684,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
     (r.status === 'Em Andamento' || (r.status as any) === 'Pendente') &&
     r.strategy_name !== 'Execução NT8' &&
     (!activeAccount || !r.account_id || r.account_id === activeAccount.id) &&
-    (!isMtAccount || Boolean((r.id && r.id.startsWith('mt_')) || (r as any).ticket || (r as any).is_mt_real)) &&
+    (!isMtAccount || (r.status as any) === 'Pendente' || Boolean((r.id && r.id.startsWith('mt_')) || (r as any).ticket || (r as any).is_mt_real)) &&
     isReportForThisAsset(r)
   );
 
@@ -693,7 +693,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
     (r.status === 'Em Andamento' || (r.status as any) === 'Pendente') &&
     r.strategy_name !== 'Execução NT8' &&
     (!activeAccount || !r.account_id || r.account_id === activeAccount.id) &&
-    (!isMtAccount || Boolean((r.id && r.id.startsWith('mt_')) || (r as any).ticket || (r as any).is_mt_real))
+    (!isMtAccount || (r.status as any) === 'Pendente' || Boolean((r.id && r.id.startsWith('mt_')) || (r as any).ticket || (r as any).is_mt_real))
   );
 
   const inProgressAccountReports = allAccountActiveReports.filter((r: any) => r.status === 'Em Andamento');

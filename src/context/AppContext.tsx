@@ -55,6 +55,10 @@ import {
   fetchOptionsMarketSupabase,
   isNinjaExecutionAccount,
   isNinjaMasterAccount,
+  isMtExecutionAccount,
+  extractMtAccountNumber,
+  dispatchMtGatewayCommand,
+  calculateAccountDrawdownMetrics,
   saveLocalStrategyReports,
   validateAccountTradingRules,
   getLocalCopyTradingConfigs,
@@ -10064,15 +10068,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const mergedList: StrategyReport[] = list.map(serverReport => {
       const memReport = memoryMap.get(serverReport.id);
       if (memReport) {
-        // Se localmente a ordem já foi ENCERRADA (Cancelado, Gain, Stop) e o servidor ainda reporta 'Em Andamento',
-        // PRESERVA o encerramento local! NUNCA reabra a operação na tela!
-        if ((memReport.status === 'Cancelado' || memReport.status === 'Gain' || memReport.status === 'Stop') && serverReport.status === 'Em Andamento') {
+        // Se localmente a ordem já foi ENCERRADA (Cancelado, Gain, Stop) e o servidor ainda reporta 'Em Andamento' ou 'Pendente',
+        // PRESERVA o encerramento local! NUNCA reabra nem pisque a operação na tela!
+        if ((memReport.status === 'Cancelado' || memReport.status === 'Gain' || memReport.status === 'Stop') && (serverReport.status === 'Em Andamento' || (serverReport.status as any) === 'Pendente')) {
           return {
             ...serverReport,
             status: memReport.status,
             exit_price: memReport.exit_price ?? serverReport.exit_price,
-            closed_at: memReport.closed_at ?? serverReport.closed_at
+            closed_at: memReport.closed_at ?? serverReport.closed_at,
+            pnl_liquido: (memReport as any).pnl_liquido ?? (serverReport as any).pnl_liquido,
+            description: memReport.description || serverReport.description
           };
+        }
+
+        // Se localmente a ordem 'Pendente' já foi confirmada pelo MT4/MT5 para 'Em Andamento', preserva os dados reais!
+        if ((serverReport.status as any) === 'Pendente' && memReport.status === 'Em Andamento') {
+          return {
+            ...serverReport,
+            ...memReport,
+            status: 'Em Andamento'
+          };
+        }
+
+        // Preserva metadados em tempo real de ordens MT4/MT5 (ticket, is_mt_real, pnl_liquido)
+        if (((memReport as any).is_mt_real || (memReport as any).ticket) && serverReport.status === 'Em Andamento') {
+          serverReport = {
+            ...serverReport,
+            ticket: (memReport as any).ticket ?? (serverReport as any).ticket,
+            is_mt_real: (memReport as any).is_mt_real ?? (serverReport as any).is_mt_real,
+            pnl_liquido: (memReport as any).pnl_liquido ?? (serverReport as any).pnl_liquido
+          } as StrategyReport;
         }
 
         // 🛡️ Proteção Anti-Reversão de Níveis SL/TP Modificados pelo Usuário:
@@ -10089,16 +10114,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           };
         }
       }
+
+      // Auto-limpeza definitiva de ordens 'Pendente' órfãs no Supabase (> 30s sem confirmação)
+      if ((serverReport.status as any) === 'Pendente') {
+        const ageMs = Date.now() - new Date(serverReport.created_at || Date.now()).getTime();
+        if (ageMs > 30000) {
+          const closedAt = new Date().toISOString();
+          updateStrategyReportStatusSupabase(serverReport.id, 'Cancelado', serverReport.entry_price || 0, closedAt, true).catch(() => {});
+          return {
+            ...serverReport,
+            status: 'Cancelado' as const,
+            closed_at: closedAt
+          };
+        }
+      }
+
       return serverReport;
     });
 
-    // Se há ordens em memória criadas recentemente (< 60s) ou ordens de copy trading locais ainda em andamento
+    // Se há ordens em memória criadas recentemente (< 60s), ordens de copy trading locais ou posições MT4/MT5 reais em andamento
     // que o servidor não retornou na listagem, MANTÉM no topo para a ordem NÃO desaparecer da tela!
     currentMemory.forEach(memReport => {
-      if (!mergedList.some(m => m.id === memReport.id)) {
+      if (!mergedList.some(m => m.id === memReport.id || ((memReport as any).ticket && (m as any).ticket === (memReport as any).ticket))) {
         const ageMs = Date.now() - new Date(memReport.created_at || Date.now()).getTime();
         const isActiveLocalCopy = Boolean((memReport as any).is_copy_trade && memReport.status === 'Em Andamento');
-        if (ageMs < 60000 || isActiveLocalCopy) {
+        const isActiveMtReal = Boolean(((memReport as any).is_mt_real || String(memReport.id || '').startsWith('mt_')) && memReport.status === 'Em Andamento');
+        if (ageMs < 60000 || isActiveLocalCopy || isActiveMtReal) {
           mergedList.unshift(memReport);
         }
       }
@@ -13240,129 +13281,15 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
     };
   }, [isAuthenticated, user]);
 
-  // 5.0.0.1 Loop de Cotações e Posições em Tempo Real para Conexões Remotas MT4 / MT5 via Túnel VPS
+  // 5.0.0.1 Loop de Cotações, Posições, Histórico e Governança de Risco em Tempo Real para MT4 / MT5 via Túnel VPS
   useEffect(() => {
     if (!isAuthenticated || !user) return;
 
     let mtQuotesTimer: any = null;
     let isFetchingQuotes = false;
+    const riskFlattenCooldownRef = new Map<string, number>();
 
-    const syncRemoteMtPositions = (acc: BrokerAccount, mtPositions: any[]) => {
-      if (!acc || !user) return;
-      const accId = acc.id;
-      const existingReports = reportsRef.current || [];
-      const nowMs = Date.now();
-      const isRecentOrder = (createdAt: string) => {
-        const t = new Date(createdAt).getTime();
-        return !isNaN(t) && (nowMs - t < 25000); // Janela de carência de 25s para execução e confirmação no MT4
-      };
-
-      if (mtPositions.length > 0) {
-        let changed = false;
-        const updatedReports = [...existingReports];
-        const activeTickets = new Set(mtPositions.map((p: any) => Number(p.ticket)));
-
-        // 1. Fecha ordens ativas locais desta conta MT4 que já não existem mais no MT4 (respeitando carência para novas ordens)
-        updatedReports.forEach((r, idx) => {
-          if (r.account_id === accId && (r.status === 'Em Andamento' || (r.status as any) === 'Pendente')) {
-            const ticket = Number((r as any).ticket || (r.id && r.id.startsWith('mt_') ? r.id.replace('mt_', '') : 0));
-            if (!ticket) {
-              // Ordem pendente sem ticket: só cancela se exceder 25s de espera
-              if (!isRecentOrder(r.created_at)) {
-                updatedReports[idx] = {
-                  ...r,
-                  status: 'Cancelado' as const,
-                  closed_at: new Date().toISOString(),
-                  description: `[${r.symbol}] Ordem não executada no MetaTrader (tempo limite de confirmação excedido ou rejeitada pela corretora)`
-                };
-                changed = true;
-              }
-            } else if (!activeTickets.has(ticket)) {
-              updatedReports[idx] = { ...r, status: 'Cancelado' as const, closed_at: new Date().toISOString() };
-              changed = true;
-            }
-          }
-        });
-
-        // 2. Insere ou atualiza as posições reais recebidas do MT4
-        mtPositions.forEach((pos: any) => {
-          const ticketId = `mt_${pos.ticket}`;
-          const existingIdx = updatedReports.findIndex(r => r.id === ticketId || (r.account_id === accId && Number((r as any).ticket) === Number(pos.ticket)));
-          const pSym = String(pos.symbol || '').toUpperCase();
-          const matchedPanel = (allPanelsRef.current || []).find(p => 
-            (p.name || '').toUpperCase().includes(pSym) || 
-            (p.symbol || '').toUpperCase() === pSym || 
-            (p.instance_id || '').toUpperCase() === pSym
-          );
-
-          const posPayload: any = {
-            id: ticketId,
-            ticket: Number(pos.ticket),
-            user_id: user.id,
-            strategy_id: null,
-            account_id: accId,
-            panel_id: matchedPanel?.id || 'default',
-            instance_id: matchedPanel?.instance_id || pSym.toLowerCase(),
-            symbol: pos.symbol || pSym,
-            strategy_name: `MT4 #${pos.ticket}`,
-            side: pos.side === 'COMPRA' ? 'COMPRA' : 'VENDA',
-            contrato: Number(pos.lots || 1),
-            quantity: Number(pos.lots || 1),
-            entry_price: Number(pos.entry_price || 0),
-            stop_loss: Number(pos.sl || 0),
-            take_profit: Number(pos.tp || 0),
-            status: 'Em Andamento',
-            pnl_liquido: Number(pos.profit || 0),
-            realized_pnl: Number(pos.profit || 0),
-            description: `[${pos.symbol || pSym}] Ordem MT4 #${pos.ticket} (${pos.lots} lotes)`,
-            created_at: pos.open_time || new Date().toISOString(),
-            already_dispatched: true,
-            is_mt_real: true
-          };
-
-          if (existingIdx >= 0) {
-            const current = updatedReports[existingIdx];
-            if (current.status !== 'Em Andamento' || current.pnl_liquido !== posPayload.pnl_liquido || current.stop_loss !== posPayload.stop_loss || current.take_profit !== posPayload.take_profit) {
-              updatedReports[existingIdx] = { ...current, ...posPayload };
-              changed = true;
-            }
-          } else {
-            updatedReports.unshift(posPayload);
-            changed = true;
-          }
-        });
-
-        if (changed) {
-          reportsRef.current = updatedReports;
-          setReports(updatedReports);
-          saveLocalStrategyReports(updatedReports);
-        }
-      } else {
-        // Quando o MT4 não possui posições abertas no momento, encerra ordens que já expiraram a janela de carência
-        let hasChanges = false;
-        const updated = existingReports.map(r => {
-          if (r.account_id === accId && (r.status === 'Em Andamento' || (r.status as any) === 'Pendente')) {
-            if (!isRecentOrder(r.created_at)) {
-              hasChanges = true;
-              return {
-                ...r,
-                status: 'Cancelado' as const,
-                closed_at: new Date().toISOString(),
-                description: `[${r.symbol}] Ordem não executada no MetaTrader (tempo limite de confirmação excedido ou rejeitada pela corretora)`
-              };
-            }
-          }
-          return r;
-        });
-        if (hasChanges) {
-          reportsRef.current = updated;
-          setReports(updated);
-          saveLocalStrategyReports(updated);
-        }
-      }
-    };
-
-    const syncRemoteMtTrades = (account: any, trades: any[]) => {
+    const syncRemoteMtTrades = (account: BrokerAccount, trades: any[]) => {
       if (!account || !Array.isArray(trades) || trades.length === 0) return;
       const accId = account.id;
       const existingReports = [...(reportsRef.current || [])];
@@ -13373,49 +13300,77 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         if (!ticket) return;
         const netProfit = Number(trade.net_profit ?? trade.profit ?? 0);
         const tradeStatus: 'Gain' | 'Stop' = netProfit >= 0 ? 'Gain' : 'Stop';
-
-        const existingIdx = existingReports.findIndex(
-          r => (r.account_id === accId || !r.account_id) && ((r as any).ticket === ticket || r.id === `mt_${ticket}`)
+        const exitPrice = Number(trade.exit_price || trade.entry_price || 0);
+        const closeTime = trade.close_time || new Date().toISOString();
+        const tSym = String(trade.symbol || '').toUpperCase();
+        const matchedPanel = (allPanelsRef.current || []).find(p =>
+          isSameAsset(p.symbol || p.name || '', tSym) ||
+          isSameAsset(p.instance_id || '', tSym)
         );
+        const pnlTag = `[PNL: ${netProfit >= 0 ? '+' : ''}${netProfit.toFixed(2)}]`;
+
+        // Procura por ticket exato OU por ordem sem ticket na mesma conta/ativo que estava 'Em Andamento'
+        let existingIdx = existingReports.findIndex(
+          r => (r.account_id === accId || !r.account_id) && (Number((r as any).ticket) === ticket || r.id === `mt_${ticket}`)
+        );
+        if (existingIdx < 0) {
+          existingIdx = existingReports.findIndex(
+            r => r.account_id === accId &&
+                 r.status === 'Em Andamento' &&
+                 !(r as any).ticket &&
+                 isSameAsset(r.symbol || '', tSym) &&
+                 r.side === (trade.side === 'COMPRA' ? 'COMPRA' : 'VENDA')
+          );
+        }
 
         if (existingIdx >= 0) {
           const current = existingReports[existingIdx];
-          if (current.status === 'Em Andamento' || current.status !== tradeStatus || current.pnl_liquido !== netProfit) {
+          const wasOpen = current.status === 'Em Andamento' || (current.status as any) === 'Pendente';
+          if (wasOpen || current.status !== tradeStatus || (current as any).pnl_liquido !== netProfit) {
+            const baseDesc = (current.description || `[${trade.symbol || current.symbol}] Trade MT4 #${ticket}`).replace(/\[PNL:\s*[^\]]+\]/gi, '').trim();
             existingReports[existingIdx] = {
               ...current,
+              ticket,
+              is_mt_real: true,
               status: tradeStatus,
-              exit_price: Number(trade.exit_price || current.exit_price || 0),
+              entry_price: Number(trade.entry_price || current.entry_price || 0),
+              exit_price: exitPrice,
               pnl_liquido: netProfit,
-              realized_pnl: Number(trade.profit || 0),
-              closed_at: trade.close_time || new Date().toISOString()
-            };
+              realized_pnl: Number(trade.profit || netProfit),
+              description: `${baseDesc} ${pnlTag}`,
+              closed_at: closeTime
+            } as StrategyReport;
             changed = true;
+            if (wasOpen) {
+              updateStrategyReportStatusSupabase(current.id, tradeStatus, exitPrice, closeTime, false, true).catch(() => {});
+            }
           }
         } else {
           const newReport: StrategyReport = {
             id: `mt_${ticket}`,
             ticket: ticket,
+            is_mt_real: true,
             user_id: user?.id || 'local',
             strategy_id: null,
-            panel_id: activePanelRef.current?.id || 'default',
-            instance_id: (trade.symbol || '').toLowerCase(),
-            symbol: trade.symbol || activePanelRef.current?.name || 'MT4',
+            panel_id: matchedPanel?.id || activePanelRef.current?.id || 'default',
+            instance_id: matchedPanel?.instance_id || tSym.toLowerCase(),
+            symbol: trade.symbol || matchedPanel?.symbol || matchedPanel?.name || 'MT4',
             account_id: accId,
             strategy_name: `MT4 #${ticket}`,
             side: trade.side === 'COMPRA' ? 'COMPRA' : 'VENDA',
             status: tradeStatus,
             quantity: Number(trade.lots || 1),
             contrato: Number(trade.lots || 1),
-            entry_price: Number(trade.entry_price || trade.exit_price || 0),
-            exit_price: Number(trade.exit_price || 0),
+            entry_price: Number(trade.entry_price || exitPrice),
+            exit_price: exitPrice,
             stop_loss: Number(trade.sl || 0),
             take_profit: Number(trade.tp || 0),
             pnl_liquido: netProfit,
-            realized_pnl: Number(trade.profit || 0),
-            description: `[${trade.symbol}] Trade MT4 #${ticket} (${trade.lots} lotes)`,
-            created_at: trade.open_time || trade.close_time || new Date().toISOString(),
-            closed_at: trade.close_time || new Date().toISOString()
-          };
+            realized_pnl: Number(trade.profit || netProfit),
+            description: `[${trade.symbol || tSym}] Trade MT4 #${ticket} (${trade.lots} lotes) ${pnlTag}`,
+            created_at: trade.open_time || closeTime,
+            closed_at: closeTime
+          } as StrategyReport;
           existingReports.unshift(newReport);
           changed = true;
           insertStrategyReportSupabase(newReport).catch(() => {});
@@ -13429,31 +13384,310 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       }
     };
 
+    const syncRemoteMtPositions = (acc: BrokerAccount, mtPositions: any[], mtTrades?: any[]) => {
+      if (!acc || !user) return;
+      const accId = acc.id;
+      const existingReports = [...(reportsRef.current || [])];
+      const nowMs = Date.now();
+      const isRecentOrder = (createdAt: string) => {
+        const t = new Date(createdAt).getTime();
+        return !isNaN(t) && (nowMs - t < 25000); // Janela de carência de 25s para execução e confirmação no MT4
+      };
+
+      let changed = false;
+      const updatedReports = [...existingReports];
+      const activeTickets = new Set((mtPositions || []).map((p: any) => Number(p.ticket)));
+      const matchedReportIds = new Set<string>();
+
+      // 1. Insere ou atualiza as posições reais recebidas do MT4 (incluindo vinculação de ordens 'Pendente' recém-enviadas pelo Axion!)
+      (mtPositions || []).forEach((pos: any) => {
+        const ticketNum = Number(pos.ticket);
+        const ticketId = `mt_${ticketNum}`;
+        const pSym = String(pos.symbol || '').toUpperCase();
+        const posSide: 'COMPRA' | 'VENDA' = pos.side === 'COMPRA' ? 'COMPRA' : 'VENDA';
+
+        const matchedPanel = (allPanelsRef.current || []).find(p =>
+          isSameAsset(p.symbol || p.name || '', pSym) ||
+          isSameAsset(p.instance_id || '', pSym) ||
+          (p.name || '').toUpperCase().includes(pSym)
+        );
+
+        // 1A. Procura primeiro pelo ticket exato
+        let existingIdx = updatedReports.findIndex(
+          r => r.id === ticketId || (r.account_id === accId && Number((r as any).ticket) === ticketNum)
+        );
+
+        // 1B. Se não achou pelo ticket, procura uma ordem 'Pendente' ou 'Em Andamento' sem ticket na mesma conta, mesmo ativo e mesma direção!
+        // Isso converte instantaneamente a ordem criada na Boleta/Robô do Axion na posição real do MT4 sem duplicar nem piscar!
+        if (existingIdx < 0) {
+          existingIdx = updatedReports.findIndex(r =>
+            r.account_id === accId &&
+            (r.status === 'Em Andamento' || (r.status as any) === 'Pendente') &&
+            !(r as any).ticket &&
+            !String(r.id || '').startsWith('mt_') &&
+            !matchedReportIds.has(r.id) &&
+            isSameAsset(r.symbol || '', pSym) &&
+            r.side === posSide
+          );
+        }
+
+        const posPayload: any = {
+          ticket: ticketNum,
+          user_id: user.id,
+          account_id: accId,
+          panel_id: matchedPanel?.id || activePanelRef.current?.id || 'default',
+          instance_id: matchedPanel?.instance_id || pSym.toLowerCase(),
+          symbol: matchedPanel?.symbol || pos.symbol || pSym,
+          side: posSide,
+          contrato: Number(pos.lots || 1),
+          quantity: Number(pos.lots || 1),
+          entry_price: Number(pos.entry_price || 0),
+          stop_loss: Number(pos.sl || 0),
+          take_profit: Number(pos.tp || 0),
+          status: 'Em Andamento',
+          pnl_liquido: Number(pos.profit || 0),
+          realized_pnl: Number(pos.profit || 0),
+          already_dispatched: true,
+          is_mt_real: true
+        };
+
+        if (existingIdx >= 0) {
+          const current = updatedReports[existingIdx];
+          matchedReportIds.add(current.id);
+          const wasPending = (current.status as any) === 'Pendente' || current.status !== 'Em Andamento';
+          const slChanged = Math.abs(Number(current.stop_loss || 0) - posPayload.stop_loss) > 0.0001;
+          const tpChanged = Math.abs(Number(current.take_profit || 0) - posPayload.take_profit) > 0.0001;
+          const pnlChanged = Number((current as any).pnl_liquido || 0) !== posPayload.pnl_liquido;
+          const ticketAssigned = Number((current as any).ticket || 0) !== ticketNum;
+
+          // Respeita proteção de níveis recém-modificados pelo usuário no Axion (< 10s)
+          const memLevelsTime = (current as any)._levels_modified_at || 0;
+          const isRecentlyModifiedLocally = (nowMs - memLevelsTime) < 10000;
+
+          if (wasPending || slChanged || tpChanged || pnlChanged || ticketAssigned) {
+            const nextSl = isRecentlyModifiedLocally ? current.stop_loss : posPayload.stop_loss;
+            const nextTp = isRecentlyModifiedLocally ? current.take_profit : posPayload.take_profit;
+            updatedReports[existingIdx] = {
+              ...current,
+              ...posPayload,
+              id: current.id, // Preserva o UUID original caso tenha nascido no Axion
+              strategy_name: current.strategy_name || `MT4 #${ticketNum}`,
+              description: current.description || `[${pos.symbol || pSym}] Ordem MT4 #${ticketNum} (${pos.lots} lotes)`,
+              stop_loss: nextSl,
+              take_profit: nextTp
+            };
+            changed = true;
+
+            // Se a ordem estava 'Pendente' no Supabase, promove para 'Em Andamento' no banco!
+            if (wasPending && !String(current.id || '').startsWith('mt_')) {
+              supabase
+                .from('painelvm_strategy_reports')
+                .update({
+                  status: 'Em Andamento',
+                  entry_price: posPayload.entry_price,
+                  stop_loss: nextSl,
+                  take_profit: nextTp
+                })
+                .eq('id', current.id)
+                .then(() => {});
+            } else if ((slChanged || tpChanged) && !isRecentlyModifiedLocally) {
+              // Sincroniza mudança de SL/TP feita diretamente no MetaTrader para o Axion e para contas Slaves (Copy Trading)!
+              updateStrategyReportLevelsSupabase(current.id, posPayload.stop_loss, posPayload.take_profit).catch(() => {});
+            }
+          }
+        } else {
+          // Posição aberta diretamente no MetaTrader ("Sincronização Bypass" / Master Trade)
+          const newBypassReport: StrategyReport = {
+            ...posPayload,
+            id: ticketId,
+            strategy_id: null,
+            strategy_name: `MT4 #${ticketNum}`,
+            description: `[${pos.symbol || pSym}] Execução Direta MT4 #${ticketNum} (${pos.lots} lotes)`,
+            created_at: pos.open_time || new Date().toISOString()
+          };
+          matchedReportIds.add(ticketId);
+          updatedReports.unshift(newBypassReport);
+          changed = true;
+
+          // Persiste no Supabase e aciona Copy Trading caso esta conta MT4/MT5 seja Master!
+          insertStrategyReportSupabase(newBypassReport).catch(() => {});
+          const activeCopyConfigs = getLocalCopyTradingConfigs().filter(
+            c => c.is_active && c.master_account_id === accId
+          );
+          if (activeCopyConfigs.length > 0) {
+            triggerCopyTradingForMaster(newBypassReport, newBypassReport).catch(() => {});
+          }
+        }
+      });
+
+      // 2. Fecha ou cancela ordens locais desta conta MT4 que já não existem mais nas posições abertas do MT4
+      updatedReports.forEach((r, idx) => {
+        if (r.account_id === accId && (r.status === 'Em Andamento' || (r.status as any) === 'Pendente')) {
+          if (matchedReportIds.has(r.id)) return;
+          const ticket = Number((r as any).ticket || (r.id && r.id.startsWith('mt_') ? r.id.replace('mt_', '') : 0));
+
+          if (!ticket) {
+            // Ordem 'Pendente' sem ticket: aguarda até 25s para o EA confirmar; se passar disso, cancela definitivamente no estado E no Supabase!
+            if (!isRecentOrder(r.created_at)) {
+              const closedIso = new Date().toISOString();
+              updatedReports[idx] = {
+                ...r,
+                status: 'Cancelado' as const,
+                closed_at: closedIso,
+                description: `[${r.symbol}] Ordem não confirmada pelo MetaTrader (verifique se o EA AxionGatewayEA está ativo e com AutoTrading ligado)`
+              };
+              changed = true;
+              updateStrategyReportStatusSupabase(r.id, 'Cancelado', r.entry_price || 0, closedIso, true, false).catch(() => {});
+            }
+          } else if (!activeTickets.has(ticket)) {
+            // Posição com ticket que foi encerrada no MT4 (por Take, Stop ou manualmente no terminal MT4)
+            const matchedHist = (mtTrades || []).find((t: any) => Number(t.ticket) === ticket);
+            const netProfit = matchedHist
+              ? Number(matchedHist.net_profit ?? matchedHist.profit ?? 0)
+              : Number((r as any).pnl_liquido ?? 0);
+            const finalStatus: 'Gain' | 'Stop' = netProfit >= 0 ? 'Gain' : 'Stop';
+            const exitPrice = matchedHist ? Number(matchedHist.exit_price || r.entry_price || 0) : Number(r.exit_price || r.entry_price || 0);
+            const closedIso = matchedHist?.close_time || new Date().toISOString();
+            const pnlTag = `[PNL: ${netProfit >= 0 ? '+' : ''}${netProfit.toFixed(2)}]`;
+            const baseDesc = (r.description || `[${r.symbol}] Trade MT4 #${ticket}`).replace(/\[PNL:\s*[^\]]+\]/gi, '').trim();
+
+            updatedReports[idx] = {
+              ...r,
+              status: finalStatus,
+              exit_price: exitPrice,
+              pnl_liquido: netProfit,
+              realized_pnl: netProfit,
+              description: `${baseDesc} ${pnlTag}`,
+              closed_at: closedIso
+            } as StrategyReport;
+            changed = true;
+            // Atualiza no Supabase E replica o fechamento para eventuais contas Slaves!
+            updateStrategyReportStatusSupabase(r.id, finalStatus, exitPrice, closedIso, false, true).catch(() => {});
+          }
+        }
+      });
+
+      if (changed) {
+        reportsRef.current = updatedReports;
+        setReports(updatedReports);
+        saveLocalStrategyReports(updatedReports);
+      }
+
+      // 3. Governança de Risco em Tempo Real sobre Posições Abertas no MT4/MT5 (Stop Diário / Meta Diária / Drawdown Máximo)
+      if (mtPositions && mtPositions.length > 0) {
+        const lastFlatten = riskFlattenCooldownRef.get(accId) || 0;
+        if (nowMs - lastFlatten > 8000) {
+          const metrics = calculateAccountDrawdownMetrics(acc, updatedReports, allPanelsRef.current || []);
+          const dailyGainTargetMet = Boolean(metrics.dailyGainTargetMet && (acc.daily_max_gain_usd || 0) > 0);
+          const maxDdViolated = Boolean(metrics.maxDdViolated && (acc.max_drawdown_usd || 0) > 0);
+
+          if (metrics.dailyStopViolated || dailyGainTargetMet || maxDdViolated) {
+            riskFlattenCooldownRef.set(accId, nowMs);
+            const reasonMsg = metrics.dailyStopViolated
+              ? `Limite de Perda Diária atingido ($${metrics.dailyPnL.toFixed(2)})`
+              : dailyGainTargetMet
+                ? `Meta de Ganho Diário atingida ($${metrics.dailyPnL.toFixed(2)})`
+                : `Limite de Drawdown Máximo da conta atingido`;
+            addLog('ALERTA', `🛡️ [GESTÃO DE RISCO MT4/MT5] Encerrando posições abertas na conta ${acc.account_name}: ${reasonMsg}`, 'alerta');
+            dispatchMtGatewayCommand(acc, { action: 'flatten_all' });
+          }
+        }
+      }
+    };
+
+    const processMtSyncSnapshot = (acc: BrokerAccount, snap: any) => {
+      if (!acc || !snap || typeof snap !== 'object') return;
+
+      // 1. Cotações de todos os ativos do Market Watch embutidas no snapshot
+      if (Array.isArray(snap.quotes)) {
+        snap.quotes.forEach((qData: any) => {
+          const sym = String(qData.symbol || '').toUpperCase();
+          const numPrice = Number(qData.price || qData.bid || 0);
+          if (!sym || numPrice <= 0) return;
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
+              detail: {
+                symbol: sym,
+                panel: sym.toLowerCase(),
+                price: numPrice,
+                bid: Number(qData.bid || numPrice),
+                ask: Number(qData.ask || numPrice),
+                volume: Number(qData.volume || 1),
+                updated_at: snap.updated_at || new Date().toISOString()
+              }
+            }));
+          }
+        });
+      }
+
+      // 2. Saldo e Patrimônio (Balance & Equity)
+      if (snap.balance !== undefined) {
+        const newBal = Number(snap.balance);
+        const newEq = Number(snap.equity ?? newBal);
+        if (newBal > 0 && (acc.balance !== newBal || acc.equity !== newEq)) {
+          acc.balance = newBal;
+          acc.equity = newEq;
+          if (activeAccountRef.current?.id === acc.id) {
+            activeAccountRef.current = { ...acc };
+            setActiveAccount({ ...acc });
+          }
+          setAccounts(prev => prev.map(a => a.id === acc.id ? { ...a, balance: newBal, equity: newEq } : a));
+          updateAccountSupabase(acc.id, { balance: newBal, equity: newEq }).catch(() => {});
+        }
+      }
+
+      // 3. Histórico de trades fechados (processado antes das posições para enriquecer PnL de fechamentos recentes)
+      const histList = Array.isArray(snap.history) ? snap.history : (Array.isArray(snap.trades) ? snap.trades : null);
+      if (histList && histList.length > 0) {
+        syncRemoteMtTrades(acc, histList);
+      }
+
+      // 4. Posições abertas em tempo real
+      if (Array.isArray(snap.positions)) {
+        syncRemoteMtPositions(acc, snap.positions, histList || undefined);
+      }
+    };
+
+    const handleRealtimeMtSyncEvent = (e: any) => {
+      const snap = e?.detail;
+      if (!snap) return;
+      const snapAccNum = String(snap.account || '').replace(/\D/g, '');
+      const mtAccounts = (accountsRef.current || []).filter(a => isMtExecutionAccount(a));
+      const targetAcc = mtAccounts.find(a => extractMtAccountNumber(a) === snapAccNum)
+        || (activeAccountRef.current && isMtExecutionAccount(activeAccountRef.current) ? activeAccountRef.current : mtAccounts[0]);
+      if (targetAcc) {
+        processMtSyncSnapshot(targetAcc, snap);
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('vortex_mt_sync_snapshot', handleRealtimeMtSyncEvent);
+    }
+
     const fetchRemoteMtQuotes = async () => {
+      const mtAccounts = (accountsRef.current || []).filter(a => isMtExecutionAccount(a) && a.is_active !== false);
       const curAcc = activeAccountRef.current;
-      const acc = (curAcc?.platform === 'mt4' || curAcc?.platform === 'mt5')
-        ? curAcc
-        : (accountsRef.current || []).find(a => a.platform === 'mt4' || a.platform === 'mt5');
-      if (!acc || isFetchingQuotes) return;
+      const primaryAcc = (curAcc && isMtExecutionAccount(curAcc)) ? curAcc : mtAccounts[0];
+      if (!primaryAcc || isFetchingQuotes) return;
 
       isFetchingQuotes = true;
       try {
         const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
         const activeConn = mtConns.find(c => c.status === 'online') || mtConns[0];
         const host = (activeConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
-        const accNum = (acc?.account_name || '').replace(/\D/g, '') || acc?.id;
+        const isLocalHost = host.includes('localhost') || host.includes('127.0.0.1');
+        const accNum = extractMtAccountNumber(primaryAcc);
 
-        // 1. Cotações Bid/Ask em tempo real
-        const res = await fetch(`${host}/quotes`, { signal: AbortSignal.timeout(2500) });
-        if (res.ok) {
-          const quotes = await res.json();
+        // 1. Cotações Bid/Ask em tempo real de todos os ativos do Market Watch (/quotes)
+        const res = await fetch(`${host}/quotes`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+        if (res && res.ok) {
+          const quotes = await res.json().catch(() => null);
           if (quotes && typeof quotes === 'object') {
             for (const [rawSym, qData] of Object.entries<any>(quotes)) {
               const sym = String(rawSym).toUpperCase();
               const numPrice = Number(qData.price || qData.bid || 0);
               if (numPrice <= 0) continue;
 
-              // Dispara evento event-driven para alimentar gráficos e boleta via túnel
               if (typeof window !== 'undefined') {
                 window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
                   detail: {
@@ -13471,65 +13705,86 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
           }
         }
 
-        // 2. Sincronização contínua de Saldo e Patrimônio da Conta MT4
-        let mtAccInfo: any = null;
-        const accRes = await fetch(`${host}/accounts?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
-        if (accRes && accRes.ok) {
-          const accData = await accRes.json().catch(() => null);
-          mtAccInfo = (accData?.accounts || []).find((a: any) => 
-            String(a.account_number) === String(accNum) || String(a.id) === String(accNum)
-          ) || accData?.accounts?.[0];
+        // 2. Snapshot Unificado Bypass via /market_data?instance_id=mt4_sync_<accNum> ou mt4_sync_all
+        // Funciona nativamente tanto no Hub VPS em produção quanto no Bridge local!
+        let syncHandled = false;
+        const syncRes = await fetch(`${host}/market_data?instance_id=mt4_sync_${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+        let syncData = (syncRes && syncRes.ok) ? await syncRes.json().catch(() => null) : null;
+        if (!syncData || (!Array.isArray(syncData.positions) && !Array.isArray(syncData.history))) {
+          const fallbackSyncRes = await fetch(`${host}/market_data?instance_id=mt4_sync_all`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+          if (fallbackSyncRes && fallbackSyncRes.ok) {
+            syncData = await fallbackSyncRes.json().catch(() => null);
+          }
+        }
 
-          if (mtAccInfo && mtAccInfo.balance !== undefined) {
-            const newBal = Number(mtAccInfo.balance);
-            const newEq = Number(mtAccInfo.equity || newBal);
-            if (newBal > 0 && (acc.balance !== newBal || acc.equity !== newEq)) {
-              acc.balance = newBal;
-              acc.equity = newEq;
-              activeAccountRef.current = { ...acc };
-              setActiveAccount({ ...acc });
-              setAccounts(prev => prev.map(a => a.id === acc.id ? { ...a, balance: newBal, equity: newEq } : a));
-              updateAccountSupabase(acc.id, { balance: newBal, equity: newEq }).catch(() => {});
+        if (syncData && (Array.isArray(syncData.positions) || Array.isArray(syncData.history))) {
+          processMtSyncSnapshot(primaryAcc, syncData);
+          syncHandled = true;
+        }
+
+        // 3. Endpoints dedicados (/accounts, /positions, /trades) caso o servidor suporte ou não tenha snapshot mt4_sync_* ainda
+        if (!syncHandled) {
+          let mtAccInfo: any = null;
+          const accRes = await fetch(`${host}/accounts?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+          if (accRes && accRes.ok) {
+            const accData = await accRes.json().catch(() => null);
+            mtAccInfo = (accData?.accounts || []).find((a: any) =>
+              String(a.account_number) === String(accNum) || String(a.id) === String(accNum)
+            ) || accData?.accounts?.[0];
+
+            if (mtAccInfo && mtAccInfo.balance !== undefined) {
+              const newBal = Number(mtAccInfo.balance);
+              const newEq = Number(mtAccInfo.equity || newBal);
+              if (newBal > 0 && (primaryAcc.balance !== newBal || primaryAcc.equity !== newEq)) {
+                primaryAcc.balance = newBal;
+                primaryAcc.equity = newEq;
+                if (activeAccountRef.current?.id === primaryAcc.id) {
+                  activeAccountRef.current = { ...primaryAcc };
+                  setActiveAccount({ ...primaryAcc });
+                }
+                setAccounts(prev => prev.map(a => a.id === primaryAcc.id ? { ...a, balance: newBal, equity: newEq } : a));
+                updateAccountSupabase(primaryAcc.id, { balance: newBal, equity: newEq }).catch(() => {});
+              }
             }
           }
-        }
 
-        // 3. Sincronização de posições ativas abertas no MT4 (com fallback para bridge local e dados da conta)
-        let mtPositionsData: any[] | null = null;
-        let posRes = await fetch(`${host}/positions?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
-        if (!posRes || !posRes.ok) {
-          posRes = await fetch(`http://localhost:8003/positions?account=${accNum}`, { signal: AbortSignal.timeout(2000) }).catch(() => null);
-        }
-        if (posRes && posRes.ok) {
-          const posData = await posRes.json().catch(() => null);
-          if (posData && Array.isArray(posData.positions)) {
-            mtPositionsData = posData.positions;
+          let mtTradesData: any[] | null = null;
+          let tradesRes = await fetch(`${host}/trades?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+          if ((!tradesRes || !tradesRes.ok) && isLocalHost) {
+            tradesRes = await fetch(`http://localhost:8003/trades?account=${accNum}`, { signal: AbortSignal.timeout(2000) }).catch(() => null);
           }
-        } else if (mtAccInfo && Array.isArray((mtAccInfo as any).positions)) {
-          mtPositionsData = (mtAccInfo as any).positions;
-        }
-
-        if (mtPositionsData !== null) {
-          syncRemoteMtPositions(acc, mtPositionsData);
-        }
-
-        // 4. Sincronização de histórico de ordens fechadas no MT4 (com fallback)
-        let mtTradesData: any[] | null = null;
-        let tradesRes = await fetch(`${host}/trades?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
-        if (!tradesRes || !tradesRes.ok) {
-          tradesRes = await fetch(`http://localhost:8003/trades?account=${accNum}`, { signal: AbortSignal.timeout(2000) }).catch(() => null);
-        }
-        if (tradesRes && tradesRes.ok) {
-          const tradesData = await tradesRes.json().catch(() => null);
-          if (tradesData && Array.isArray(tradesData.trades)) {
-            mtTradesData = tradesData.trades;
+          if (tradesRes && tradesRes.ok) {
+            const tradesData = await tradesRes.json().catch(() => null);
+            if (tradesData && Array.isArray(tradesData.trades)) {
+              mtTradesData = tradesData.trades;
+            }
+          } else if (mtAccInfo && Array.isArray((mtAccInfo as any).trades)) {
+            mtTradesData = (mtAccInfo as any).trades;
           }
-        } else if (mtAccInfo && Array.isArray((mtAccInfo as any).trades)) {
-          mtTradesData = (mtAccInfo as any).trades;
-        }
 
-        if (mtTradesData !== null && mtTradesData.length > 0) {
-          syncRemoteMtTrades(acc, mtTradesData);
+          if (mtTradesData !== null && mtTradesData.length > 0) {
+            syncRemoteMtTrades(primaryAcc, mtTradesData);
+          }
+
+          // IMPORTANTE: Nunca fazer fallback para localhost:8003/positions quando o host configurado é uma VPS remota!
+          // O fallback para localhost:8003 retornava {"positions":[]} vazio e cancelava indevidamente ordens abertas na VPS!
+          let mtPositionsData: any[] | null = null;
+          let posRes = await fetch(`${host}/positions?account=${accNum}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+          if ((!posRes || !posRes.ok) && isLocalHost) {
+            posRes = await fetch(`http://localhost:8003/positions?account=${accNum}`, { signal: AbortSignal.timeout(2000) }).catch(() => null);
+          }
+          if (posRes && posRes.ok) {
+            const posData = await posRes.json().catch(() => null);
+            if (posData && Array.isArray(posData.positions)) {
+              mtPositionsData = posData.positions;
+            }
+          } else if (mtAccInfo && Array.isArray((mtAccInfo as any).positions)) {
+            mtPositionsData = (mtAccInfo as any).positions;
+          }
+
+          if (mtPositionsData !== null) {
+            syncRemoteMtPositions(primaryAcc, mtPositionsData, mtTradesData || undefined);
+          }
         }
       } catch (_) {
         // Silencioso se host momentaneamente offline
@@ -13542,6 +13797,9 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
 
     return () => {
       if (mtQuotesTimer) clearWorkerTimer(mtQuotesTimer);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('vortex_mt_sync_snapshot', handleRealtimeMtSyncEvent);
+      }
     };
   }, [isAuthenticated, user]);
 
@@ -14733,6 +14991,10 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
             if (!msg || !msg.type) return;
 
             const incomingInst = msg.instance_id || msg.data?.instance_id;
+            if (typeof incomingInst === 'string' && incomingInst.startsWith('mt4_sync') && msg.data && typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('vortex_mt_sync_snapshot', { detail: msg.data }));
+              return;
+            }
             let targetPanel = activePanelRef.current || activePanel;
             if (incomingInst && allPanelsRef.current.length > 0) {
               const matched = allPanelsRef.current.find((p: any) => {
@@ -15232,12 +15494,24 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
 
       if (!matchedPanel) return;
 
+      if (!panelDataCache.current[matchedPanel.id]) {
+        panelDataCache.current[matchedPanel.id] = {
+          marketData: null,
+          forces: [],
+          gammaLevels: null,
+          screenshot: null,
+          candles: [],
+          lastGammaFetch: 0,
+          lastGammaSymbol: ''
+        };
+      }
       const cache = panelDataCache.current[matchedPanel.id];
-      if (!cache) return;
 
       const numBid = Number(detail.bid || numPrice);
       const numAsk = Number(detail.ask || numPrice);
       const numSpread = Number(Math.max(0, numAsk - numBid).toFixed(5));
+      const prevM = cache.marketData;
+      const bidAskChanged = !prevM || prevM.bid !== numBid || prevM.ask !== numAsk || Number(prevM.price) !== numPrice;
       const liveMetrics = computeLiveCandleMetrics(cache.candles || [], numPrice);
 
       // 2. Atualização imediata do cache de MarketData com métricas dinâmicas
@@ -15262,8 +15536,9 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         updated_at: detail.updated_at || new Date().toISOString()
       };
       cache.marketData = mData;
+      cache.lastMarketUpdateAt = Date.now();
 
-      // 3. Atualização imediata do candle em formação (<1ms)
+      // 3. Atualização imediata do candle em formação (<1ms) e do Bid/Ask na UI e no Multi-Chart Grid
       if (!cache.candles || cache.candles.length === 0) {
         const nowIso = detail.updated_at || new Date().toISOString();
         const firstCandle: Candle = {
@@ -15279,16 +15554,20 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         if (isActive) {
           setMarketData(mData);
           setCandles([firstCandle]);
+        } else {
+          bumpPanelCacheVersion();
         }
       } else {
         const { updatedCandles, hasChanged, isNewBar } = applyRealtimePriceToCandles(cache.candles, numPrice, detail.updated_at);
         if (hasChanged) {
           cache.candles = updatedCandles;
+        }
+        if (hasChanged || bidAskChanged) {
           const isActive = activePanelRef.current?.id === matchedPanel.id;
           if (isActive) {
             pendingUiAction = () => {
               setMarketData(mData);
-              if (isNewBar) setCandles([...updatedCandles]);
+              if (hasChanged && isNewBar) setCandles([...updatedCandles]);
             };
             if (!rafId) {
               rafId = requestAnimationFrame(() => {
@@ -15298,6 +15577,12 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                 }
                 rafId = null;
               });
+            }
+          } else {
+            const nowT = Date.now();
+            if (!(cache as any)._lastTickBumpAt || nowT - (cache as any)._lastTickBumpAt > 250) {
+              (cache as any)._lastTickBumpAt = nowT;
+              bumpPanelCacheVersion();
             }
           }
         }

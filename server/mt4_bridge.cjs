@@ -13,6 +13,7 @@ const quotesCache = new Map(); // symbol -> { price, bid, ask, volume, updated_a
 const accountsConnected = new Map(); // accountNumber -> { lastSeen: Date, symbol: string }
 const accountsPositions = new Map(); // accountNumber -> Array<{ ticket, symbol, side, lots, entry_price, sl, tp, profit, open_time }>
 const accountsTradesHistory = new Map(); // accountNumber -> Array<{ ticket, symbol, side, lots, entry_price, exit_price, profit, net_profit, open_time, close_time }>
+const marketDataSnapshots = new Map(); // instance_id -> full JSON snapshot
 
 // Fila de comandos pendentes por conta
 // accountId/number -> Array<{ id, action, symbol, direction, side, lots, stop_loss, take_profit, ticket }>
@@ -307,8 +308,8 @@ function getMt4Queue(accNum) {
         leverage: info.leverage || 100,
         platform: info.platform || 'mt4',
         symbols: info.symbols || [],
-        positions: positionsCache.get(acc) || [],
-        trades: tradesHistoryCache.get(acc) || [],
+        positions: accountsPositions.get(acc) || [],
+        trades: accountsTradesHistory.get(acc) || [],
         last_seen: info.lastSeen
       });
     }
@@ -518,6 +519,57 @@ function getMt4Queue(accNum) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(Object.fromEntries(quotesCache)));
     return;
+  }
+
+  // 7. GET/POST /market_data: Compatibilidade com snapshots mt4_sync_all / mt4_sync_<account>
+  if (pathname === '/market_data') {
+    if (req.method === 'GET') {
+      const instId = String(query.instance_id || 'mt4_sync_all').trim();
+      const snap = marketDataSnapshots.get(instId) || marketDataSnapshots.get('mt4_sync_all') || null;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(snap || {}));
+      return;
+    }
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const item = JSON.parse(body || '{}');
+          const instId = String(item.instance_id || 'mt4_sync_all').trim();
+          marketDataSnapshots.set(instId, item);
+          if (item.account) {
+            const accClean = cleanAccountNumber(item.account);
+            marketDataSnapshots.set(`mt4_sync_${accClean}`, item);
+            if (Array.isArray(item.positions)) accountsPositions.set(accClean, item.positions);
+            if (Array.isArray(item.history)) accountsTradesHistory.set(accClean, item.history);
+          }
+          if (Array.isArray(item.quotes)) {
+            for (const q of item.quotes) {
+              const sym = String(q.symbol || '').toUpperCase();
+              const bid = Number(q.bid || 0);
+              const ask = Number(q.ask || bid);
+              if (sym && bid > 0) {
+                quotesCache.set(sym, {
+                  symbol: sym,
+                  price: Number(q.price || bid),
+                  bid,
+                  ask,
+                  volume: 1,
+                  updated_at: q.updated_at || new Date().toISOString()
+                });
+              }
+            }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
   }
 
   res.writeHead(404, { 'Content-Type': 'application/json' });
