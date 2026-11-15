@@ -406,10 +406,13 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
           </div>
         )}
 
-        {/* Widgets Flutuantes (exibidos no slot focado ou único) */}
+        {/* Widgets Flutuantes (isolados por ativo e alimentados pelo snapshot deste slot) */}
         {showWidgets && (
           <ChartWidgetsOverlay
             widgets={activeWidgets}
+            overrideMarketData={snapshot.marketData}
+            overrideGammaLevels={snapshot.gammaLevels}
+            overrideForces={(snapshot as any).forces}
             onUpdateWidget={onUpdateWidget}
             onRemoveWidget={onRemoveWidget}
             containerRef={slotContainerRef}

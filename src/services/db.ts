@@ -3596,7 +3596,13 @@ export async function fetchCandlesSupabase(
   const rawSym = (targetPanelObj?.symbol || targetPanelObj?.name || targetPanelObj?.instance_id || queryId || '').toUpperCase();
   const baseSym = rawSym.split(/[-_(\s]/)[0].trim().replace(/[^A-Z0-9]/g, '');
 
-  const isCrypto = /USDT|BUSD|USDC/i.test(baseSym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(baseSym);
+  const isMtFeed = (targetPanelObj as any)?.platform === 'mt4' ||
+                   (targetPanelObj as any)?.platform === 'mt5' ||
+                   (targetPanelObj as any)?.source === 'mt4' ||
+                   (targetPanelObj?.instance_id || '').startsWith('mt4_') ||
+                   (typeof window !== 'undefined' && localStorage.getItem('vortex_active_account_platform') === 'mt4');
+
+  const isCrypto = !isMtFeed && (/USDT|BUSD|USDC/i.test(baseSym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(baseSym));
   if (isCrypto) {
     try {
       let cleanSym = baseSym;
@@ -3616,6 +3622,11 @@ export async function fetchCandlesSupabase(
     } catch (e) {
       console.warn('[DB] Falha no feed da Binance para cripto, tentando fallback:', e);
     }
+  } else if (isMtFeed) {
+    // Garante que o WebSocket da Binance seja desativado para não colidir com o feed da corretora MT4
+    try {
+      import('./binanceService').then(m => m.unsubscribeBinanceMarketData?.()).catch(() => {});
+    } catch {}
   }
 
   // 0.1 Detecção e alimentação nativa de Forex, Metais & Índices Globais via Bridge / VPS (e fallback para Cripto)

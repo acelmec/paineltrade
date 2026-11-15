@@ -15039,6 +15039,74 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
   // MOTOR EVENT-DRIVEN EM TEMPO REAL (< 1ms) VIA WEBSOCKET DO NINJATRADER 8 (:8002)
   // Desacopla a cotação e a proteção de ordens do timer de relógio (250ms/500ms)
   // =========================================================================
+  const computeLiveCandleMetrics = (candles: Candle[], currentPrice: number): { zScore: number; atrRatio: number; estado: string } => {
+    const n = candles?.length || 0;
+    if (n < 2 || !currentPrice || currentPrice <= 0) {
+      return { zScore: 0, atrRatio: 1.0, estado: 'NORMAL' };
+    }
+
+    // 1. Z-Score (20 períodos de fechamento)
+    const zPeriod = 20;
+    const startZ = Math.max(0, n - zPeriod);
+    let sum = 0;
+    let count = 0;
+    for (let i = startZ; i < n - 1; i++) {
+      const c = Number(candles[i].close || 0);
+      if (c > 0) { sum += c; count++; }
+    }
+    sum += currentPrice;
+    count++;
+    const mean = sum / count;
+
+    let variance = 0;
+    for (let i = startZ; i < n - 1; i++) {
+      const c = Number(candles[i].close || 0);
+      if (c > 0) variance += Math.pow(c - mean, 2);
+    }
+    variance += Math.pow(currentPrice - mean, 2);
+    const stdDev = count > 1 ? Math.sqrt(variance / (count - 1)) : 1;
+    const zScore = stdDev > 0 ? Number(((currentPrice - mean) / stdDev).toFixed(2)) : 0;
+
+    // 2. ATR Ratio (14 períodos de True Range)
+    const atrPeriod = 14;
+    let trSum = 0;
+    let trCount = 0;
+    const startAtr = Math.max(1, n - atrPeriod - 1);
+    for (let i = startAtr; i < n - 1; i++) {
+      const h = Number(candles[i].high || 0);
+      const l = Number(candles[i].low || 0);
+      const prevC = Number(candles[i - 1].close || 0);
+      const tr = Math.max(h - l, Math.abs(h - prevC), Math.abs(l - prevC));
+      trSum += tr;
+      trCount++;
+    }
+    const avgTr = trCount > 0 ? trSum / trCount : 10;
+    const lastC = candles[n - 1];
+    const curHigh = lastC ? Math.max(Number(lastC.high || currentPrice), currentPrice) : currentPrice;
+    const curLow = lastC ? Math.min(Number(lastC.low || currentPrice), currentPrice) : currentPrice;
+    const prevClose = n > 1 ? Number(candles[n - 2].close || currentPrice) : currentPrice;
+    const curTr = Math.max(curHigh - curLow, Math.abs(curHigh - prevClose), Math.abs(curLow - prevClose));
+    const atrRatio = avgTr > 0 ? Number((curTr / avgTr).toFixed(2)) : 1.0;
+
+    // 3. Classificação Dinâmica de Estado
+    let estado = 'NORMAL';
+    if (atrRatio >= 1.8 && zScore >= 1.5) {
+      estado = 'EXPLOSAO COMPRA';
+    } else if (atrRatio >= 1.8 && zScore <= -1.5) {
+      estado = 'EXPLOSAO VENDA';
+    } else if (atrRatio >= 2.2 || Math.abs(zScore) >= 2.4) {
+      estado = 'EXAUSTAO';
+    } else if (atrRatio <= 0.65) {
+      estado = 'COMPRESSAO';
+    } else if (zScore >= 1.0) {
+      estado = 'ALTA';
+    } else if (zScore <= -1.0) {
+      estado = 'BAIXA';
+    }
+
+    return { zScore, atrRatio, estado };
+  };
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -15076,20 +15144,21 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       const numBid = Number(detail.bid || numPrice);
       const numAsk = Number(detail.ask || numPrice);
       const numSpread = Number(Math.max(0, numAsk - numBid).toFixed(5));
+      const liveMetrics = computeLiveCandleMetrics(cache.candles || [], numPrice);
 
-      // 2. Atualização imediata do cache de MarketData
+      // 2. Atualização imediata do cache de MarketData com métricas dinâmicas
       const mData: MarketData = {
         symbol: sym,
         price: String(numPrice),
         bid: numBid,
         ask: numAsk,
         spread: numSpread,
-        zScore: 0,
-        atrRatio: 1.0,
-        estado: 'ONLINE',
+        zScore: liveMetrics.zScore,
+        atrRatio: liveMetrics.atrRatio,
+        estado: liveMetrics.estado,
         timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        sentiment: 50,
-        originalSentiment: 50,
+        sentiment: cache.marketData?.sentiment || 50,
+        originalSentiment: cache.marketData?.originalSentiment || 50,
         delta: 0,
         deltaRatio: 1.0,
         buyVolume: 0,

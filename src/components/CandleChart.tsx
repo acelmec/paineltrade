@@ -2803,7 +2803,12 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     const askVal = Number(marketData?.ask || 0);
 
     if (bidVal > 0 && askVal > 0 && askVal > bidVal) {
-      // 1. Linha de ASK (Rosa/Vermelho tracejado)
+      // Oculta o card duplicado do candle para exibir estritamente as etiquetas ASK e BID na escala
+      try {
+        candleSeriesRef.current.applyOptions({ lastValueVisible: false });
+      } catch (_) {}
+
+      // 1. Linha de ASK (Vermelho tracejado, estendendo-se horizontalmente por todo o gráfico)
       if (!askPriceLineRef.current) {
         try {
           askPriceLineRef.current = candleSeriesRef.current.createPriceLine({
@@ -2811,34 +2816,40 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
             color: '#f43f5e',
             lineWidth: 1,
             lineStyle: 2, // Dashed
+            lineVisible: true,
             axisLabelVisible: true,
             title: 'ASK'
           });
         } catch (_) {}
       } else {
         try {
-          askPriceLineRef.current.applyOptions({ price: askVal });
+          askPriceLineRef.current.applyOptions({ price: askVal, lineVisible: true });
         } catch (_) {}
       }
 
-      // 2. Linha de BID (Azul claro pontilhado)
+      // 2. Linha de BID (Azul sólido contínuo, padrão MT4/NT8)
       if (!bidPriceLineRef.current) {
         try {
           bidPriceLineRef.current = candleSeriesRef.current.createPriceLine({
             price: bidVal,
             color: '#38bdf8',
             lineWidth: 1,
-            lineStyle: 1, // Dotted
+            lineStyle: 0, // Solid
+            lineVisible: true,
             axisLabelVisible: true,
             title: 'BID'
           });
         } catch (_) {}
       } else {
         try {
-          bidPriceLineRef.current.applyOptions({ price: bidVal });
+          bidPriceLineRef.current.applyOptions({ price: bidVal, lineVisible: true });
         } catch (_) {}
       }
     } else {
+      try {
+        candleSeriesRef.current.applyOptions({ lastValueVisible: true });
+      } catch (_) {}
+
       if (askPriceLineRef.current) {
         try { candleSeriesRef.current.removePriceLine(askPriceLineRef.current); } catch (_) {}
         askPriceLineRef.current = null;
