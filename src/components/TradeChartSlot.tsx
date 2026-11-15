@@ -263,9 +263,12 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
           {/* Badge de Conexão Dedicada deste Gráfico */}
           {(() => {
             const sym = (slotPanel?.symbol || slotPanel?.name || '').toUpperCase();
-            const isCrypto = /USDT|BUSD|USDC/i.test(sym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK)/i.test(sym);
-            const isMt = (slotPanel as any)?.platform === 'mt4' || (slotPanel as any)?.platform === 'mt5' || (slotPanel as any)?.source === 'mt4' || (slotPanel?.instance_id || '').startsWith('mt4_') || (activeAccount?.platform === 'mt4' && /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX|BTC|ETH)/i.test(sym));
-            const isNt8 = !isMt && !isCrypto && ((slotPanel as any)?.platform === 'ninjatrader' || (isStreamerWsConnected() && /^(NQ|MNQ|ES|MES|YM|MYM|RTY|M2K|CL|MCL|GC|MGC|FDAX|FESX|WIN|WDO|RUSSELL)/i.test(sym)));
+            const inst = (slotPanel?.instance_id || '').toUpperCase();
+            const fullStr = `${sym} ${inst}`.toUpperCase();
+            const isBrokerAsset = (sym.includes(' - ') && !sym.includes('BINANCE')) || sym.includes('ACTIVTRADES') || sym.includes('ACTIVETRADE') || sym.includes('PEPPERSTONE');
+            const isMt = isBrokerAsset || (slotPanel as any)?.platform === 'mt4' || (slotPanel as any)?.platform === 'mt5' || (slotPanel as any)?.source === 'mt4' || (slotPanel?.instance_id || '').startsWith('mt4_') || (activeAccount?.platform === 'mt4' && /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX|BTC|ETH)/i.test(sym));
+            const isBinance = !isMt && (sym.includes('BINANCE') || /USDT|BUSD|USDC/i.test(sym) || (activeAccount?.platform === 'binance' && !isBrokerAsset));
+            const isNt8 = !isMt && !isBinance && ((slotPanel as any)?.platform === 'ninjatrader' || (isStreamerWsConnected() && /^(NQ|MNQ|ES|MES|YM|MYM|RTY|M2K|CL|MCL|GC|MGC|FDAX|FESX|WIN|WDO|RUSSELL)/i.test(sym)));
 
             let label = 'Axion Feed';
             let dotColor = 'bg-sky-400';
@@ -273,9 +276,13 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
             let title = 'Consumindo cotações e histórico via Feed Axion Cloud';
 
             if (isMt) {
-              const broker = (activeAccount as any)?.broker && !['MetaTrader 4', 'MetaTrader 5', 'MetaTrader Server'].includes((activeAccount as any)?.broker)
-                ? (activeAccount as any)?.broker
-                : ((slotPanel as any)?.broker || 'ActivTrades');
+              let broker = 'ActivTrades';
+              if (sym.includes(' - ')) {
+                const parts = sym.split(' - ');
+                broker = parts[parts.length - 1].trim();
+              } else if ((activeAccount as any)?.broker && !['MetaTrader 4', 'MetaTrader 5', 'MetaTrader Server'].includes((activeAccount as any)?.broker)) {
+                broker = (activeAccount as any)?.broker;
+              }
               label = `MT4 ${broker}`;
               dotColor = 'bg-emerald-400 animate-pulse';
               badgeStyle = 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300';
@@ -285,11 +292,14 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
               dotColor = 'bg-emerald-400 animate-pulse';
               badgeStyle = 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300';
               title = 'Transmissão em tempo real do NinjaTrader 8 Local (:8002)';
-            } else if (activeAccount?.platform === 'binance' || isCrypto) {
-              label = 'Binance Spot';
+            } else if (isBinance) {
+              const isFutures = fullStr.includes('FUTUR') || fullStr.includes('PERP') || (activeAccount?.platform === 'binance' && ((activeAccount?.account_name || '').toLowerCase().includes('futuro') || (activeAccount?.connection_host || '').includes('future') || (activeAccount?.connection_host || '').includes('fapi')));
+              const isDemo = fullStr.includes('DEMO') || (activeAccount?.platform === 'binance' && ((activeAccount?.account_name || '').toLowerCase().includes('demo') || (activeAccount?.connection_host || '').includes('testnet')));
+              
+              label = isFutures ? (isDemo ? 'Binance Futuros Demo' : 'Binance Futuros') : (isDemo ? 'Binance Spot Demo' : 'Binance Spot');
               dotColor = 'bg-amber-400';
               badgeStyle = 'bg-amber-950/40 border-amber-500/30 text-amber-300';
-              title = 'Cotações de Cripto em tempo real direto da Binance Spot';
+              title = `Cotações e Ordens em tempo real via ${label}`;
             } else if (activeAccount?.platform === 'ctrader') {
               label = 'cTrader';
               dotColor = 'bg-purple-400';

@@ -3853,18 +3853,22 @@ export async function fetchCandlesSupabase(
   const baseSym = rawSym.split(/[-_(\s]/)[0].trim().replace(/[^A-Z0-9]/g, '');
   const hasBrokerSuffix = rawSym.includes(' - ') && !rawSym.includes('BINANCE');
 
-  const activePlat = typeof window !== 'undefined' ? (localStorage.getItem('vortex_active_account_platform') || '') : '';
-  const isBinanceAccount = activePlat === 'binance' || (targetPanelObj as any)?.platform === 'binance' || rawSym.includes('BINANCE');
-  const isMtFeed = !isBinanceAccount && (activePlat === 'mt4' ||
-                   activePlat === 'mt5' ||
-                   hasBrokerSuffix ||
-                   (targetPanelObj as any)?.platform === 'mt4' ||
-                   (targetPanelObj as any)?.platform === 'mt5' ||
-                   (targetPanelObj as any)?.source === 'mt4' ||
-                   (targetPanelObj?.instance_id || '').startsWith('mt4_'));
+  // Identificação do tipo de ativo baseada PRIMARIAMENTE no próprio painel/ativo
+  const isPanelMt = (targetPanelObj as any)?.platform === 'mt4' ||
+                    (targetPanelObj as any)?.platform === 'mt5' ||
+                    (targetPanelObj as any)?.source === 'mt4' ||
+                    (targetPanelObj?.instance_id || '').startsWith('mt4_') ||
+                    hasBrokerSuffix ||
+                    rawSym.includes('ACTIVETRADE') ||
+                    rawSym.includes('ACTIVTRADES') ||
+                    rawSym.includes('PEPPERSTONE');
 
-  const isCryptoAsset = isBinanceAccount || /USDT|BUSD|USDC/i.test(baseSym) || /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK|NEAR|SUI|PEPE)/i.test(baseSym);
-  const isForexOrCfd = !isBinanceAccount && (isCryptoAsset || /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(baseSym));
+  const activePlat = typeof window !== 'undefined' ? (localStorage.getItem('vortex_active_account_platform') || '') : '';
+  const isBinancePanel = rawSym.includes('BINANCE') || /USDT|BUSD|USDC/i.test(baseSym) || (!isPanelMt && activePlat === 'binance');
+  const isMtFeed = isPanelMt && !isBinancePanel;
+
+  const isCryptoAsset = isBinancePanel || (!isMtFeed && /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK|NEAR|SUI|PEPE)/i.test(baseSym));
+  const isForexOrCfd = isMtFeed || /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(baseSym);
 
   if (isMtFeed) {
     // Garante que o WebSocket da Binance seja imediatamente desativado para nunca colidir com o Bid/Ask da corretora MT4/MT5
@@ -3875,7 +3879,7 @@ export async function fetchCandlesSupabase(
 
   // 0.1 Para Criptoativos (BTCUSDT, ETHUSDT, SOLUSDT, etc.), prioridade máxima para a Binance REST API
   // A Binance fornece histórico contínuo M1 autêntico em tempo real (sem delay de 1m nem flat dashes com segundos do Yahoo)
-  if (isCryptoAsset) {
+  if (isCryptoAsset && !isMtFeed) {
     try {
       let cleanSym = baseSym;
       if (cleanSym.endsWith('USD') && !cleanSym.endsWith('USDT')) {
@@ -3884,7 +3888,7 @@ export async function fetchCandlesSupabase(
         cleanSym = `${cleanSym}USDT`;
       }
 
-      const isFutures = isBinanceAccount || rawSym.includes('FUTUR') || rawSym.includes('PERP');
+      const isFutures = rawSym.includes('FUTUR') || rawSym.includes('PERP') || activePlat === 'binance';
       const { fetchBinanceCandles, subscribeBinanceMarketData, unsubscribeBinanceMarketData } = await import('./binanceService');
       const binanceCandles = await fetchBinanceCandles(cleanSym, '1m', Math.max(limit, 1000), Boolean(isFutures));
       if (binanceCandles && binanceCandles.length > 0) {
