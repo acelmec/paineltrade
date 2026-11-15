@@ -389,20 +389,48 @@ void PollAndProcessCommands()
 //+------------------------------------------------------------------+
 bool ExecuteMarketOrder(const string sym, int direction, double lot, double sl, double tp)
 {
-   double ask = MarketInfo(sym, MODE_ASK);
-   double bid = MarketInfo(sym, MODE_BID);
+   string orderSym = sym;
+   if(orderSym == "" || MarketInfo(orderSym, MODE_ASK) == 0)
+   {
+      orderSym = _Symbol;
+   }
+
+   double ask = MarketInfo(orderSym, MODE_ASK);
+   double bid = MarketInfo(orderSym, MODE_BID);
    double price = (direction == 1) ? ask : bid;
    int cmd = (direction == 1) ? OP_BUY : OP_SELL;
    color arrowColor = (direction == 1) ? clrBlue : clrRed;
 
    ResetLastError();
-   int ticket = OrderSend(sym, cmd, lot, price, InpSlippagePoints, sl, tp, "Axion Web Order", InpMagicNumber, 0, arrowColor);
+   int ticket = OrderSend(orderSym, cmd, lot, price, InpSlippagePoints, sl, tp, "Axion Web Order", InpMagicNumber, 0, arrowColor);
    if(ticket > 0)
    {
-      Print("✅ [AxionGatewayEA MT4] Ordem executada com sucesso! Ticket: ", ticket, " | Lote: ", lot);
+      Print("✅ [AxionGatewayEA MT4] Ordem executada com sucesso! Ticket: ", ticket, " | Lote: ", lot, " | Ativo: ", orderSym);
       return true;
    }
-   Print("❌ [AxionGatewayEA MT4] Falha ao executar ordem: Erro #", GetLastError());
+
+   int err = GetLastError();
+   Print("⚠️ [AxionGatewayEA MT4] Falha inicial ao executar ordem (#", err, "). Tentando contingência sem SL/TP...");
+
+   // Se falhou por erro de stops (130) ou rejeição de execução com stops acoplados, abre a mercado e ajusta via modify
+   if(err == 130 || err == 138 || err == 129 || sl > 0 || tp > 0)
+   {
+      ResetLastError();
+      price = (direction == 1) ? MarketInfo(orderSym, MODE_ASK) : MarketInfo(orderSym, MODE_BID);
+      ticket = OrderSend(orderSym, cmd, lot, price, InpSlippagePoints * 2, 0, 0, "Axion Web Order", InpMagicNumber, 0, arrowColor);
+      if(ticket > 0)
+      {
+         Print("✅ [AxionGatewayEA MT4] Ordem aberta a mercado sem SL/TP! Ticket: ", ticket, ". Ajustando SL e TP...");
+         if(sl > 0 || tp > 0)
+         {
+            Sleep(200);
+            ModifyPositionSLTP(ticket, sl, tp);
+         }
+         return true;
+      }
+   }
+
+   Print("❌ [AxionGatewayEA MT4] Falha definitiva ao executar ordem: Erro #", GetLastError());
    return false;
 }
 

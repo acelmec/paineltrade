@@ -8839,10 +8839,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    * Impede contaminação cruzada (ex: cotação de 29.000 do NASDAQ sendo aplicada ao gráfico do SP500 de 7.780).
    */
   const isMarketDataCompatibleWithPanel = (panelNameOrId: string, marketSymbol?: string): boolean => {
-    if (!panelNameOrId || !marketSymbol) return true;
+    if (!panelNameOrId || !marketSymbol) return false;
     const p = String(panelNameOrId).toUpperCase();
     const m = String(marketSymbol).toUpperCase();
 
+    // 1. Criptoativos NUNCA são compatíveis com Índices, Ouro ou Petróleo
+    const isCryptoP = /BTC|ETH|SOL|BNB|XRP|DOGE|CRYPTO/i.test(p);
+    const isCryptoM = /BTC|ETH|SOL|BNB|XRP|DOGE|USDT|BUSD/i.test(m);
+    if (isCryptoP || isCryptoM) {
+      return isSameAsset(p, m);
+    }
+
+    // 2. Validação estrita por ativos conhecidos
     const isSP = p.includes('SP500') || p.includes('MES') || p.includes('S&P') || p.includes('ES');
     const isNQ = p.includes('NASDAQ') || p.includes('MNQ') || p.includes('NQ') || p.includes('PRINCIPAL');
     const isGold = p.includes('GOLD') || p.includes('MGC') || p.includes('GC') || p.includes('OURO');
@@ -8850,14 +8858,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const isDow = p.includes('DOW') || p.includes('MYM') || p.includes('YM') || p.includes('US30');
     const isRussel = p.includes('RUSSEL') || p.includes('M2K') || p.includes('RTY');
 
-    if (isSP && (m.includes('NQ') || m.includes('GC') || m.includes('CL') || m.includes('YM') || m.includes('RTY') || m.includes('M2K'))) return false;
-    if (isNQ && (m.includes('ES') || m.includes('MES') || m.includes('GC') || m.includes('CL') || m.includes('YM') || m.includes('RTY') || m.includes('M2K'))) return false;
-    if (isGold && (m.includes('NQ') || m.includes('ES') || m.includes('MES') || m.includes('CL') || m.includes('YM') || m.includes('RTY') || m.includes('M2K'))) return false;
-    if (isOil && (m.includes('NQ') || m.includes('ES') || m.includes('MES') || m.includes('GC') || m.includes('YM') || m.includes('RTY') || m.includes('M2K'))) return false;
-    if (isDow && (m.includes('NQ') || m.includes('ES') || m.includes('MES') || m.includes('GC') || m.includes('CL') || m.includes('RTY') || m.includes('M2K'))) return false;
-    if (isRussel && (m.includes('NQ') || m.includes('ES') || m.includes('MES') || m.includes('GC') || m.includes('CL') || m.includes('YM'))) return false;
+    if (isSP && !isSameAsset('ES', m)) return false;
+    if (isNQ && !isSameAsset('NQ', m)) return false;
+    if (isGold && !isSameAsset('GC', m)) return false;
+    if (isOil && !isSameAsset('CL', m)) return false;
+    if (isDow && !isSameAsset('YM', m)) return false;
+    if (isRussel && !isSameAsset('RTY', m)) return false;
 
-    return true;
+    return isSameAsset(p, m);
   };
 
   const executeMarketCycleForPanel = async (targetPanel: any, targetSettings: any) => {
@@ -10427,23 +10435,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const mtHost = (activeMtConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
           const targetNumber = (localAcc.account_name || '').replace(/\D/g, '') || localAcc.account_name;
 
-          fetch(`${mtHost}/order`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              id: reportId,
-              account: targetNumber,
-              symbol: resolvedSymbol,
-              direction: payload.side === 'COMPRA' || payload.side === 'BUY' ? 1 : 2,
-              side: payload.side,
-              lots: Number(payload.contrato || (payload as any).quantity || 0.01),
-              stop_loss: Number(payload.stop_loss || 0),
-              take_profit: Number(payload.take_profit || 0)
-            })
-          }).then(r => r.json()).then(data => {
-            console.log(`🚀 [MT-ORDER] Ordem enviada ao MetaTrader (${targetNumber}) com sucesso:`, data);
-          }).catch(err => {
-            console.warn(`⚠️ [MT-ORDER] Falha ao despachar ordem para o MetaTrader:`, err.message);
+          const orderPayload = JSON.stringify({
+            id: reportId,
+            account: targetNumber,
+            account_name: localAcc.account_name,
+            symbol: resolvedSymbol,
+            direction: payload.side === 'COMPRA' || payload.side === 'BUY' ? 1 : 2,
+            side: payload.side,
+            lots: Number(payload.contrato || (payload as any).quantity || 0.01),
+            stop_loss: Number(payload.stop_loss || 0),
+            take_profit: Number(payload.take_profit || 0)
+          });
+
+          // Envio redundante: Dispara para a VPS oficial e para a ponte local (:8003) caso esteja rodando localmente
+          const hostsToTry = [mtHost, 'http://localhost:8003'].filter((h, idx, arr) => h && arr.indexOf(h) === idx);
+          hostsToTry.forEach(h => {
+            fetch(`${h}/order`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: orderPayload
+            }).then(r => r.json()).then(data => {
+              console.log(`🚀 [MT-ORDER] Ordem enviada ao MetaTrader via ${h} (${targetNumber}) com sucesso:`, data);
+            }).catch(err => {
+              console.warn(`⚠️ [MT-ORDER] Falha ao despachar ordem via ${h}:`, err.message);
+            });
           });
         } catch (e: any) {
           console.warn('[MT-ORDER] Erro ao enviar ordem para MT4/MT5:', e.message);
@@ -15038,20 +15053,19 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       const pan = (detail.panel || '').toUpperCase();
       const numPrice = Number(detail.price);
 
-      // 1. Identificar o painel correspondente no cache
+      // 1. Identificar o painel correspondente no cache de forma estrita (sem contaminação cruzada)
       const currentPanels = allPanelsRef.current || [];
       const matchedPanel = currentPanels.find((p: any) => {
         const pName = (p.name || p.id || '').toUpperCase();
         const pSym = (p.symbol || '').toUpperCase();
         const pInst = (p.instance_id || '').toUpperCase();
-        return (
-          (pan && (pName.includes(pan) || pInst === pan)) ||
-          pName.startsWith(sym) ||
-          pName.includes(sym) ||
-          pSym === sym ||
-          pInst === sym ||
-          isMarketDataCompatibleWithPanel(p.name || p.id, sym)
-        );
+
+        if (pan && (pName.toLowerCase() === pan.toLowerCase() || pInst.toLowerCase() === pan.toLowerCase())) return true;
+        if (pSym && pSym === sym) return true;
+        if (pInst && pInst === sym) return true;
+        if (isSameAsset(pSym || pName, sym)) return true;
+        if (isSameAsset(pInst, sym)) return true;
+        return false;
       });
 
       if (!matchedPanel) return;

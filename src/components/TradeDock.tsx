@@ -31,51 +31,30 @@ export const TradeDock: React.FC = () => {
 
   // Helper para obter o nome real do ATIVO (e não o nome do painel)
   const getSymbol = (r: any) => {
-    // 1. Tentar encontrar o painel vinculado pelo panel_id ou instance_id
-    let panel = panels?.find((p: any) => p.id === r.panel_id || p.instance_id === r.instance_id);
-    
-    // Fallback: Tentar extrair o nome do ativo dos colchetes na descrição "[S&P 500] ..."
-    if (!panel && r.description) {
-      const match = r.description.match(/\[(.*?)\]/);
-      if (match && match[1]) {
-        const pName = match[1].toLowerCase().replace(/[^a-z0-9]/g, '');
-        panel = panels?.find((p: any) => p.name.toLowerCase().replace(/[^a-z0-9]/g, '') === pName);
-      }
-    }
+    // 1. Prioridade absoluta para o símbolo real registrado na própria ordem
+    if (r.symbol && r.symbol !== '--' && r.symbol !== 'ATIVO') return r.symbol;
+    if (r.asset && r.asset !== '--') return r.asset;
 
-    if (panel) {
-      const panelSettings = allSettings?.[panel.id];
-      if (panelSettings?.gamma_symbol) return panelSettings.gamma_symbol;
-      if (panel.gamma_symbol) return panel.gamma_symbol;
-      if (panel.symbol) return panel.symbol;
-
-      const norm = (panel.name || panel.instance_id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (norm.includes('sp500') || norm.includes('sp') || norm.includes('es')) return 'ES';
-      if (norm.includes('nasdaq') || norm.includes('nq')) return 'NQ';
-      if (norm.includes('gold') || norm.includes('ouro') || norm.includes('gc')) return 'GC';
-      if (norm.includes('oil') || norm.includes('petr') || norm.includes('cl')) return 'CL';
-      if (norm.includes('dxy') || norm.includes('usdindex')) return 'DXY';
-      if (panel.name) return panel.name;
-    }
-
-    // Se houver nome no colchete da descrição
+    // 2. Extrair o nome do ativo dos colchetes na descrição "[BTCUSD] Ordem..."
     if (r.description) {
       const match = r.description.match(/\[(.*?)\]/);
       if (match && match[1]) {
-        const norm = match[1].toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (norm.includes('sp500') || norm.includes('sp') || norm.includes('es')) return 'ES';
-        if (norm.includes('nasdaq') || norm.includes('nq')) return 'NQ';
-        if (norm.includes('gold') || norm.includes('ouro') || norm.includes('gc')) return 'GC';
-        if (norm.includes('oil') || norm.includes('petr') || norm.includes('cl')) return 'CL';
-        if (norm.includes('dxy') || norm.includes('usdindex')) return 'DXY';
         return match[1];
       }
     }
 
-    if (r.symbol && r.symbol !== '--') return r.symbol;
-    if (r.asset && r.asset !== '--') return r.asset;
+    // 3. Tentar encontrar o painel vinculado pelo panel_id ou instance_id
+    let panel = panels?.find((p: any) => p.id === r.panel_id || p.instance_id === r.instance_id);
 
-    return activePanel?.gamma_symbol || activePanel?.symbol || activePanel?.name || 'NQ';
+    if (panel) {
+      if (panel.symbol) return panel.symbol;
+      const panelSettings = allSettings?.[panel.id];
+      if (panelSettings?.gamma_symbol && panelSettings.gamma_symbol !== 'NQ') return panelSettings.gamma_symbol;
+      if (panel.gamma_symbol && panel.gamma_symbol !== 'NQ') return panel.gamma_symbol;
+      if (panel.name) return panel.name;
+    }
+
+    return activePanel?.symbol || activePanel?.name || 'NQ';
   };
 
   // Helper para formatar data (DD/MM/AA) no fuso de São Paulo

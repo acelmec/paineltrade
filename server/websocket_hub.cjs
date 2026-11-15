@@ -933,6 +933,14 @@ const server = http.createServer((req, res) => {
         }
         mt4PendingCommands.get(accNum).push(cmd);
 
+        // Também enfileira em 'all' para garantir entrega ao robô caso consulte sem parâmetro de conta
+        if (accNum !== 'all') {
+          if (!mt4PendingCommands.has('all')) {
+            mt4PendingCommands.set('all', []);
+          }
+          mt4PendingCommands.get('all').push(cmd);
+        }
+
         console.log(`🚀 [MT4-HUB] Ordem enfileirada para MT4 (${accNum}):`, cmd);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, command_id: cmdId }));

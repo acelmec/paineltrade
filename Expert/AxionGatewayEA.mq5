@@ -439,16 +439,39 @@ void PollAndProcessCommands()
 //+------------------------------------------------------------------+
 bool ExecuteMarketOrder(const string sym, int direction, double lot, double sl, double tp)
 {
-   double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
-   double bid = SymbolInfoDouble(sym, SYMBOL_BID);
+   string orderSym = sym;
+   if(orderSym == "" || SymbolInfoDouble(orderSym, SYMBOL_ASK) == 0)
+   {
+      orderSym = _Symbol;
+   }
+
+   double ask = SymbolInfoDouble(orderSym, SYMBOL_ASK);
+   double bid = SymbolInfoDouble(orderSym, SYMBOL_BID);
    double price = (direction == 1) ? ask : bid;
    ENUM_ORDER_TYPE orderType = (direction == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
 
-   if(trade.PositionOpen(sym, orderType, lot, price, sl, tp, "Axion Web Order"))
+   if(trade.PositionOpen(orderSym, orderType, lot, price, sl, tp, "Axion Web Order"))
    {
-      Print("✅ [AxionGatewayEA] Ordem executada com sucesso! Ticket: ", trade.ResultOrder(), " | Lote: ", lot);
+      Print("✅ [AxionGatewayEA] Ordem executada com sucesso! Ticket: ", trade.ResultOrder(), " | Lote: ", lot, " | Ativo: ", orderSym);
       return true;
    }
+
+   Print("⚠️ [AxionGatewayEA] Falha inicial ao executar ordem (", trade.ResultRetcodeDescription(), "). Tentando contingência sem SL/TP...");
+
+   // Se falhou por erro de stops (retcode 10016) ou rejeição de execução instantânea com stops, abre a mercado e modifica
+   price = (direction == 1) ? SymbolInfoDouble(orderSym, SYMBOL_ASK) : SymbolInfoDouble(orderSym, SYMBOL_BID);
+   if(trade.PositionOpen(orderSym, orderType, lot, price, 0, 0, "Axion Web Order"))
+   {
+      ulong ticket = trade.ResultOrder();
+      Print("✅ [AxionGatewayEA] Ordem aberta a mercado sem SL/TP! Ticket: ", ticket, ". Ajustando SL e TP...");
+      if(sl > 0 || tp > 0)
+      {
+         Sleep(200);
+         ModifyPositionSLTP(ticket, sl, tp);
+      }
+      return true;
+   }
+
    Print("❌ [AxionGatewayEA] Falha ao executar ordem: ", trade.ResultRetcodeDescription());
    return false;
 }

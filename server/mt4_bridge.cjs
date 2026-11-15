@@ -420,6 +420,14 @@ const server = http.createServer((req, res) => {
         }
         pendingCommands.get(accNum).push(cmd);
 
+        // Também disponibiliza na fila 'all' para garantir entrega caso o EA consulte sem query account
+        if (accNum !== 'all') {
+          if (!pendingCommands.has('all')) {
+            pendingCommands.set('all', []);
+          }
+          pendingCommands.get('all').push(cmd);
+        }
+
         console.log(`🚀 [MT4-BRIDGE] Nova ordem enfileirada para conta ${accNum}:`, cmd);
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
