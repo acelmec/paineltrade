@@ -4099,8 +4099,8 @@ export async function fetchCandlesSupabase(
 
     onProgress?.(95, allRows.length, limit);
 
-    // Inverte o array para que fique em ordem cronológica crescente para a plotagem do gráfico
-    const chronologicalData = [...allRows].reverse();
+    // Garante que o array esteja sempre em ordem cronológica estritamente crescente (do mais antigo para o mais novo)
+    const chronologicalData = [...allRows].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
     // Deduplicação estrita por minuto (evita linhas duplicadas no mesmo timestamp)
     const minuteMap = new Map<number, any>();
@@ -4112,7 +4112,8 @@ export async function fetchCandlesSupabase(
       minuteMap.set(mKey, c);
     });
 
-    const uniqueRows = Array.from(minuteMap.values());
+    const uniqueRows = Array.from(minuteMap.values())
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
     const rawMapped: Candle[] = uniqueRows.map(c => ({
       timestamp: c.timestamp,

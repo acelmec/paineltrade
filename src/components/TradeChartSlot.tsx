@@ -9,6 +9,7 @@ import type { DrawingItem, DrawingToolType } from '../types/chartDrawings';
 import type { ChartSlotConfig } from '../types/chartLayout';
 import { AssetSearchSelect } from './AssetSearchSelect';
 import { resolveAssetSource } from '../utils/marketSource';
+import { parseInputToDate } from '../utils/date';
 
 function getShortIndicatorName(ind: IndicatorConfig): string {
   switch (ind.type) {
@@ -150,7 +151,10 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
     [slot.indicators]
   );
 
-  const rawPrice = snapshot.marketData?.price && snapshot.marketData.price !== '--'
+  const isMarketDataFresh = snapshot.marketData?.updated_at
+    ? (Date.now() - (parseInputToDate(snapshot.marketData.updated_at)?.getTime() || 0) <= 90000)
+    : false;
+  const rawPrice = isMarketDataFresh && snapshot.marketData?.price && snapshot.marketData.price !== '--'
     ? parseFloat(String(snapshot.marketData.price).replace(/[^\d.-]/g, ''))
     : null;
   const displayPrice = rawPrice && !isNaN(rawPrice) && rawPrice > 0

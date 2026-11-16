@@ -9038,11 +9038,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
 
+      // Se o market_data do banco for defasado (> 90s, ex: dados antigos no Supabase) ou nulo, sintetiza cotação a partir do último candle válido
+      const isMDataTimestampFresh = mData?.updated_at ? (Date.now() - (parseInputToDate(mData.updated_at)?.getTime() || 0) <= 90000) : false;
+      if (!isMDataTimestampFresh && cache.candles && cache.candles.length > 0) {
+        const lastC = cache.candles[cache.candles.length - 1];
+        const lastCPrice = Number(lastC.close);
+        if (lastCPrice > 0) {
+          mData = {
+            symbol: targetPanel.symbol || targetPanel.name || 'M2K',
+            price: String(lastCPrice),
+            bid: lastCPrice,
+            ask: lastCPrice,
+            spread: 0.1,
+            zScore: cache.marketData?.zScore || 0,
+            atrRatio: cache.marketData?.atrRatio || 1,
+            estado: cache.marketData?.estado || 'NORMAL',
+            timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            sentiment: cache.marketData?.sentiment || 50,
+            originalSentiment: cache.marketData?.originalSentiment || 50,
+            delta: 0,
+            deltaRatio: 1.0,
+            buyVolume: 0,
+            sellVolume: 0,
+            printsPerSecond: 0,
+            blockTrades: cache.marketData?.blockTrades || [],
+            updated_at: new Date().toISOString()
+          };
+          cache.marketData = mData;
+        }
+      }
+
       const now = Date.now();
 
       // Atualização imediata do preço em tempo real no candle em formação
-      const isMDataTimestampFresh = mData?.updated_at ? (Date.now() - (parseInputToDate(mData.updated_at)?.getTime() || 0) <= 90000) : true;
-      if (mData && isMDataTimestampFresh && mData.price && mData.price !== '--' && cache.candles && cache.candles.length > 0) {
+      const isUsableFresh = mData?.updated_at ? (Date.now() - (parseInputToDate(mData.updated_at)?.getTime() || 0) <= 90000) : true;
+      if (mData && isUsableFresh && mData.price && mData.price !== '--' && cache.candles && cache.candles.length > 0) {
         const mBid = parseNumericValue((mData as any).bid);
         const mAsk = parseNumericValue((mData as any).ask);
         const rawPrice = parseNumericValue(mData.price);

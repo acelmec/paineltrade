@@ -4129,14 +4129,26 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     }
   }, [resetViewTrigger, applySavedViewport, panelKey]);
 
+  // Tick contínuo de relógio a cada 1s para garantir a formação e atualização em tempo real de novas barras
+  const [clockSec, setClockSec] = useState(() => Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setClockSec(Math.floor(Date.now() / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   useEffect(() => {
     const lastCandle = chartDataRef.current.length > 0 ? chartDataRef.current[chartDataRef.current.length - 1] : null;
     const lastPrice = lastCandle ? lastCandle.close : null;
-    const mBid = marketData?.bid !== undefined && marketData.bid !== null && !isNaN(Number(marketData.bid)) ? Number(marketData.bid) : 0;
-    const mAsk = marketData?.ask !== undefined && marketData.ask !== null && !isNaN(Number(marketData.ask)) ? Number(marketData.ask) : 0;
-    const mPrice = marketData?.price && marketData.price !== '--' ? Number(marketData.price) : 0;
+    const isMDataFresh = marketData?.updated_at
+      ? (Date.now() - (parseInputToDate(marketData.updated_at)?.getTime() || 0) <= 90000)
+      : false;
+    const mBid = isMDataFresh && marketData?.bid !== undefined && marketData.bid !== null && !isNaN(Number(marketData.bid)) ? Number(marketData.bid) : 0;
+    const mAsk = isMDataFresh && marketData?.ask !== undefined && marketData.ask !== null && !isNaN(Number(marketData.ask)) ? Number(marketData.ask) : 0;
+    const mPrice = isMDataFresh && marketData?.price && marketData.price !== '--' ? Number(marketData.price) : 0;
 
-    // Para MT4/MT5 e gráficos com Bid/Ask, o candle é formado pelo menor preço (BID)
+    // Para MT4/MT5 e gráficos com Bid/Ask, o candle é formado pelo menor preço (BID); se o feed de cotação for antigo, adota o fechamento da última vela
     let resolvedPrice = (mBid > 0 && mAsk > 0)
       ? Math.min(mBid, mAsk)
       : (mBid > 0 ? mBid : (mPrice > 0 ? mPrice : lastPrice));
@@ -4188,8 +4200,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       : (lastCandle.timestamp ? getChartTimeFromDate(lastCandle.timestamp) : 0);
 
     // Determina o horário de referência do tick atual (sempre coerente com o relógio real para nunca ficar defasado)
-    let tickSec = Math.floor(Date.now() / 1000);
-    if (marketData?.updated_at) {
+    let tickSec = clockSec;
+    if (isMDataFresh && marketData?.updated_at) {
       const parsed = parseInputToDate(marketData.updated_at);
       if (parsed && !isNaN(parsed.getTime()) && parsed.getTime() > 0) {
         const pSec = Math.floor(parsed.getTime() / 1000);
@@ -4283,7 +4295,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         });
       } catch (_) {}
     }
-  }, [marketData?.price, marketData?.bid, marketData?.ask, marketData?.updated_at, simulatedPrice, timeframe, effectiveShowPva]);
+  }, [clockSec, marketData?.price, marketData?.bid, marketData?.ask, marketData?.updated_at, simulatedPrice, timeframe, effectiveShowPva, isNt8OrSupabaseAsset]);
 
   const updateLevelLabelsRef = useRef<((immediate?: boolean) => void) | null>(null);
   const showOrderLinesRef = useRef<boolean>(showOrderLines);
