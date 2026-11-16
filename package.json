@@ -28,6 +28,7 @@
     "hub": "node server/websocket_hub.cjs",
     "pack:addons": "node scripts/pack_addon.cjs",
     "easypanel:pack": "node scripts/packEasypanel.cjs",
+    "version:save": "node scripts/manageVersions.cjs all",
     "postinstall": "node scripts/patchLightweightCharts.cjs",
     "patch:charts": "node scripts/patchLightweightCharts.cjs"
   },

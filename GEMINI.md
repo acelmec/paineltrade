@@ -149,6 +149,22 @@ Toda e qualquer manutenção em cadastro de dados de mercado, alertas e configur
 4. **Governança de Alertas em Segundo Plano:**
    - O loop de monitoramento contínuo em Web Worker deve iterar sobre todos os ativos que possuam alertas ativos habilitados (`allSettings[panel.id]`), garantindo disparo sonoro/visual/Telegram ininterrupto mesmo quando o usuário estiver operando outro gráfico na tela.
 
+---
+
+## 12. Constituição de Versionamento e Publicação de Pacotes (`public/`)
+
+Toda e qualquer rotina de salvamento de versões dos pacotes oficiais DEVE seguir estritamente as regras de [`VERSIONING_GUIDELINES.md`](file:///c:/Users/Pichau/Projetos%20React/VortexWeb/VERSIONING_GUIDELINES.md):
+1. **Os 3 Pacotes Oficiais de Distribuição:**
+   - **Item 1 — Easypanel (Docker Web):** `easypanel-deploy.zip`
+   - **Item 2 — Instalador Windows:** `Instalador_AxionTradeStation.exe`
+   - **Item 3 — Android APK:** `VortexWeb.apk`
+2. **Escopo Estrito de Arquivos:** As pastas de versão devem conter exclusivamente os arquivos acima, sem logs, pastas intermediárias ou código-fonte.
+3. **Padrão de Pastas com Contador Diário (`public/V<DDMMAAAA>_<NN>`):** Formato `V<DDMMAAAA>_<NN>` (ex: `public/V16112026_01/`), iniciando sempre em `_01` a cada novo dia e incrementando `_02`, `_03` caso novas versões sejam geradas na mesma data.
+4. **Solicitações Coletivas vs. Individuais:**
+   - O usuário pode solicitar atualizar as três versões simultaneamente ou pedir qualquer uma individualmente ("Atualizar Easypanel", "Atualizar Instalador Windows" ou "Atualizar Android").
+5. **Regra de Ambiguidade Mandatória:** Se a solicitação do usuário for genérica ou não especificar com clareza o que deseja atualizar, o agente DEVE perguntar diretamente qual(is) dos 3 pacotes ele deseja atualizar antes de executar qualquer compilação ou build.
+
+
 
 
 
