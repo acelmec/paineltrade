@@ -599,7 +599,20 @@ export const ConnectionsHub: React.FC<ConnectionsHubProps> = ({ onSelectConnecti
                     {onSelectConnection && isOnline && (
                       <button
                         type="button"
-                        onClick={() => onSelectConnection(conn)}
+                        onClick={() => {
+                          const detAcc = conn.detected_accounts_detail?.[0] || 
+                            (conn.detected_accounts?.[0] ? {
+                              id: conn.detected_accounts[0],
+                              account_number: conn.detected_accounts[0],
+                              name: `Conta ${conn.platform.toUpperCase()} #${conn.detected_accounts[0]}`,
+                              balance: 0,
+                              equity: 0,
+                              broker: 'ActivTrades Markets Limited',
+                              currency: 'USD',
+                              platform: conn.platform
+                            } : undefined);
+                          onSelectConnection(conn, detAcc);
+                        }}
                         className="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
                       >
                         <span>👉</span> Usar na Conta

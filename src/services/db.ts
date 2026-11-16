@@ -7540,9 +7540,14 @@ export function calculateAccountDrawdownMetrics(
     .filter(op => op.status === 'Gain' || op.status === 'Stop' || (op.status === 'Cancelado' && op.exit_price !== null && op.exit_price !== undefined))
     .sort((a, b) => new Date(a.closed_at || a.created_at).getTime() - new Date(b.closed_at || b.created_at).getTime());
 
-  const initialBal = account.initial_balance || 50000;
+  const isMt = isMtExecutionAccount(account);
+  let initialBal = account.initial_balance || 50000;
+  // Se for conta MT4/MT5 vinculada com initial_balance padrão de 50.000 enquanto o saldo real é menor:
+  if (isMt && initialBal === 50000 && account.balance && account.balance > 0 && account.balance < 25000) {
+    initialBal = Number(account.balance);
+  }
   let runningBal = initialBal;
-  let peakHWM = Math.max(account.high_watermark || initialBal, initialBal);
+  let peakHWM = Math.max(account.high_watermark && account.high_watermark !== 50000 ? account.high_watermark : initialBal, initialBal);
 
   // Reconstruir o patrimônio acumulado para capturar a máxima de pico real (High-Watermark)
   for (const op of closedOps) {
@@ -7681,8 +7686,9 @@ export function calculateAccountDrawdownMetrics(
     // ⭐️ PARA CONTAS METATRADER 4 / 5: O Saldo e Patrimônio reais sincronizados do terminal têm prioridade
     currentBalance = Number(account.balance);
     currentEquity = Number((account as any).equity || (currentBalance + floatingPnL));
-    highWatermark = Math.max(account.high_watermark || initialBal, currentBalance, currentEquity);
-    eodBaseline = account.eod_baseline_balance || initialBal;
+    const cleanHwm = (account.high_watermark && account.high_watermark !== 50000) ? account.high_watermark : initialBal;
+    highWatermark = Math.max(cleanHwm, currentBalance, currentEquity);
+    eodBaseline = (account.eod_baseline_balance && account.eod_baseline_balance !== 50000) ? account.eod_baseline_balance : initialBal;
   }
 
   // Intraday Trailing Drawdown (HWM): Diferença entre o maior patrimônio atingido e o patrimônio/equidade atual

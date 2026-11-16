@@ -307,10 +307,25 @@ export const AccountsDashboard: React.FC = () => {
       return;
     }
     const isNinja = acc.platform === 'nt8' || isNinjaExecutionAccount(acc) || Boolean(acc.send_localhost);
+    const isMt = acc.platform === 'mt4' || acc.platform === 'mt5';
+    let initBal = acc.initial_balance || 50000;
+    if (isMt && initBal === 50000 && acc.balance && acc.balance > 0 && acc.balance < 25000) {
+      initBal = acc.balance;
+    }
+    let host = acc.connection_host || '';
+    let token = acc.pairing_token || '';
+    if (isMt && (!host || !token)) {
+      const mtConn = getLocalPlatformConnections().find(c => c.platform === acc.platform && c.is_active);
+      if (mtConn) {
+        if (!host) host = mtConn.host_url || 'http://144.126.141.254';
+        if (!token) token = mtConn.pairing_token || 'vps_mt4';
+      }
+    }
+
     setEditingAccount(acc);
     setFormName(acc.account_name);
     setFormPlatform(acc.platform || 'axion');
-    setFormInitialBalance(acc.initial_balance || 50000);
+    setFormInitialBalance(initBal);
     setFormDdMode(acc.dd_mode || 'intraday_trailing');
     setFormMaxDd(acc.max_drawdown_usd || 2500);
     setFormDailyStop(acc.daily_stop_loss_usd || 1000);
@@ -324,8 +339,8 @@ export const AccountsDashboard: React.FC = () => {
     setFormSymbolMapping(acc.symbol_mapping || '');
     setFormApiKey(acc.api_key || '');
     setFormApiSecret(acc.api_secret || '');
-    setFormConnectionHost(acc.connection_host || '');
-    setFormPairingToken(acc.pairing_token || '');
+    setFormConnectionHost(host);
+    setFormPairingToken(token);
 
     if (acc.symbol_mapping === 'NQ->MNQ, ES->MES, YM->MYM') {
       setFormMappingPreset('nq_mnq');
@@ -378,16 +393,21 @@ export const AccountsDashboard: React.FC = () => {
     }
 
     if (editingAccount) {
+      const isMtAcc = editingAccount.platform === 'mt4' || editingAccount.platform === 'mt5' || formPlatform === 'mt4' || formPlatform === 'mt5';
       const balanceChanged = Number(editingAccount.initial_balance) !== effectiveInitialBalance;
       if (balanceChanged) {
         if (editingAccount.platform === 'nt8' || editingAccount.send_localhost) {
           alert('O saldo de contas sincronizadas com o NinjaTrader 8 não pode ser alterado manualmente. Utilize a sincronização do NinjaTrader para atualizar o saldo.');
           return;
         }
-        const confirmReset = window.confirm(
-          `⚠️ ATENÇÃO: Alterar o Saldo Inicial de US$ ${editingAccount.initial_balance.toLocaleString()} para US$ ${effectiveInitialBalance.toLocaleString()} irá RESETAR a conta e APAGAR TODO O HISTÓRICO DE OPERAÇÕES desta conta no banco de dados.\n\nDeseja prosseguir com o reset e salvar o novo saldo?`
-        );
-        if (!confirmReset) return;
+        if (isMtAcc) {
+          // Contas MT4/MT5 sincronizam saldo real diretamente da corretora, sem reset destrutivo
+        } else {
+          const confirmReset = window.confirm(
+            `⚠️ ATENÇÃO: Alterar o Saldo Inicial de US$ ${editingAccount.initial_balance.toLocaleString()} para US$ ${effectiveInitialBalance.toLocaleString()} irá RESETAR a conta e APAGAR TODO O HISTÓRICO DE OPERAÇÕES desta conta no banco de dados.\n\nDeseja prosseguir com o reset e salvar o novo saldo?`
+          );
+          if (!confirmReset) return;
+        }
       }
 
       if (!isNinja && editingAccount.simulate_elimination && !formSimulateElimination) {
@@ -425,7 +445,7 @@ export const AccountsDashboard: React.FC = () => {
       };
 
       if (balanceChanged) {
-        const newBal = effectiveInitialBalance;
+        const newBal = (isMtAcc && editingAccount.balance && editingAccount.balance > 0) ? editingAccount.balance : effectiveInitialBalance;
         updatedFields.balance = newBal;
         updatedFields.high_watermark = newBal;
         updatedFields.eod_baseline_balance = newBal;
@@ -443,7 +463,7 @@ export const AccountsDashboard: React.FC = () => {
       addLog('SISTEMA', `✅ Regras da conta "${accountNameTrimmed}" salvas com sucesso.`, 'sistema');
 
       await updateAccountSupabase(editingAccount.id, updatedFields);
-      if (balanceChanged) {
+      if (balanceChanged && !isMtAcc) {
         await resetAccountAction(editingAccount, effectiveInitialBalance);
       }
       await refreshAccounts();
@@ -984,47 +1004,95 @@ export const AccountsDashboard: React.FC = () => {
         <ConnectionsHub
           accounts={accounts}
           onAccountsUpdated={async () => { await refreshAccounts(); }}
-          onSelectConnection={(conn, detectedAcc) => {
+          onSelectConnection={async (conn, detectedAcc) => {
             setDashboardMainTab('contas');
+            const targetDetail = detectedAcc || conn.detected_accounts_detail?.[0];
+            const targetAccNum = targetDetail?.account_number || conn.detected_accounts?.[0];
+            const realBal = (targetDetail && targetDetail.balance > 0) 
+              ? targetDetail.balance 
+              : (conn.detected_accounts_detail?.[0]?.balance || 0);
+
+            // 1. Verifica se a conta já existe no painel
+            const existing = accounts.find(a => 
+              a.platform === conn.platform && 
+              (targetAccNum ? (a.account_name.includes(targetAccNum) || (a as any).account_number === targetAccNum) : false)
+            );
+
+            if (existing) {
+              // Corrige saldo inicial se estava com o bug de 50.000 da mesa demo
+              const needsInitialFix = (existing.initial_balance === 50000 && realBal > 0 && realBal < 25000) ||
+                (existing.initial_balance === 50000 && existing.balance && existing.balance > 0 && existing.balance < 25000);
+              const fixedInitial = needsInitialFix ? (realBal > 0 ? realBal : existing.balance) : existing.initial_balance;
+
+              if (needsInitialFix || (realBal > 0 && existing.balance !== realBal)) {
+                await updateAccountSupabase(existing.id, {
+                  balance: realBal > 0 ? realBal : existing.balance,
+                  initial_balance: fixedInitial,
+                  high_watermark: fixedInitial,
+                  eod_baseline_balance: fixedInitial,
+                  connection_host: conn.host_url || existing.connection_host,
+                  pairing_token: conn.pairing_token || existing.pairing_token
+                });
+                await refreshAccounts();
+              }
+
+              handleOpenEdit({
+                ...existing,
+                initial_balance: fixedInitial,
+                connection_host: conn.host_url || existing.connection_host,
+                pairing_token: conn.pairing_token || existing.pairing_token
+              });
+              setModalTab('mesa');
+              return;
+            }
+
+            // 2. Se NÃO existe e é MT4 ou MT5: Insere automaticamente no banco com saldo real bloqueado
+            if (conn.platform === 'mt4' || conn.platform === 'mt5') {
+              const effectiveBal = realBal > 0 ? realBal : 10000;
+              const accName = targetDetail?.name || (targetAccNum ? `Conta ${conn.platform.toUpperCase()} #${targetAccNum}` : conn.name);
+              
+              const newAcc = await createDemoAccountSupabase({
+                account_name: accName,
+                platform: conn.platform,
+                initial_balance: effectiveBal,
+                dd_mode: 'intraday_trailing',
+                max_drawdown_usd: Math.round(effectiveBal * 0.1) || 1000,
+                daily_stop_loss_usd: Math.round(effectiveBal * 0.05) || 500,
+                daily_max_gain_usd: Math.round(effectiveBal * 0.1) || 1000,
+                daily_max_entries: 0,
+                allow_multi_signals: true,
+                enforce_dd_lockout: true,
+                simulate_elimination: false,
+                is_master: false,
+                send_localhost: false,
+                connection_host: conn.host_url,
+                pairing_token: conn.pairing_token || '',
+                manual_trading_enabled: true
+              });
+
+              await refreshAccounts();
+
+              if (newAcc) {
+                handleOpenEdit(newAcc);
+                setModalTab('mesa');
+              }
+              return;
+            }
+
+            // 3. Fallback para Binance ou NinjaTrader 8
             handleOpenCreate();
             setFormPlatform(conn.platform as any);
-            if (conn.platform === 'mt4' || conn.platform === 'mt5') {
-              setFormSendLocalhost(true);
-              if (detectedAcc) {
-                setFormName(detectedAcc.name || `MT4 #${detectedAcc.account_number}`);
-                if (detectedAcc.balance > 0) {
-                  setFormInitialBalance(detectedAcc.balance);
-                  setFormDailyStop(Math.round(detectedAcc.balance * 0.05) || 1000);
-                  setFormMaxDd(Math.round(detectedAcc.balance * 0.1) || 2500);
-                  setFormProfitTarget(Math.round(detectedAcc.balance * 0.1) || 2000);
-                }
-              } else if (conn.detected_accounts_detail && conn.detected_accounts_detail.length > 0) {
-                const first = conn.detected_accounts_detail[0];
-                setFormName(first.name || `MT4 #${first.account_number}`);
-                if (first.balance > 0) {
-                  setFormInitialBalance(first.balance);
-                  setFormDailyStop(Math.round(first.balance * 0.05) || 1000);
-                  setFormMaxDd(Math.round(first.balance * 0.1) || 2500);
-                  setFormProfitTarget(Math.round(first.balance * 0.1) || 2000);
-                }
-              } else if (conn.detected_accounts && conn.detected_accounts.length > 0) {
-                setFormName(`Conta MT4 #${conn.detected_accounts[0]}`);
-              }
-            } else if (conn.platform === 'binance') {
-              setFormPlatform('binance');
+            setFormConnectionHost(conn.host_url || '');
+            setFormPairingToken(conn.pairing_token || '');
+            if (conn.platform === 'binance') {
               setFormSendLocalhost(false);
               if (conn.api_key) setFormApiKey(conn.api_key);
               if (conn.api_secret) setFormApiSecret(conn.api_secret);
-              if (detectedAcc) {
-                setFormName(detectedAcc.name || 'Binance Spot');
-                if (detectedAcc.balance > 0) {
-                  setFormInitialBalance(detectedAcc.balance);
-                  setFormDailyStop(Math.round(detectedAcc.balance * 0.05) || 100);
-                  setFormMaxDd(Math.round(detectedAcc.balance * 0.1) || 200);
-                  setFormProfitTarget(Math.round(detectedAcc.balance * 0.1) || 200);
-                }
-              } else {
-                setFormName(conn.name || 'Binance Spot');
+              if (realBal > 0) {
+                setFormInitialBalance(realBal);
+                setFormDailyStop(Math.round(realBal * 0.05) || 100);
+                setFormMaxDd(Math.round(realBal * 0.1) || 200);
+                setFormProfitTarget(Math.round(realBal * 0.1) || 200);
               }
             } else if (conn.platform === 'nt8') {
               setFormSendLocalhost(true);
@@ -1946,7 +2014,25 @@ export const AccountsDashboard: React.FC = () => {
                     {/* Opção 3: MetaTrader 5 */}
                     <button
                       type="button"
-                      onClick={() => { setFormPlatform('mt5'); setFormSendLocalhost(true); }}
+                      onClick={() => { 
+                        setFormPlatform('mt5'); 
+                        setFormSendLocalhost(false); 
+                        const mtConn = getLocalPlatformConnections().find(c => c.platform === 'mt5' && c.is_active);
+                        if (mtConn) {
+                          if (!formConnectionHost) setFormConnectionHost(mtConn.host_url || 'http://144.126.141.254');
+                          if (!formPairingToken) setFormPairingToken(mtConn.pairing_token || 'vps_mt5');
+                          const det = mtConn.detected_accounts_detail?.[0];
+                          if (det && det.balance > 0) {
+                            setFormInitialBalance(det.balance);
+                            setFormDailyStop(Math.round(det.balance * 0.05) || 500);
+                            setFormMaxDd(Math.round(det.balance * 0.1) || 1000);
+                            setFormProfitTarget(Math.round(det.balance * 0.1) || 1000);
+                            if (formName.startsWith('Conta #')) {
+                              setFormName(det.name || `Conta MT5 #${det.account_number}`);
+                            }
+                          }
+                        }
+                      }}
                       className={`p-2.5 rounded-lg border text-left transition flex flex-col justify-between cursor-pointer ${
                         formPlatform === 'mt5'
                           ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300 ring-1 ring-emerald-500/40 shadow-sm'
@@ -1966,7 +2052,25 @@ export const AccountsDashboard: React.FC = () => {
                     {/* Opção 4: MetaTrader 4 */}
                     <button
                       type="button"
-                      onClick={() => { setFormPlatform('mt4'); setFormSendLocalhost(true); }}
+                      onClick={() => { 
+                        setFormPlatform('mt4'); 
+                        setFormSendLocalhost(false); 
+                        const mtConn = getLocalPlatformConnections().find(c => c.platform === 'mt4' && c.is_active);
+                        if (mtConn) {
+                          if (!formConnectionHost) setFormConnectionHost(mtConn.host_url || 'http://144.126.141.254');
+                          if (!formPairingToken) setFormPairingToken(mtConn.pairing_token || 'vps_mt4');
+                          const det = mtConn.detected_accounts_detail?.[0];
+                          if (det && det.balance > 0) {
+                            setFormInitialBalance(det.balance);
+                            setFormDailyStop(Math.round(det.balance * 0.05) || 500);
+                            setFormMaxDd(Math.round(det.balance * 0.1) || 1000);
+                            setFormProfitTarget(Math.round(det.balance * 0.1) || 1000);
+                            if (formName.startsWith('Conta #')) {
+                              setFormName(det.name || `Conta MT4 #${det.account_number}`);
+                            }
+                          }
+                        }
+                      }}
                       className={`p-2.5 rounded-lg border text-left transition flex flex-col justify-between cursor-pointer ${
                         formPlatform === 'mt4'
                           ? 'bg-sky-600/20 border-sky-500 text-sky-300 ring-1 ring-sky-500/40 shadow-sm'
@@ -2207,19 +2311,27 @@ export const AccountsDashboard: React.FC = () => {
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="block text-slate-400">Saldo Inicial (US$)</label>
-                      {editingAccount && (editingAccount.platform === 'nt8' || editingAccount.send_localhost) && (
+                      {editingAccount && (editingAccount.platform === 'nt8' || editingAccount.send_localhost) ? (
                         <span className="text-[10px] text-amber-400 font-semibold bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/30">
                           🔒 Gerenciado pelo NinjaTrader
                         </span>
-                      )}
+                      ) : (formPlatform === 'mt4' || formPlatform === 'mt5' || editingAccount?.platform === 'mt4' || editingAccount?.platform === 'mt5') ? (
+                        <span className="text-[10px] text-sky-400 font-semibold bg-sky-500/10 px-1.5 py-0.5 rounded border border-sky-500/30">
+                          🔒 Sincronizado com a Corretora (MetaTrader)
+                        </span>
+                      ) : null}
                     </div>
                     <input
                       type="number"
                       value={formInitialBalance}
-                      disabled={Boolean(editingAccount && (editingAccount.platform === 'nt8' || editingAccount.send_localhost))}
+                      disabled={Boolean(
+                        (editingAccount && (editingAccount.platform === 'nt8' || editingAccount.send_localhost)) ||
+                        formPlatform === 'mt4' || formPlatform === 'mt5' || editingAccount?.platform === 'mt4' || editingAccount?.platform === 'mt5'
+                      )}
                       onChange={e => setFormInitialBalance(Number(e.target.value))}
                       className={`w-full bg-slate-950 border border-slate-800 rounded p-2 text-white font-medium focus:outline-none focus:border-blue-500 ${
-                        editingAccount && (editingAccount.platform === 'nt8' || editingAccount.send_localhost) ? 'opacity-60 cursor-not-allowed' : ''
+                        ((editingAccount && (editingAccount.platform === 'nt8' || editingAccount.send_localhost)) ||
+                        formPlatform === 'mt4' || formPlatform === 'mt5' || editingAccount?.platform === 'mt4' || editingAccount?.platform === 'mt5') ? 'opacity-60 cursor-not-allowed' : ''
                       }`}
                     />
                   </div>

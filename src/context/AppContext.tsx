@@ -13906,15 +13906,33 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       if (snap.balance !== undefined) {
         const newBal = Number(snap.balance);
         const newEq = Number(snap.equity ?? newBal);
-        if (newBal > 0 && (acc.balance !== newBal || acc.equity !== newEq)) {
-          acc.balance = newBal;
-          acc.equity = newEq;
-          if (activeAccountRef.current?.id === acc.id) {
-            activeAccountRef.current = { ...acc };
-            setActiveAccount({ ...acc });
+        if (newBal > 0) {
+          const needsFixInitial = acc.initial_balance === 50000 && newBal < 25000;
+          const balChanged = acc.balance !== newBal || acc.equity !== newEq;
+          if (balChanged || needsFixInitial) {
+            acc.balance = newBal;
+            acc.equity = newEq;
+            if (needsFixInitial) {
+              acc.initial_balance = newBal;
+              acc.high_watermark = newBal;
+              acc.eod_baseline_balance = newBal;
+            }
+            if (activeAccountRef.current?.id === acc.id) {
+              activeAccountRef.current = { ...acc };
+              setActiveAccount({ ...acc });
+            }
+            setAccounts(prev => prev.map(a => a.id === acc.id ? {
+              ...a,
+              balance: newBal,
+              equity: newEq,
+              ...(needsFixInitial ? { initial_balance: newBal, high_watermark: newBal, eod_baseline_balance: newBal } : {})
+            } : a));
+            updateAccountSupabase(acc.id, {
+              balance: newBal,
+              equity: newEq,
+              ...(needsFixInitial ? { initial_balance: newBal, high_watermark: newBal, eod_baseline_balance: newBal } : {})
+            }).catch(() => {});
           }
-          setAccounts(prev => prev.map(a => a.id === acc.id ? { ...a, balance: newBal, equity: newEq } : a));
-          updateAccountSupabase(acc.id, { balance: newBal, equity: newEq }).catch(() => {});
         }
       }
 
@@ -14036,15 +14054,33 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
             if (mtAccInfo && mtAccInfo.balance !== undefined) {
               const newBal = Number(mtAccInfo.balance);
               const newEq = Number(mtAccInfo.equity || newBal);
-              if (newBal > 0 && (primaryAcc.balance !== newBal || primaryAcc.equity !== newEq)) {
-                primaryAcc.balance = newBal;
-                primaryAcc.equity = newEq;
-                if (activeAccountRef.current?.id === primaryAcc.id) {
-                  activeAccountRef.current = { ...primaryAcc };
-                  setActiveAccount({ ...primaryAcc });
+              if (newBal > 0) {
+                const needsFixInitial = primaryAcc.initial_balance === 50000 && newBal < 25000;
+                const balChanged = primaryAcc.balance !== newBal || primaryAcc.equity !== newEq;
+                if (balChanged || needsFixInitial) {
+                  primaryAcc.balance = newBal;
+                  primaryAcc.equity = newEq;
+                  if (needsFixInitial) {
+                    primaryAcc.initial_balance = newBal;
+                    primaryAcc.high_watermark = newBal;
+                    primaryAcc.eod_baseline_balance = newBal;
+                  }
+                  if (activeAccountRef.current?.id === primaryAcc.id) {
+                    activeAccountRef.current = { ...primaryAcc };
+                    setActiveAccount({ ...primaryAcc });
+                  }
+                  setAccounts(prev => prev.map(a => a.id === primaryAcc.id ? {
+                    ...a,
+                    balance: newBal,
+                    equity: newEq,
+                    ...(needsFixInitial ? { initial_balance: newBal, high_watermark: newBal, eod_baseline_balance: newBal } : {})
+                  } : a));
+                  updateAccountSupabase(primaryAcc.id, {
+                    balance: newBal,
+                    equity: newEq,
+                    ...(needsFixInitial ? { initial_balance: newBal, high_watermark: newBal, eod_baseline_balance: newBal } : {})
+                  }).catch(() => {});
                 }
-                setAccounts(prev => prev.map(a => a.id === primaryAcc.id ? { ...a, balance: newBal, equity: newEq } : a));
-                updateAccountSupabase(primaryAcc.id, { balance: newBal, equity: newEq }).catch(() => {});
               }
             }
           }
