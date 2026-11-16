@@ -4130,14 +4130,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetDays = Math.max(3, Number(targetSettings?.chart_history_days) || 3);
     const loadedDays = Number((cache as any).loadedHistoryDays || 0);
 
-    // OTIMIZAÇÃO DE VELOCIDADE: Se já temos velas em memória ou localmente, plota na hora (0ms)!
-    const hasCachedCandles = Boolean(cache.candles && cache.candles.length > 0);
-    if (hasCachedCandles) {
-      setCandles(cache.candles || []);
+    // OTIMIZAÇÃO DE VELOCIDADE COM GUARDA DE FRESCOR:
+    // Se já temos velas em memória ou localmente, valida se não são de pregão anterior (>15 min) nem contêm lacunas
+    const cCandles = cache.candles || [];
+    const hasCachedCandles = cCandles.length > 0;
+    const lastMemoryCandle = hasCachedCandles ? cCandles[cCandles.length - 1] : null;
+    const lastMemoryMs = lastMemoryCandle?.timestamp ? new Date(lastMemoryCandle.timestamp).getTime() : 0;
+    const isMemoryStale = !lastMemoryMs || isNaN(lastMemoryMs) || (Date.now() - lastMemoryMs > 15 * 60 * 1000);
+    const memoryHasGap = hasCachedCandles ? detectInternalCandleGap(cCandles) : false;
+
+    if (hasCachedCandles && !isMemoryStale && !memoryHasGap) {
+      setCandles(cCandles);
       setIsCandlesLoading(false);
     } else {
+      if (hasCachedCandles && (isMemoryStale || memoryHasGap)) {
+        cache.candles = [];
+        initialLoadedPanelsRef.current.delete(panelId);
+      }
       const stored = getLocalCandles(panelId) || (targetPanel.instance_id ? getLocalCandles(targetPanel.instance_id) : null);
-      if (stored && stored.length > 0) {
+      if (stored && stored.length > 0 && !detectInternalCandleGap(stored)) {
         cache.candles = stored;
         setCandles(stored);
         setIsCandlesLoading(false);

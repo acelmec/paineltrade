@@ -3743,11 +3743,15 @@ export function detectInternalCandleGap(candles: Candle[]): boolean {
     const diffMin = (tCurr - tPrev) / (1000 * 60);
     if (diffMin > 5) {
       const dPrev = new Date(tPrev);
+      const dCurr = new Date(tCurr);
       const prevUtcHour = dPrev.getUTCHours();
       const prevDay = dPrev.getUTCDay(); // 0 = Domingo, 5 = Sexta, 6 = Sábado
+      const currDay = dCurr.getUTCDay();
       
-      // Sexta para Domingo: pregão fecha sexta à tarde e reabre domingo à noite
-      const isWeekendBreak = (prevDay === 5 && diffMin > 60) || prevDay === 6 || (prevDay === 0 && dPrev.getUTCHours() < 23);
+      // Sexta para Domingo: pregão fecha sexta à tarde (~21h/22h UTC) e reabre domingo à noite (~23h UTC).
+      // Se a próxima vela for da reabertura de domingo (diffMin <= 3100 e dCurr no domingo), é a pausa regular de fim de semana.
+      // Se a próxima vela já estiver na Segunda-feira ou diffMin > 3100, HÁ LACUNA INTERNA (faltam as velas da reabertura de domingo e madrugada/manhã de segunda)!
+      const isWeekendBreak = (prevDay === 5 && currDay === 0 && diffMin <= 3100) || (prevDay === 5 && currDay === 1 && dCurr.getUTCHours() <= 1 && diffMin <= 3100);
       // Pausa diária da CME: seg a qui entre 20:00 UTC e 22:30 UTC (cobre tanto DST quanto Standard Time, 15m a 90m)
       const isDailyCmeBreak = (prevUtcHour >= 20 && prevUtcHour <= 22 && diffMin <= 90);
 

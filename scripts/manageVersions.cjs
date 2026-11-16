@@ -89,12 +89,19 @@ const TARGET_FILENAMES = {
 
 function resolveSourceFile(type) {
   const candidates = PACKAGE_SOURCES[type] || [];
+  let newestFile = null;
+  let newestMtime = -1;
+
   for (const c of candidates) {
     if (fs.existsSync(c) && fs.statSync(c).isFile()) {
-      return c;
+      const mtime = fs.statSync(c).mtimeMs;
+      if (mtime > newestMtime) {
+        newestMtime = mtime;
+        newestFile = c;
+      }
     }
   }
-  return null;
+  return newestFile;
 }
 
 /**

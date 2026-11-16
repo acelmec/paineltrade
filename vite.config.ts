@@ -1,5 +1,27 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import fs from 'fs'
+import path from 'path'
+
+function excludePublicVersionsFromDist(): Plugin {
+  return {
+    name: 'exclude-public-versions-from-dist',
+    closeBundle() {
+      // Evita inchaço do dist com pastas de releases/versões públicas (V<DDMMAAAA>_NN)
+      const distDir = path.resolve(__dirname, 'dist');
+      if (fs.existsSync(distDir)) {
+        const entries = fs.readdirSync(distDir, { withFileTypes: true });
+        for (const e of entries) {
+          if (e.isDirectory() && /^V\d{8}_\d+$/.test(e.name)) {
+            try {
+              fs.rmSync(path.join(distDir, e.name), { recursive: true, force: true });
+            } catch {}
+          }
+        }
+      }
+    }
+  };
+}
 
 function lightweightChartsSafetyPlugin(): Plugin {
   return {
@@ -32,7 +54,7 @@ function lightweightChartsSafetyPlugin(): Plugin {
 // https://vite.dev/config/
 export default defineConfig({
   base: './',
-  plugins: [lightweightChartsSafetyPlugin(), react()],
+  plugins: [lightweightChartsSafetyPlugin(), react(), excludePublicVersionsFromDist()],
   server: {
     port: 5173,
     strictPort: false,
