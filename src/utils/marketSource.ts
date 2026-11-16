@@ -16,6 +16,47 @@ export interface MarketSourceInfo {
 }
 
 /**
+ * Formata as partes de um nome de ativo:
+ * - Ativo: sempre em CAIXA ALTA (ex: "EURUSD", "BTCUSD", "NASDAQ")
+ * - Corretora: formatação suave (sem caixa alta forçada) para estilização não-bold e mais clara
+ * Ex: "EURUSD - ACTIVTRADES" -> { assetPart: "EURUSD", brokerPart: "ActivTrades" }
+ * Ex: "BNBUSDT - BINANCE FUTUROS" -> { assetPart: "BNBUSDT", brokerPart: "Binance Futuros" }
+ */
+export function formatAssetNameParts(rawName: string): { assetPart: string; brokerPart: string | null } {
+  if (!rawName) return { assetPart: 'ATIVO', brokerPart: null };
+  const cleaned = rawName.replace(/\s*\([^)]*\)/g, '').trim();
+  if (cleaned.includes(' - ')) {
+    const parts = cleaned.split(' - ');
+    const assetPart = parts[0].trim().toUpperCase();
+    let rawBroker = parts.slice(1).join(' - ').trim();
+
+    // Dicionário de capitalização elegante para corretoras conhecidas
+    const brokerLower = rawBroker.toLowerCase();
+    let brokerPart = rawBroker;
+    if (brokerLower === 'activtrades' || brokerLower === 'activtrade') {
+      brokerPart = 'ActivTrades';
+    } else if (brokerLower === 'pepperstone') {
+      brokerPart = 'Pepperstone';
+    } else if (brokerLower === 'binance spot') {
+      brokerPart = 'Binance Spot';
+    } else if (brokerLower === 'binance spot demo') {
+      brokerPart = 'Binance Spot Demo';
+    } else if (brokerLower.includes('binance') && brokerLower.includes('futur') && brokerLower.includes('demo')) {
+      brokerPart = 'Binance Futuros Demo';
+    } else if (brokerLower.includes('binance') && brokerLower.includes('futur')) {
+      brokerPart = 'Binance Futuros';
+    } else if (brokerLower === 'ic markets' || brokerLower === 'icmarkets') {
+      brokerPart = 'IC Markets';
+    } else if (rawBroker === rawBroker.toUpperCase() && rawBroker.length > 3) {
+      brokerPart = rawBroker.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    }
+
+    return { assetPart, brokerPart };
+  }
+  return { assetPart: cleaned.toUpperCase(), brokerPart: null };
+}
+
+/**
  * Normaliza strings para comparação flexível e case-insensitive
  */
 function cleanStr(val: any): string {

@@ -31,6 +31,7 @@ import { getAccountManualStrategyId, fetchChartDrawingsSupabase, saveChartDrawin
 import { evaluateDrawingTrigger } from '../utils/drawingEngine';
 import { calculateTradeManagement } from '../utils/levelPriceResolver';
 import { useIsMobile } from '../utils/platform';
+import { formatAssetNameParts } from '../utils/marketSource';
 
 export const TradeWorkstation: React.FC = () => {
   const {
@@ -2391,7 +2392,7 @@ export const TradeWorkstation: React.FC = () => {
               <div>
                 <div className="grid grid-cols-2 gap-1.5">
                   {panels?.map((p: any) => {
-                    const cleanName = p.name ? p.name.replace(/\s*\([^)]*\)/g, '').trim() : 'Painel';
+                    const { assetPart, brokerPart } = formatAssetNameParts(p.name || p.symbol || 'Painel');
                     const isSel = (focusedSlot.panelId === p.id) || (!focusedSlot.panelId && activePanel?.id === p.id);
                     return (
                       <button
@@ -2401,14 +2402,17 @@ export const TradeWorkstation: React.FC = () => {
                           updateSlotByIndex(effectiveFocusedIdx, s => ({ ...s, panelId: p.id }));
                           setIsMobileLeftDrawerOpen(false);
                         }}
-                        className={`p-2 rounded-xl text-xs font-black text-left transition flex items-center justify-between border cursor-pointer ${
+                        className={`p-2 rounded-xl text-xs text-left transition flex items-center justify-between border cursor-pointer ${
                           isSel
                             ? 'bg-blue-600/30 border-blue-500 text-blue-300 shadow-md'
                             : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:bg-slate-800'
                         }`}
                       >
-                        <span className="truncate">{cleanName}</span>
-                        {isSel && <span className="text-[10px] text-cyan-400">✓</span>}
+                        <div className="flex items-center gap-1 truncate">
+                          <span className="font-bold text-white uppercase">{assetPart}</span>
+                          {brokerPart && <span className="font-normal text-slate-400 text-[10px] normal-case">- {brokerPart}</span>}
+                        </div>
+                        {isSel && <span className="text-[10px] text-cyan-400 font-bold">✓</span>}
                       </button>
                     );
                   })}

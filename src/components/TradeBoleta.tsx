@@ -8,7 +8,7 @@ import { resolveLevelPrice, calculateRangeHlLevels } from '../utils/levelPriceRe
 import { checkNinjaStatus, fetchNinjaPositionsAndOrders } from '../services/ninjaGateway';
 import { getLocalPlatformConnections } from '../services/connectionsService';
 import { useIsMobile } from '../utils/platform';
-import { filterAccountsForAsset, resolveAssetSource } from '../utils/marketSource';
+import { filterAccountsForAsset, resolveAssetSource, formatAssetNameParts } from '../utils/marketSource';
 
 interface TradeBoletaProps {
   selectedAsset: string;
@@ -1486,10 +1486,11 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 title="Clique para alternar o ativo"
               >
                 {(panels || []).map((p: any) => {
-                  const cleanName = p.name ? p.name.replace(/\s*\([^)]*\)/g, '').trim() : 'Ativo';
+                  const { assetPart, brokerPart } = formatAssetNameParts(p.name || p.symbol || 'Ativo');
+                  const label = brokerPart ? `${assetPart} - ${brokerPart}` : assetPart;
                   return (
                     <option key={p.id} value={p.id} className="bg-slate-900 text-white font-bold">
-                      {cleanName.toUpperCase()}
+                      {label}
                     </option>
                   );
                 })}

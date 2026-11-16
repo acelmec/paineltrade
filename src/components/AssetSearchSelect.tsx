@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { formatAssetNameParts } from '../utils/marketSource';
 
 interface AssetSearchSelectProps {
   panels: any[];
@@ -26,10 +27,10 @@ export const AssetSearchSelect: React.FC<AssetSearchSelectProps> = ({
     return (panels || []).find(p => p.id === currentPanelId) || panels?.[0];
   }, [panels, currentPanelId]);
 
-  const displayName = useMemo(() => {
-    if (!currentPanel) return 'ATIVO';
+  const { assetPart, brokerPart } = useMemo(() => {
+    if (!currentPanel) return { assetPart: 'ATIVO', brokerPart: null };
     const raw = currentPanel.name || currentPanel.symbol || 'Painel';
-    return raw.replace(/\s*\([^)]*\)/g, '').trim().toUpperCase();
+    return formatAssetNameParts(raw);
   }, [currentPanel]);
 
   // Fecha dropdown ao clicar fora
@@ -90,13 +91,18 @@ export const AssetSearchSelect: React.FC<AssetSearchSelectProps> = ({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onClick={(e) => e.stopPropagation()}
-            placeholder={displayName}
-            className="bg-transparent text-white font-black outline-none border-b border-blue-500 w-20 uppercase text-[10px] placeholder:text-slate-400"
+            placeholder={assetPart}
+            className="bg-transparent text-white font-black outline-none border-b border-blue-500 w-24 uppercase text-[10px] placeholder:text-slate-400"
           />
         ) : (
-          <span className="truncate max-w-[110px]" title={currentPanel?.name || displayName}>
-            {displayName}
-          </span>
+          <div className="flex items-center gap-1 truncate max-w-[150px]" title={currentPanel?.name || assetPart}>
+            <span className="font-bold text-white uppercase tracking-wider shrink-0">{assetPart}</span>
+            {brokerPart && (
+              <span className="font-normal text-slate-400 text-[10px] normal-case tracking-normal truncate">
+                - {brokerPart}
+              </span>
+            )}
+          </div>
         )}
         <span className="text-slate-400 text-[8px] pointer-events-none ml-0.5">▼</span>
       </div>
@@ -123,7 +129,7 @@ export const AssetSearchSelect: React.FC<AssetSearchSelectProps> = ({
             {filteredPanels.length > 0 ? (
               filteredPanels.map((p) => {
                 const isSelected = p.id === currentPanelId;
-                const cleanName = p.name ? p.name.replace(/\s*\([^)]*\)/g, '').trim() : 'Painel';
+                const { assetPart: aPart, brokerPart: bPart } = formatAssetNameParts(p.name || p.symbol || 'Painel');
                 return (
                   <button
                     key={p.id}
@@ -134,13 +140,20 @@ export const AssetSearchSelect: React.FC<AssetSearchSelectProps> = ({
                       setSearchQuery('');
                     }}
                     className={`w-full text-left px-2.5 py-1.5 flex items-center justify-between gap-2 hover:bg-blue-600/20 transition-colors ${
-                      isSelected ? 'bg-blue-600/30 text-blue-400 font-bold' : 'text-slate-200'
+                      isSelected ? 'bg-blue-600/30' : ''
                     }`}
                   >
-                    <div className="flex flex-col truncate">
-                      <span className="font-extrabold uppercase truncate tracking-wide">{cleanName}</span>
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className={`font-bold uppercase tracking-wide shrink-0 ${isSelected ? 'text-blue-400' : 'text-white'}`}>
+                        {aPart}
+                      </span>
+                      {bPart && (
+                        <span className={`font-normal text-[10px] normal-case tracking-normal truncate ${isSelected ? 'text-blue-300/80' : 'text-slate-400'}`}>
+                          - {bPart}
+                        </span>
+                      )}
                     </div>
-                    {isSelected && <span className="text-blue-400 text-[10px]">✓</span>}
+                    {isSelected && <span className="text-blue-400 text-[10px] font-bold">✓</span>}
                   </button>
                 );
               })
