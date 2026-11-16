@@ -776,6 +776,29 @@ export const TradeWorkstation: React.FC = () => {
     });
   }, [saveSettings]);
 
+  const getEffectiveSlot = useCallback((idx: number): ChartSlotConfig => {
+    if (idx === 0) {
+      return {
+        id: 'slot_0',
+        panelId: activePanel?.id || pKey,
+        timeframe,
+        indicators: activeIndicators,
+        widgets: activeWidgets,
+        autoCenter,
+        showTradeMarkers,
+        showOrderLines,
+        showIndicatorsLegend,
+        showRobots,
+      };
+    }
+    const base = multiSlots[idx] || multiSlots[0];
+    return {
+      ...base,
+      panelId: (panels || []).some((p: any) => p.id === base.panelId) ? base.panelId : (activePanel?.id || pKey),
+      widgets: base.widgets || [],
+    };
+  }, [activePanel?.id, pKey, timeframe, activeIndicators, activeWidgets, autoCenter, showTradeMarkers, showOrderLines, showIndicatorsLegend, showRobots, multiSlots, panels]);
+
   // Informar ao AppContext quais painéis secundários estão visíveis no Multi-Gráfico para rodarem tick-a-tick em tempo real
   useEffect(() => {
     if (!setVisibleMultiPanelIds) return;
@@ -789,15 +812,19 @@ export const TradeWorkstation: React.FC = () => {
         : chartLayout.startsWith('triple')
         ? 3
         : 4;
-    const ids = multiSlots
-      .slice(0, slotsCount)
-      .map(s => s.panelId)
-      .filter(Boolean);
-    setVisibleMultiPanelIds(ids);
+    const ids: string[] = [];
+    for (let i = 0; i < slotsCount; i++) {
+      const slot = getEffectiveSlot(i);
+      if (slot && slot.panelId) {
+        ids.push(slot.panelId);
+      }
+    }
+    const uniqueIds = Array.from(new Set(ids));
+    setVisibleMultiPanelIds(uniqueIds);
     return () => {
       setVisibleMultiPanelIds([]);
     };
-  }, [chartLayout, multiSlots, setVisibleMultiPanelIds]);
+  }, [chartLayout, multiSlots, activePanel?.id, setVisibleMultiPanelIds, getEffectiveSlot]);
 
   const handleSelectLayout = useCallback((nextLayout: ChartLayoutType) => {
     setChartLayout(nextLayout);
@@ -837,29 +864,6 @@ export const TradeWorkstation: React.FC = () => {
     } catch {}
     return [];
   });
-
-  const getEffectiveSlot = useCallback((idx: number): ChartSlotConfig => {
-    if (idx === 0) {
-      return {
-        id: 'slot_0',
-        panelId: activePanel?.id || pKey,
-        timeframe,
-        indicators: activeIndicators,
-        widgets: activeWidgets,
-        autoCenter,
-        showTradeMarkers,
-        showOrderLines,
-        showIndicatorsLegend,
-        showRobots,
-      };
-    }
-    const base = multiSlots[idx] || multiSlots[0];
-    return {
-      ...base,
-      panelId: (panels || []).some((p: any) => p.id === base.panelId) ? base.panelId : (activePanel?.id || pKey),
-      widgets: base.widgets || [],
-    };
-  }, [activePanel?.id, pKey, timeframe, activeIndicators, activeWidgets, autoCenter, showTradeMarkers, showOrderLines, showIndicatorsLegend, showRobots, multiSlots, panels]);
 
   const effectiveFocusedIdx = chartLayout === 'single' ? 0 : focusedSlotIndex;
   const focusedSlot = useMemo(() => getEffectiveSlot(effectiveFocusedIdx), [getEffectiveSlot, effectiveFocusedIdx]);

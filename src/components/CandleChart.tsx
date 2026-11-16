@@ -4160,7 +4160,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
     // Diretriz de Segurança e Estabilidade:
     // O candle corrente só dispara plotagem/atualização APÓS o carregamento e plotagem consolidada do histórico!
-    if (!isHistoryPlottedRef.current || chartDataRef.current.length < 2 || loadingProgress?.isLoading) {
+    if (!isHistoryPlottedRef.current || chartDataRef.current.length < 2) {
       return;
     }
 
@@ -4212,12 +4212,10 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       }
     }
 
-    // Convenção de tempo por ecossistema:
-    // Para NT8 e Supabase (End of Bar / Close Time): o candle em formação é referenciado pelo horário de término (ex: 22:48:15 fecha às 22:49:00).
-    // Para Binance / MT4 / MT5 / cTrader (Start of Bar / Open Time): o candle em formação é referenciado pelo horário de início (22:48:00).
-    const currentBucketSec = isNt8OrSupabaseAsset
-      ? ((tickSec % bucketSec > 0) ? (Math.floor(tickSec / bucketSec) + 1) * bucketSec : Math.floor(tickSec / bucketSec) * bucketSec)
-      : Math.floor(tickSec / bucketSec) * bucketSec;
+    // Padrão Universal de Mercado (TradingView / Lightweight Charts / Supabase / NT8 / Binance / MT4 / MT5):
+    // Toda barra (candle) é rigorosamente indexada pelo horário de abertura do bucket (Start of Bar / Open Time).
+    // Às 02:14:05, o candle em formação de 1m pertence exatamente ao balde das 02:14:00 (Math.floor(tickSec / 60) * 60).
+    const currentBucketSec = Math.floor(tickSec / bucketSec) * bucketSec;
 
     // REGRA DE OURO INVIOLÁVEL: CANDLE FECHADO É SAGRADO E NUNCA PODE SER MUTADO!
     // Se o último candle do array possui tempo anterior ao bucket corrente (currentBucketSec > lastCandleTimeSec),
@@ -4257,12 +4255,14 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       const gapBars = Math.floor((currentBucketSec - lastCandleTimeSec) / bucketSec);
       if (gapBars <= 3) {
         const isBullish = true;
+        const prevClose = Number(lastCandle.close);
+        const openPrice = (prevClose && !isNaN(prevClose) && prevClose > 0) ? prevClose : resolvedPrice;
         const newCandle: any = {
           time: currentBucketSec,
           timestamp: new Date(currentBucketSec * 1000).toISOString(),
-          open: resolvedPrice,
-          high: resolvedPrice,
-          low: resolvedPrice,
+          open: openPrice,
+          high: Math.max(openPrice, resolvedPrice),
+          low: Math.min(openPrice, resolvedPrice),
           close: resolvedPrice,
           volume: 0
         };
@@ -8591,7 +8591,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           try { markersPluginRef.current.setMarkers([]); } catch (_) {}
         }
         candleSeriesRef.current.setData(chartData as any);
-        if (!loadingProgress?.isLoading && chartData.length >= 2) {
+        if (chartData.length >= 2) {
           isHistoryPlottedRef.current = true;
         }
         if (savedRange && mainChartRef.current) {
@@ -8613,7 +8613,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       }
 
       candleSeriesRef.current.setData(chartData as any);
-      if (!loadingProgress?.isLoading && chartData.length >= 2) {
+      if (chartData.length >= 2) {
         isHistoryPlottedRef.current = true;
       }
 

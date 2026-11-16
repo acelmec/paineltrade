@@ -4760,7 +4760,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     existingCandles: Candle[],
     price: number,
     tickTimeStrOrMs?: string | number | null,
-    targetPanel?: any
+    _targetPanel?: any
   ): { updatedCandles: Candle[]; hasChanged: boolean; isNewBar: boolean } => {
     if (!price || isNaN(price) || price <= 0 || !existingCandles || existingCandles.length === 0) {
       return { updatedCandles: existingCandles || [], hasChanged: false, isNewBar: false };
@@ -4768,9 +4768,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     let candles = existingCandles;
 
-    // Se ainda não temos histórico consistente carregado do banco (pelo menos 15 velas) ou se estamos em carga inicial, não alteramos
-    if (candles.length < 15 || isCandlesLoading) {
-      return { updatedCandles: candles, hasChanged: false, isNewBar: false };
+    // Se ainda não temos histórico consistente carregado do banco (pelo menos 5 velas), não alteramos
+    if (!candles || candles.length < 5) {
+      return { updatedCandles: candles || [], hasChanged: false, isNewBar: false };
     }
 
     // 1. Determina o horário de referência do tick com base no parâmetro fornecido ou no relógio real.
@@ -4791,35 +4791,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // 2. Convenção de Timestamp de Barra por Ativo e Plataforma:
-    // - ATIVOS SUPABASE & NT8 (NinjaTrader): 22:48:15 pertence ao candle em formação das 22:49:00 (horário de fechamento da barra)
-    // - BINANCE / MT4 / MT5 / cTrader: 22:48:15 pertence ao candle em formação das 22:48:00 (horário de abertura da barra)
-    const effPanel = targetPanel || activePanelRef.current;
-    const pInst = String(effPanel?.instance_id || '').toLowerCase();
-    const pName = String(effPanel?.name || '').toUpperCase();
-    const isStandardSupabase = isStandardSupabasePanel(effPanel);
-
-    // Identificação precisa por ativo (ativos padrão Supabase NUNCA são tratados como Binance nem MT4):
-    const isNt8OrSupabase = isStandardSupabase || (effPanel as any)?.platform === 'ninjatrader' || pInst.startsWith('nt8_') || pName.includes(' - NT8') || (
-      !pName.includes('BINANCE') && !pInst.endsWith('usdt') && !/USDT|BUSD|USDC/i.test(pName) && !pName.includes(' - MT4') && !pName.includes(' - MT5') && !pName.includes('ACTIVTRADES') &&
-      /^(NQ|MNQ|ES|MES|YM|MYM|RTY|M2K|CL|MCL|GC|MGC|WIN|WDO|RUSSELL|SP500|NASDAQ|GOLD|OIL)/i.test(pName)
-    );
-
-    const isExplicitMtOrBinance = !isNt8OrSupabase && (
-      pInst.startsWith('mt4_') ||
-      pInst.startsWith('mt5_') ||
-      pName.includes('ACTIVTRADES') ||
-      pName.includes(' - MT4') ||
-      pName.includes(' - MT5') ||
-      pName.includes('BINANCE') ||
-      pInst.endsWith('usdt') ||
-      /USDT|BUSD|USDC/i.test(pName) ||
-      (effPanel as any)?.platform === 'binance' ||
-      (effPanel as any)?.platform === 'mt4' ||
-      (effPanel as any)?.platform === 'mt5' ||
-      (effPanel as any)?.platform === 'ctrader'
-    );
-
+    // 2. Base temporal universal: Todo balde de 1 minuto é indexado pelo início do minuto (baseFloorBucketMs)
     const baseFloorBucketMs = Math.floor(tickMs / 60000) * 60000;
 
     // 3. Informações da última vela consolidada / em formação no array
@@ -4833,13 +4805,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const lastCandleBucketMs = !isNaN(lastCandleMs) ? Math.floor(lastCandleMs / 60000) * 60000 : baseFloorBucketMs;
 
-    // Se o ativo for NinjaTrader 8 ou Supabase (End of Bar / Close Time):
-    // Às 22:48:15, o candle em formação é o das 22:49:00 (baseFloorBucketMs + 60000). O primeiro fechado é 22:48:00.
-    // Para Binance / MT4 / cTrader (Start of Bar / Open Time):
-    // Às 22:48:15, o candle em formação é o das 22:48:00 (baseFloorBucketMs).
-    const tickBucketMs = isNt8OrSupabase
-      ? ((tickMs % 60000 > 0) ? baseFloorBucketMs + 60000 : baseFloorBucketMs)
-      : (isExplicitMtOrBinance ? baseFloorBucketMs : ((lastCandleBucketMs === baseFloorBucketMs + 60000 && tickMs % 60000 > 0) ? baseFloorBucketMs + 60000 : baseFloorBucketMs));
+    // Padrão Universal de Mercado (TradingView / Supabase / NT8 / Binance / MT4 / MT5):
+    // Todo balde temporal é indexado pelo início do minuto (baseFloorBucketMs).
+    // Às 02:14:05, o candle em formação pertence exatamente ao minuto 02:14:00.
+    const tickBucketMs = baseFloorBucketMs;
 
     // Cotação defasada (tick de um minuto anterior à última vela): NÃO altera e JAMAIS apaga velas reais do histórico.
     if (lastCandleBucketMs > tickBucketMs) {
@@ -9191,7 +9160,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const lastCandles = cache.lastCandlesFetch || 0;
       const lastScreenshot = cache.lastScreenshotFetch || 0;
       const isForced = lastCandles === 0;
-      const effectiveCandlesInterval = checkIsActive() ? candlesInterval : Math.max(candlesInterval, 5000);
+      const isActivePanelNow = checkIsActive();
+      const isVisibleMultiPanel = visibleMultiPanelIdsRef.current.includes(targetPanel.id);
+      const isPanelDisplayed = isActivePanelNow || isVisibleMultiPanel;
+      const effectiveCandlesInterval = isPanelDisplayed ? candlesInterval : Math.max(candlesInterval, 5000);
 
       const hasExisting = Boolean(cache.candles && cache.candles.length > 0);
       const historyDays = Math.max(3, Number(targetSettings.chart_history_days) || 3);
@@ -9240,9 +9212,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         // REGRA DE OURO: Se já temos velas na memória, buscamos apenas as últimas 50 para preencher qualquer gap da ponta.
         // O limite histórico completo (ex: 4320 barras para 3 dias) só é consultado na carga inicial do painel ativo ou por recarga forçada!
-        const isActivePanelNow = checkIsActive();
-        const isVisibleMultiPanel = visibleMultiPanelIdsRef.current.includes(targetPanel.id);
-        const isPanelDisplayed = isActivePanelNow || isVisibleMultiPanel;
         const effectiveMaxLimit = isPanelDisplayed ? maxCandleLimit : Math.min(maxCandleLimit, 500);
         const lastCandle = hasExisting && cache.candles && cache.candles.length > 0 ? cache.candles[cache.candles.length - 1] : null;
         const deltaSince = (!isForced && hasExisting && !hasGap && !isInitialForPanel && lastCandle?.timestamp) ? lastCandle.timestamp : undefined;
