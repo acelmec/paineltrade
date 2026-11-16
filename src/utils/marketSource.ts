@@ -17,14 +17,17 @@ export interface MarketSourceInfo {
 
 /**
  * Formata as partes de um nome de ativo:
- * - Ativo: sempre em CAIXA ALTA (ex: "EURUSD", "BTCUSD", "NASDAQ")
- * - Corretora: formatação suave (sem caixa alta forçada) para estilização não-bold e mais clara
+ * - Ativo: sempre em CAIXA ALTA (ex: "EURUSD", "BTCUSD", "NASDAQ", "SP500", "GOLD")
+ * - Corretora / Fonte: formatação suave (sem caixa alta forçada) para estilização clara
  * Ex: "EURUSD - ACTIVTRADES" -> { assetPart: "EURUSD", brokerPart: "ActivTrades" }
  * Ex: "BNBUSDT - BINANCE FUTUROS" -> { assetPart: "BNBUSDT", brokerPart: "Binance Futuros" }
+ * Ex: Ativos Supabase Admin ("NASDAQ", "SP500", "DOWJONES", "RUSSEL 2000", "OIL", "GOLD", etc.) -> { assetPart: "...", brokerPart: "AxionDB" }
  */
-export function formatAssetNameParts(rawName: string): { assetPart: string; brokerPart: string | null } {
-  if (!rawName) return { assetPart: 'ATIVO', brokerPart: null };
-  const cleaned = rawName.replace(/\s*\([^)]*\)/g, '').trim();
+export function formatAssetNameParts(rawName: string, panel?: any, panelSettings?: any): { assetPart: string; brokerPart: string | null } {
+  if (!rawName && !panel) return { assetPart: 'ATIVO', brokerPart: null };
+  const effectiveRaw = String(rawName || panel?.name || panel?.symbol || 'Ativo');
+  const cleaned = effectiveRaw.replace(/\s*\([^)]*\)/g, '').trim();
+
   if (cleaned.includes(' - ')) {
     const parts = cleaned.split(' - ');
     const assetPart = parts[0].trim().toUpperCase();
@@ -47,13 +50,66 @@ export function formatAssetNameParts(rawName: string): { assetPart: string; brok
       brokerPart = 'Binance Futuros';
     } else if (brokerLower === 'ic markets' || brokerLower === 'icmarkets') {
       brokerPart = 'IC Markets';
+    } else if (brokerLower === 'axiondb' || brokerLower === 'axion db' || brokerLower === 'supabase' || brokerLower === 'axion') {
+      brokerPart = 'AxionDB';
     } else if (rawBroker === rawBroker.toUpperCase() && rawBroker.length > 3) {
       brokerPart = rawBroker.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
     }
 
     return { assetPart, brokerPart };
   }
-  return { assetPart: cleaned.toUpperCase(), brokerPart: null };
+
+  // Ativo sem sufixo " - Corretora"
+  const upperClean = cleaned.toUpperCase();
+  const inst = String(panel?.instance_id || '').toLowerCase().trim();
+
+  // Verifica se o painel é do feed Supabase (Admin, canonical ou source_market supabase)
+  const isSupabaseAsset = isStandardSupabasePanel(panel, panelSettings);
+
+  // Mapeamento canônico para ativos conhecidos mesmo sem o objeto panel completo
+  const cleanInst = inst.replace(/[^a-z0-9]/g, '');
+  const cleanName = upperClean.replace(/[^A-Z0-9]/g, '');
+
+  const isCanonicalSupabase = [
+    'NASDAQ', 'NQ', 'MNQ', 'PAINELPRINCIPAL',
+    'SP500', 'SP505', 'ES', 'MES',
+    'DOWJONES', 'DOW', 'YM', 'MYM',
+    'RUSSEL2000', 'RUSSEL', 'RUSSELL2000', 'RUSSELL', 'RTY', 'M2K',
+    'OIL', 'IOL', 'PETROLEO', 'WTI', 'CL',
+    'GOLD', 'OURO', 'GC'
+  ].some(k => cleanName === k || cleanInst === k.toLowerCase() || cleanName.startsWith(k));
+
+  // Se for qualquer ativo do feed Supabase (atual ou criado futuramente no Admin)
+  if (
+    isSupabaseAsset ||
+    isCanonicalSupabase ||
+    panel?.subscription_id === 'admin' ||
+    panel?.source_market === 'supabase' ||
+    panelSettings?.source_market === 'supabase' ||
+    inst.startsWith('painel_')
+  ) {
+    let normalizedAsset = upperClean;
+    if (normalizedAsset === 'PAINEL PRINCIPAL' || inst === 'painel_principal' || inst === 'painel_principal_web') {
+      normalizedAsset = 'NASDAQ';
+    } else if (cleanName === 'IOL') {
+      normalizedAsset = 'OIL';
+    } else if (cleanName === 'RUSSEL2000' || cleanName === 'RUSSELL2000') {
+      normalizedAsset = upperClean.includes(' ') ? upperClean : 'RUSSEL 2000';
+    }
+    return { assetPart: normalizedAsset, brokerPart: 'AxionDB' };
+  }
+
+  return { assetPart: upperClean, brokerPart: null };
+}
+
+/**
+ * Retorna o rótulo completo de exibição do ativo (ex: "NASDAQ - AxionDB", "SP500 - AxionDB", "EURUSD - ActivTrades")
+ */
+export function getAssetDisplayName(panelOrName: any, panelObj?: any, panelSettings?: any): string {
+  const rawName = typeof panelOrName === 'string' ? panelOrName : (panelOrName?.name || panelOrName?.symbol || 'Ativo');
+  const panel = panelObj || (typeof panelOrName === 'object' ? panelOrName : null);
+  const { assetPart, brokerPart } = formatAssetNameParts(rawName, panel, panelSettings);
+  return brokerPart ? `${assetPart} - ${brokerPart}` : assetPart;
 }
 
 /**
@@ -372,6 +428,9 @@ export function isTickMatchingPanel(detail: any, panel: any, activeAccount?: any
     if (tickSym === pSym || tickSym === pInst) return true;
     if (tickSym === basePName) return true;
     if (pInst.toLowerCase() === tickSym.toLowerCase() || pInst.toLowerCase() === `mt4_${tickSym.toLowerCase()}`) return true;
+    const cleanTick = tickSym.replace(/[^A-Z0-9]/g, '');
+    const cleanBase = basePName.replace(/[^A-Z0-9]/g, '');
+    if (cleanTick.length > 0 && cleanBase.length > 0 && (cleanTick.startsWith(cleanBase) || cleanBase.startsWith(cleanTick))) return true;
     return false;
   }
 
@@ -384,25 +443,25 @@ export function isTickMatchingPanel(detail: any, panel: any, activeAccount?: any
 
   // 4. Ecossistema SUPABASE / NINJATRADER 8
   if (panelSource.ecosystem === 'supabase' || panelSource.ecosystem === 'nt8') {
-    // Rejeita ticks de Binance ou MetaTrader
-    if (tickSrc && ['binance', 'mt', 'mt4', 'mt5', 'ctrader'].includes(tickSrc)) return false;
+    // Rejeita ticks de Binance ou cTrader ou pares puramente crypto/forex não vinculados
+    if (tickSrc && ['binance', 'ctrader'].includes(tickSrc)) return false;
     if (/USDT|BUSD|USDC/i.test(tickSym)) return false;
     if (/^(BTC|ETH|SOL|BNB|EURUSD|GBPUSD|AUDUSD|USDJPY)/i.test(tickSym)) return false;
 
     if (tickSym === pSym || tickSym === pInst || tickSym === pName) return true;
 
-    // Ativos canônicos padrão: NQ -> NASDAQ, ES -> SP500, RTY -> RUSSEL2000, YM -> DOWJONES, CL -> OIL, GC -> GOLD
+    // Ativos canônicos padrão com suporte a Futuros CME e CFDs MetaTrader (ActivTrades / Pepperstone / etc.)
     const canonicalMap: Record<string, string[]> = {
-      'NASDAQ': ['NQ', 'MNQ', 'NASDAQ'],
-      'SP500': ['ES', 'MES', 'SP500', 'S&P500'],
-      'RUSSEL2000': ['RTY', 'M2K', 'RUSSELL2000', 'RUSSEL2000', 'RUSSELL'],
-      'DOWJONES': ['YM', 'MYM', 'DOWJONES', 'DOW'],
-      'OIL': ['CL', 'MCL', 'OIL', 'PETROLEO'],
-      'GOLD': ['GC', 'MGC', 'GOLD', 'OURO']
+      'NASDAQ': ['NQ', 'MNQ', 'NASDAQ', 'USATEC', 'USTEC', 'NAS100', 'US100', 'NDX'],
+      'SP500': ['ES', 'MES', 'SP500', 'S&P500', 'USA500', 'US500', 'SPX500'],
+      'RUSSEL2000': ['RTY', 'M2K', 'RUSSELL2000', 'RUSSEL2000', 'RUSSELL', 'USARUS', 'US2000'],
+      'DOWJONES': ['YM', 'MYM', 'DOWJONES', 'DOW', 'USAIND', 'US30', 'DJ30'],
+      'OIL': ['CL', 'MCL', 'OIL', 'PETROLEO', 'LCRUDE', 'WTI', 'BRENT'],
+      'GOLD': ['GC', 'MGC', 'GOLD', 'OURO', 'XAUUSD', 'XAU']
     };
     for (const [canon, aliases] of Object.entries(canonicalMap)) {
       if (pName.includes(canon) || pInst.includes(canon.toLowerCase())) {
-        if (aliases.includes(tickSym)) return true;
+        if (aliases.some(a => tickSym === a || tickSym.startsWith(a))) return true;
       }
     }
     return false;

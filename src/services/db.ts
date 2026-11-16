@@ -31,8 +31,8 @@ export const getStableManualStrategyId = (panelId?: string | null, existingId?: 
   return newId;
 };
 
-// Helper para evitar que chamadas de rede do Supabase travem a UI por mais de 3.5 segundos
-export const withDbTimeout = <T = any>(promise: Promise<T> | any, ms: number = 3500): Promise<T> => {
+// Helper para evitar que chamadas de rede do Supabase travem a UI por mais de 8 segundos
+export const withDbTimeout = <T = any>(promise: Promise<T> | any, ms: number = 8000): Promise<T> => {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) =>
@@ -108,6 +108,25 @@ export function resolvePanelTickSize(panel?: any, settings?: any): number {
     if (saved && Number(saved) > 0) return Number(saved);
   }
   const sym = (panel?.gamma_symbol || panel?.symbol || panel?.name || '').toUpperCase();
+  // Forex: JPY (3 decimais), Outros pares Forex (5 decimais, ex: 1.10047)
+  if (sym.includes('JPY')) {
+    return 0.001;
+  }
+  if (
+    /^(EUR|GBP|AUD|NZD|CAD|CHF)/i.test(sym) ||
+    sym.includes('EURUSD') || sym.includes('GBPUSD') || sym.includes('AUDUSD') ||
+    sym.includes('USDCAD') || sym.includes('USDCHF') || sym.includes('NZDUSD') ||
+    sym.includes('EURGBP') || sym.includes('EURJPY') || sym.includes('GBPJPY')
+  ) {
+    return 0.00001;
+  }
+  // Criptoativos
+  if (sym.includes('BTC')) {
+    return 0.1;
+  }
+  if (sym.includes('ETH') || sym.includes('SOL') || sym.includes('BNB')) {
+    return 0.01;
+  }
   if (
     sym.includes('NQ') || sym.includes('MNQ') || sym.includes('NASDAQ') || sym.includes('NAS100') || sym.includes('US100') || sym.includes('NDX') ||
     sym.includes('ES') || sym.includes('MES') || sym.includes('SP500') || sym.includes('S&P') || sym.includes('SPX') || sym.includes('US500') ||
@@ -161,7 +180,7 @@ export function formatPriceByTick(price: number, tickSize: number = 0.25): strin
   return price.toFixed(decimals);
 }
 
-export function normalizeMarketDataSpread(mData: MarketData | null, panel?: any, settings?: any): MarketData | null {
+export function normalizeMarketDataSpread(mData: MarketData | null, panel?: any, settings?: any, lastKnownSpread?: number | null): MarketData | null {
   if (!mData) return null;
   const pNum = Number(mData.price || 0);
   if (isNaN(pNum) || pNum <= 0) return mData;
@@ -176,10 +195,12 @@ export function normalizeMarketDataSpread(mData: MarketData | null, panel?: any,
     return mData;
   }
 
-  // Se não há Bid/Ask distintos (ex: fonte Supabase REST sem L2 book), deriva spread de 1 tick padrão ou spread existente
+  // Se não há Bid/Ask distintos nesta leitura, SEMPRE preserva o último spread autêntico conhecido!
+  // NUNCA regride para o tick sintético (0.25) se já temos um spread real (ex: 4.50)
+  const safeLast = (lastKnownSpread !== undefined && lastKnownSpread !== null && lastKnownSpread > 0) ? Number(lastKnownSpread) : 0;
   const spreadVal = (mData.spread !== undefined && mData.spread !== null && Number(mData.spread) > 0)
     ? Number(mData.spread)
-    : tick;
+    : (safeLast > 0 ? safeLast : tick);
 
   mData.spread = spreadVal;
   if ((mData as any).imbalance_dir === 'COMPRADOR') {
@@ -222,6 +243,7 @@ export interface MarketData {
   originalSentiment?: number;
   imbalance_dir?: string;
   updated_at?: string;
+  is_synthetic?: boolean;
 }
 
 export interface NasdaqForce {
@@ -3644,11 +3666,27 @@ export function cleanAndSanitizeCandles(rawCandles: Candle[]): Candle[] {
 
   // 2. Ordenação e deduplicação estrita por minuto (timestamp cravado em :00.000Z)
   const minuteMap = new Map<number, Candle>();
+  const nowMs = Date.now();
+  const currentMinuteBucketMs = Math.floor(nowMs / 60000) * 60000;
+
   basicValid.forEach(c => {
     const ms = new Date(c.timestamp).getTime();
     if (isNaN(ms) || ms <= 0) return;
-    const mKey = Math.floor(ms / 60000);
-    const flooredIso = new Date(mKey * 60000).toISOString();
+    let mKey = Math.floor(ms / 60000);
+    let candleBucketMs = mKey * 60000;
+
+    // Detecção e normalização universal de Close Time (NT8 / Fechamento de Barra):
+    // Se o candle recebido estiver cravado exatamente 1 minuto no futuro (ex: 17:54 quando o relógio é 17:53),
+    // ele representa o candle corrente rotulado pelo fechamento. Normaliza para Open Time (17:53:00).
+    if (candleBucketMs === currentMinuteBucketMs + 60000) {
+      mKey = mKey - 1;
+      candleBucketMs = mKey * 60000;
+    } else if (candleBucketMs > currentMinuteBucketMs + 60000) {
+      // Descarta anomalias com projeção no futuro distante (> 1 minuto)
+      return;
+    }
+
+    const flooredIso = new Date(candleBucketMs).toISOString();
     const existing = minuteMap.get(mKey);
     if (!existing) {
       minuteMap.set(mKey, {
@@ -3687,6 +3725,14 @@ export function cleanAndSanitizeCandles(rawCandles: Candle[]): Candle[] {
     let cl = c.close;
     let h = c.high;
     let l = c.low;
+
+    // Se a vela veio com cotação plana de amostra única (Open == High == Low == Close),
+    // reconstitui o corpo legítimo conectando a abertura ao fechamento da vela anterior
+    if (o === cl && h === l && prevValidClose > 0 && Math.abs(prevValidClose - cl) / cl <= 0.02) {
+      o = prevValidClose;
+      h = Math.max(o, cl);
+      l = Math.min(o, cl);
+    }
 
     // Se o candle for uma aberração total em relação à mediana da série (> 35% de desvio)
     if (medianPrice > 0) {
@@ -3861,21 +3907,142 @@ async function queryCandleChunkWithAbort(
   }
 }
 
-export function isStandardSupabasePanel(panel: any): boolean {
+export function isStandardSupabasePanel(panel: any, panelSettings?: any): boolean {
   if (!panel) return false;
   const inst = String(panel.instance_id || '').toLowerCase().trim();
-  const name = String(panel.name || '').toUpperCase().trim();
-  // Se possui sufixo de corretora/conector (ex: " - ActivTrades", " - NT8", " - MT4"), é ativo sincronizado pelo usuário
-  if (name.includes(' - ')) return false;
-  // Ativos padrão do Axion cadastrados pelo Admin que utilizam feed do Supabase
+  const rawName = String(panel.name || panel.symbol || '').trim();
+  const name = rawName.toUpperCase();
+
+  // Se possui sufixo de corretora externa conhecida (ex: " - ActivTrades", " - NT8", " - Binance"), é ativo sincronizado pelo usuário
+  if (name.includes(' - ')) {
+    const parts = name.split(' - ');
+    const brokerPart = parts.slice(1).join(' - ').trim().toLowerCase();
+    if (!/^(axiondb|axion db|supabase|axion)$/i.test(brokerPart)) {
+      return false;
+    }
+  }
+
+  // Se tem corretora ou plataforma externa explícita
+  if (panel.broker && typeof panel.broker === 'string' && panel.broker.trim().length > 0) return false;
+  if (panel.platform && ['binance', 'ctrader', 'mt4', 'mt5'].includes(String(panel.platform).toLowerCase())) return false;
+  if (inst.startsWith('mt4_') || inst.startsWith('mt5_') || inst.startsWith('ctrader_')) return false;
+
+  // 1. Criado na área do Admin para o sistema (subscription_id === 'admin')
+  if (panel.subscription_id === 'admin') return true;
+
+  // 2. Configurado explicitamente com fonte de dados do Supabase
+  const sourceMarket = panelSettings?.source_market || panel.source_market || panel.settings?.source_market;
+  if (sourceMarket === 'supabase') return true;
+
+  // 3. Ativos canônicos padrão do AxionDB / Supabase
   if (inst.startsWith('painel_')) return true;
-  if (
-    ['nasdaq', 'russel2000', 'gold', 'sp500', 'dowjones', 'oil'].includes(inst) &&
-    ['NASDAQ', 'RUSSEL2000', 'GOLD', 'SP500', 'DOWJONES', 'OIL'].includes(name)
-  ) {
+
+  const cleanInst = inst.replace(/[^a-z0-9]/g, '');
+  const cleanName = name.replace(/[^A-Z0-9]/g, '');
+
+  const canonicalTokens = [
+    'nasdaq', 'nq', 'mnq', 'painelprincipal',
+    'sp500', 'sp505', 'es', 'mes',
+    'dowjones', 'dow', 'ym', 'mym',
+    'russel2000', 'russel', 'russell', 'rty', 'm2k',
+    'oil', 'iol', 'petroleo', 'wti', 'cl',
+    'gold', 'ouro', 'gc'
+  ];
+
+  if (canonicalTokens.some(t => cleanInst === t || cleanInst.startsWith(t) || cleanName.toLowerCase().startsWith(t))) {
     return true;
   }
+
   return false;
+}
+
+/**
+ * Mapeia símbolos de Forex, Índices e CFDs para identificadores canônicos do Yahoo Finance.
+ */
+export function resolveYahooSymbol(symbol: string): string {
+  const sym = String(symbol || '').toUpperCase().trim();
+  const clean = sym.split(/[-_(\s]/)[0].trim().replace(/[^A-Z0-9]/g, '');
+  if (/^(EURUSD|GBPUSD|USDJPY|AUDUSD|USDCAD|USDCHF|NZDUSD|EURGBP|EURJPY|GBPJPY|EURCHF|AUDNZD|EURAUD|CADJPY|CHFJPY)$/i.test(clean)) {
+    return `${clean}=X`;
+  }
+  if (/^(GOLD|XAUUSD|XAU)$/i.test(clean)) return 'GC=F';
+  if (/^(SILVER|XAGUSD|XAG)$/i.test(clean)) return 'SI=F';
+  if (/^(WTI|OIL|PETROLEO|LCRUDE|CL)$/i.test(clean)) return 'CL=F';
+  if (/^(NASDAQ|NQ|MNQ|NAS100|USTEC|USATEC)/i.test(clean)) return 'NQ=F';
+  if (/^(SP500|ES|MES|SPX500|US500|USA500)/i.test(clean)) return 'ES=F';
+  if (/^(DOWJONES|DOWNJONES|YM|MYM|US30|USAIND)/i.test(clean)) return 'YM=F';
+  if (/^(RUSSEL|RUSSELL|RUSSEL2000|RTY|M2K|US2000|USARUS)/i.test(clean)) return 'RTY=F';
+  if (/^(DAX|GER40|GER30)/i.test(clean)) return '^GDAXI';
+  if (clean.length === 6 && !clean.endsWith('USDT') && !clean.endsWith('BUSD')) {
+    return `${clean}=X`;
+  }
+  return `${clean}=X`;
+}
+
+/**
+ * Consulta velas M1 do Yahoo Finance para Forex, Metais e CFDs contínuos.
+ */
+export async function fetchYahooCandles(symbol: string, interval: string = '1m', range: string = '5d'): Promise<Candle[]> {
+  try {
+    const ySym = resolveYahooSymbol(symbol);
+    const isBrowser = typeof window !== 'undefined';
+    const baseUrl = isBrowser ? '/yahoo-api' : 'https://query1.finance.yahoo.com';
+    const url = `${baseUrl}/v8/finance/chart/${encodeURIComponent(ySym)}?interval=${interval}&range=${range}`;
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(6000),
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const res0 = data.chart?.result?.[0];
+    if (!res0) return [];
+    const timestamps = res0.timestamp || [];
+    const quotes = res0.indicators?.quote?.[0] || {};
+    const candles: Candle[] = [];
+    let prevClose: number | null = null;
+
+    for (let i = 0; i < timestamps.length; i++) {
+      const o = quotes.open?.[i];
+      const h = quotes.high?.[i];
+      const l = quotes.low?.[i];
+      const c = quotes.close?.[i];
+      const v = quotes.volume?.[i] || 1;
+
+      if (c !== null && c !== undefined && !isNaN(c) && c > 0) {
+        let openVal = (o !== null && !isNaN(o) && o > 0) ? Number(o) : Number(c);
+        let closeVal = Number(c);
+        let highVal = (h !== null && !isNaN(h) && h > 0) ? Number(h) : Math.max(openVal, closeVal);
+        let lowVal = (l !== null && !isNaN(l) && l > 0) ? Number(l) : Math.min(openVal, closeVal);
+
+        // Se o feed de Forex for amostrado por quote (Open == High == Low == Close),
+        // reconstrói a continuidade autêntica do candle M1:
+        // Abertura herda o fechamento do minuto anterior, gerando corpo de candlestick real (verde/vermelho)
+        if (openVal === closeVal && highVal === lowVal && prevClose !== null && prevClose > 0) {
+          const relDiff = Math.abs(prevClose - closeVal) / closeVal;
+          if (relDiff <= 0.02) {
+            openVal = prevClose;
+            highVal = Math.max(openVal, closeVal);
+            lowVal = Math.min(openVal, closeVal);
+          }
+        }
+
+        prevClose = closeVal;
+
+        candles.push({
+          timestamp: new Date(timestamps[i] * 1000).toISOString(),
+          open: openVal,
+          high: Math.max(openVal, closeVal, highVal),
+          low: Math.min(openVal, closeVal, lowVal),
+          close: closeVal,
+          volume: Number(v || 1)
+        });
+      }
+    }
+    return cleanAndSanitizeCandles(candles);
+  } catch (err) {
+    console.warn('[YAHOO] Erro ao carregar velas do Yahoo Finance para', symbol, err);
+    return [];
+  }
 }
 
 export async function fetchCandlesSupabase(
@@ -3919,7 +4086,7 @@ export async function fetchCandlesSupabase(
   );
   const isMtFeed = isPanelMt && !isBinancePanel;
 
-  const isCryptoAsset = !isStandardSupabase && (
+  const isCryptoAsset = !isStandardSupabase && !isPanelMt && (
     isBinancePanel ||
     /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK|NEAR|SUI|PEPE)/i.test(baseSym) ||
     /USDT|BUSD|USDC/i.test(rawSym)
@@ -3958,17 +4125,27 @@ export async function fetchCandlesSupabase(
     }
   }
 
-  // 0.2 Prioridade para Bridge MT4/MT5 / VPS para Forex, Metais e Índices (EURUSD, XAUUSD, US30, GER40, etc.)
+  // 0.2 Prioridade para Histórico Contínuo de Forex, Metais e CFDs (EURUSD, GBPUSD, XAUUSD, etc.)
   if (isForexOrCfd && !isCryptoAsset) {
     try {
+      // 1. Consulta de alta resolução via Yahoo Finance (1m com até 7 dias reais)
+      const targetRange = limit > 4320 ? '7d' : (limit > 1440 ? '5d' : '1d');
+      const yCandles = await fetchYahooCandles(baseSym, '1m', targetRange);
+      if (yCandles && yCandles.length > 0) {
+        onProgress?.(100, yCandles.length, limit);
+        saveLocalCandles(queryId, yCandles);
+        return yCandles;
+      }
+
+      // 2. Fallback caso o Yahoo falhe: tenta endpoints locais/bridge se disponíveis (timeout estrito de 1.5s)
       const { getLocalPlatformConnections } = await import('./connectionsService');
       const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
       const activeConn = mtConns.find(c => c.status === 'online') || mtConns[0];
       const host = (activeConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
 
-      let mRes = await fetch(`${host}/market_candles?symbol=${baseSym}&limit=${limit}`, { signal: AbortSignal.timeout(4000) }).catch(() => null);
+      let mRes = await fetch(`${host}/market_candles?symbol=${baseSym}&limit=${limit}`, { signal: AbortSignal.timeout(1500) }).catch(() => null);
       if (!mRes || !mRes.ok) {
-        mRes = await fetch(`http://localhost:8003/market_candles?symbol=${baseSym}&limit=${limit}`, { signal: AbortSignal.timeout(3000) }).catch(() => null);
+        mRes = await fetch(`http://localhost:8003/market_candles?symbol=${baseSym}&limit=${limit}`, { signal: AbortSignal.timeout(1200) }).catch(() => null);
       }
       if (mRes && mRes.ok) {
         const text = await mRes.text();
@@ -3986,7 +4163,7 @@ export async function fetchCandlesSupabase(
         }
       }
     } catch (mErr) {
-      console.warn('[DB] Falha no feed de Forex/CFDs via Bridge, tentando fallback:', mErr);
+      console.warn('[DB] Falha no feed de Forex/CFDs via Yahoo/Bridge, tentando fallback:', mErr);
     }
   }
 
@@ -7794,12 +7971,12 @@ export function isSameAsset(sym1?: string | null, sym2?: string | null): boolean
     if (s.includes('NEAR')) return 'NEAR';
     if (s.includes('SUI')) return 'SUI';
     if (s.includes('PEPE')) return 'PEPE';
-    if (s.includes('NQ') || s.includes('NASDAQ')) return 'NQ';
-    if (s.includes('ES') || s.includes('SP500') || s.includes('SPX')) return 'ES';
-    if (s.includes('YM') || s.includes('DOW')) return 'YM';
-    if (s.includes('RTY') || s.includes('RUSSELL')) return 'RTY';
-    if (s.includes('GC') || s.includes('GOLD') || s.includes('OURO')) return 'GC';
-    if (s.includes('CL') || s.includes('OIL') || s.includes('PETR')) return 'CL';
+    if (s.includes('NQ') || s.includes('NASDAQ') || s.includes('USATEC') || s.includes('USTEC') || s.includes('NAS100') || s.includes('US100') || s.includes('NDX')) return 'NQ';
+    if (s.includes('ES') || s.includes('SP500') || s.includes('SPX') || s.includes('USA500') || s.includes('US500') || s.includes('SPX500')) return 'ES';
+    if (s.includes('YM') || s.includes('DOW') || s.includes('USAIND') || s.includes('US30') || s.includes('DJ30')) return 'YM';
+    if (s.includes('RTY') || s.includes('RUSSELL') || s.includes('RUSSEL') || s.includes('USARUS') || s.includes('US2000') || s.includes('M2K')) return 'RTY';
+    if (s.includes('GC') || s.includes('GOLD') || s.includes('OURO') || s.includes('XAU') || s.includes('XAUUSD')) return 'GC';
+    if (s.includes('CL') || s.includes('OIL') || s.includes('PETR') || s.includes('LCRUDE') || s.includes('WTI') || s.includes('BRENT')) return 'CL';
     if (s.includes('WIN') || s.includes('IBOV')) return 'WIN';
     if (s.includes('WDO') || s.includes('DOL')) return 'WDO';
     if (s.includes('EUR') || s.includes('6E')) return 'EURUSD';

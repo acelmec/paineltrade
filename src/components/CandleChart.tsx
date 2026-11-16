@@ -947,6 +947,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   const lastRsiCountRef = useRef<number>(0);
   const lastMacdCountRef = useRef<number>(0);
   const lastEmacdHistCountRef = useRef<number>(0);
+  const lastValidSpreadRef = useRef<number | null>(null);
   const markersPluginRef = useRef<any | null>(null);
   const dynamicSeriesPoolRef = useRef<Map<string, any[]>>(new Map());
   const dynamicMarkersRef = useRef<any[]>([]);
@@ -1939,7 +1940,6 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       if (parts.length < 2) return null;
       const tHours = parseInt(parts[0], 10);
       const tMinutes = parseInt(parts[1], 10);
-      const tSeconds = parts[2] ? parseInt(parts[2], 10) : 0;
       if (isNaN(tHours) || isNaN(tMinutes)) return null;
 
       const latestC = candles[candles.length - 1];
@@ -1966,12 +1966,12 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         tDay = next.getDate();
       }
 
-      // Convenção NinjaTrader 8: a barra é marcada no seu fechamento.
-      // Ex: um trade ocorrido às 23:53:08 pertence à barra das 23:54 (em 1m).
-      // Se o horário é 00:13:10, a barra em formação é rotulada como 00:14.
+      // Padrão Universal Open Time (Axion / Supabase / Binance / MT4 / MT5 / cTrader / Lightweight Charts):
+      // A barra é rigorosamente indexada pelo seu início (Open Time).
+      // Ex: um trade ocorrido às 23:53:08 pertence à barra das 23:53 (em 1m).
       const tf = Math.max(1, timeframe || 1);
-      // Arredonda para cima para o próximo múltiplo do timeframe
-      const targetTotalMinutes = Math.ceil((tHours * 60 + tMinutes + (tSeconds > 0 ? 0.001 : 0)) / tf) * tf;
+      // Arredonda para baixo para o início do balde do timeframe
+      const targetTotalMinutes = Math.floor((tHours * 60 + tMinutes) / tf) * tf;
 
       let targetYear = tYear;
       let targetMonth = tMonth;
@@ -3520,13 +3520,25 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       const cl = Number(c.close);
       if (isNaN(o) || isNaN(h) || isNaN(l) || isNaN(cl) || o <= 0 || h <= 0 || l <= 0 || cl <= 0) continue;
 
-      const safeHigh = Math.max(o, h, l, cl);
-      const safeLow = Math.min(o, h, l, cl);
+      let safeOpen = o;
+      let safeHigh = Math.max(o, h, l, cl);
+      let safeLow = Math.min(o, h, l, cl);
+
+      // Se a vela veio com cotação plana de amostra única (Open == High == Low == Close),
+      // reconstrói o corpo conectando a abertura ao fechamento da vela anterior para exibição nítida
+      if (safeOpen === cl && safeHigh === safeLow && unique.length > 0) {
+        const prevItem = unique[unique.length - 1];
+        if (prevItem && prevItem.close > 0 && Math.abs(prevItem.close - cl) / cl <= 0.02) {
+          safeOpen = prevItem.close;
+          safeHigh = Math.max(safeOpen, cl);
+          safeLow = Math.min(safeOpen, cl);
+        }
+      }
 
       const item = {
         time: t,
         timestamp: c.timestamp,
-        open: o,
+        open: safeOpen,
         high: safeHigh,
         low: safeLow,
         close: cl,
@@ -3539,6 +3551,24 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         unique.push(item);
         lastTime = t;
       }
+    }
+
+    // Se houver exatamente 1 vela (ex: ativo recém conectado recebendo live tick antes do backfill completo),
+    // sintetiza 1 vela anterior imediata (abertura = fechamento) para que length >= 2 e o TradingView Lightweight Charts
+    // inicialize a escala de preço sem zerar a tela com setData([])
+    if (unique.length === 1) {
+      const single = unique[0];
+      const prevTime = ((single.time as number) - 60) as any;
+      const prevTs = new Date(new Date(single.timestamp).getTime() - 60000).toISOString();
+      unique.unshift({
+        time: prevTime,
+        timestamp: prevTs,
+        open: single.open,
+        high: single.open,
+        low: single.open,
+        close: single.open,
+        volume: 1
+      });
     }
 
     if (effectiveShowAxionTrendColorBars && axionTrendData?.candleColorMap) {
@@ -4357,17 +4387,19 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     // Às 02:14:05, o candle em formação de 1m pertence exatamente ao balde das 02:14:00 (Math.floor(tickSec / 60) * 60).
     const currentBucketSec = Math.floor(tickSec / bucketSec) * bucketSec;
 
+    const effectiveLastCandleTimeSec = lastCandleTimeSec;
+
     // REGRA DE OURO INVIOLÁVEL: CANDLE FECHADO É SAGRADO E NUNCA PODE SER MUTADO!
-    // Se o último candle do array possui tempo anterior ao bucket corrente (currentBucketSec > lastCandleTimeSec),
-    // ele é um candle já consolidado/fechado. Jamais deve sofrer alteração de open, high, low ou close.
-    if (currentBucketSec === lastCandleTimeSec) {
-      // Caso 1: O último candle do array é de fato a vela em formação do minuto corrente.
-      // Atualizamos seu close, high e low em tempo real
+    // Se o último candle do array possui o mesmo timestamp ou está à frente (feed sincronizado pelo servidor),
+    // atualizamos seu close, high e low em tempo real mantendo seu timestamp inalterado.
+    if (currentBucketSec === effectiveLastCandleTimeSec || effectiveLastCandleTimeSec > currentBucketSec) {
+      // Caso 1: O último candle do array é de fato a vela em formação mais recente.
+      // Atualizamos seu close, high e low em tempo real mantendo seu timestamp autêntico
       const openPrice = Number(lastCandle.open) || resolvedPrice;
       const isBullish = resolvedPrice >= openPrice;
       const updatedCurrent: any = {
         ...lastCandle,
-        time: lastCandleTimeSec,
+        time: effectiveLastCandleTimeSec,
         close: resolvedPrice,
         high: Math.max(Number(lastCandle.high || openPrice), resolvedPrice),
         low: Math.min(Number(lastCandle.low || openPrice), resolvedPrice)
@@ -7062,6 +7094,9 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     });
     mainChartRef.current = mainChart;
 
+    const initTick = resolvePanelTickSize(activePanel, settings);
+    const initPrec = initTick < 1 ? Math.max(2, getTickDecimals(initTick)) : getTickDecimals(initTick);
+
     const candleSeries = mainChart.addSeries(CandlestickSeries, {
       upColor: themeColors.upColor,
       downColor: themeColors.downColor,
@@ -7071,8 +7106,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       wickDownColor: themeColors.wickDownColor,
       priceFormat: {
         type: 'price',
-        precision: 2,
-        minMove: 0.01,
+        precision: initPrec,
+        minMove: initTick,
       },
       priceLineVisible: false,
       lastValueVisible: false,
@@ -9929,8 +9964,17 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
               const src = resolveAssetSource(activePanel, activeAccount);
               const bVal = Number(marketData?.bid || 0);
               const aVal = Number(marketData?.ask || 0);
-              const spr = (aVal > 0 && bVal > 0 && aVal >= bVal) ? (aVal - bVal) : 0;
+              const directSpread = Number(marketData?.spread || 0);
+              const sprRaw = (aVal > 0 && bVal > 0 && aVal >= bVal) ? (aVal - bVal) : (directSpread > 0 ? directSpread : 0);
+              const chartTick = resolvePanelTickSize(activePanel, settings);
+              // Preserva sempre o último spread autêntico conhecido; se a leitura momentânea vier com 1 tick default (0.25), não pisca
+              if (sprRaw > chartTick) {
+                lastValidSpreadRef.current = sprRaw;
+              }
+              const spr = (sprRaw > 0 && (sprRaw > chartTick || !lastValidSpreadRef.current)) ? sprRaw : (lastValidSpreadRef.current || sprRaw);
               const sprFormatted = spr > 0 ? (spr < 0.1 ? spr.toFixed(4) : spr.toFixed(2)) : null;
+              const displayBid = bVal > 0 ? bVal : (marketData?.price ? Number(marketData.price) : 0);
+              const displayAsk = aVal > 0 ? aVal : (displayBid > 0 && spr > 0 ? Number((displayBid + spr).toFixed(2)) : 0);
 
               return (
                 <>
@@ -9945,7 +9989,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                   {sprFormatted && (
                     <div
                       className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-500/40 bg-amber-950/40 text-[9px] font-mono font-bold text-amber-300 shadow-sm shrink-0 select-none"
-                      title={`BID: ${bVal} | ASK: ${aVal} | SPREAD: ${sprFormatted}`}
+                      title={`BID: ${displayBid} | ASK: ${displayAsk} | SPREAD: ${sprFormatted}`}
                     >
                       <span className="text-[8px] uppercase text-amber-400/80 font-sans">Spread:</span>
                       <span>{sprFormatted}</span>
