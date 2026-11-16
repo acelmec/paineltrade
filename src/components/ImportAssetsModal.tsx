@@ -350,15 +350,65 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
   const handleSelectAllFiltered = () => {
     const next = new Set(selectedSymbols);
     filteredCatalog.forEach(item => {
-      if (!isSymbolAlreadyImported(item.symbol)) {
-        next.add(item.symbol);
-      }
+      next.add(item.symbol);
     });
     setSelectedSymbols(next);
   };
 
   const handleClearSelection = () => {
     setSelectedSymbols(new Set());
+  };
+
+  // Re-inclusão / Forçar atualização individual de um ativo
+  const handleReimportSymbol = async (sym: string) => {
+    if (!createPanelAction) return;
+    setIsImporting(true);
+    try {
+      const upperSym = sym.toUpperCase().trim();
+      const instanceId = upperSym.toLowerCase();
+      const existing = (panels || []).find((p: any) => {
+        const pName = String(p.name || '').toUpperCase().trim();
+        const pInst = String(p.instance_id || '').toUpperCase().trim();
+        return pInst === instanceId || pInst === upperSym || pName === upperSym || pName.startsWith(`${upperSym} -`);
+      });
+
+      if (existing && !isStandardSupabasePanel(existing) && deletePanelAction) {
+        await deletePanelAction(existing.id, { protectStandardAxion: true, skipReload: true });
+      }
+
+      const preset = MASTER_PLATFORM_CATALOG.find(p => p.symbol.toUpperCase() === upperSym);
+      let tick = preset?.tickSize;
+      let point = preset?.pointValue || 1.0;
+      let sl = preset?.defaultSl || 40;
+      let tp = preset?.defaultTp || 80;
+
+      if (!tick) {
+        if (upperSym.includes('JPY')) tick = 0.001;
+        else if (upperSym.startsWith('XAU') || upperSym.startsWith('GOLD')) tick = 0.01;
+        else if (upperSym.startsWith('BTC')) tick = 0.10;
+        else if (upperSym.includes('USD') || upperSym.includes('EUR') || upperSym.includes('GBP')) tick = 0.00001;
+        else tick = 0.01;
+      }
+
+      const finalName = effectiveSuffix.trim() ? `${upperSym} - ${effectiveSuffix.trim()}` : upperSym;
+      await createPanelAction(finalName, instanceId, point, tick, sl, tp);
+
+      if (addLog) {
+        addLog('SISTEMA', `✅ Ativo '${finalName}' re-incluído com sucesso!`, 'sucesso');
+      }
+
+      if (switchPanel) {
+        setTimeout(() => {
+          const found = (panels || []).find((p: any) =>
+            p.name?.toUpperCase() === finalName.toUpperCase() ||
+            p.instance_id?.toLowerCase() === instanceId
+          );
+          if (found?.id) switchPanel(found.id);
+        }, 500);
+      }
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   // Adicionar Par Personalizado (Binance USDT)
@@ -437,9 +487,9 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
   // ==================== IMPORTAÇÃO ====================
   const handleImport = async () => {
     if (!createPanelAction) return;
-    const toImport = Array.from(selectedSymbols).filter(s => !isSymbolAlreadyImported(s));
+    const toImport = Array.from(selectedSymbols);
     if (toImport.length === 0) {
-      alert('Nenhum ativo novo selecionado para inclusão.');
+      alert('Nenhum ativo selecionado para inclusão.');
       return;
     }
 
@@ -450,22 +500,35 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
       const sym = toImport[i];
       setImportProgress({ current: i + 1, total: toImport.length, name: sym });
 
-      const preset = MASTER_PLATFORM_CATALOG.find(p => p.symbol.toUpperCase() === sym.toUpperCase());
+      const upperSym = sym.toUpperCase().trim();
+      const instanceId = upperSym.toLowerCase();
+
+      // Se já existia um painel com esse instance_id ou nome na mesma plataforma, exclui o anterior para re-inclusão 100% limpa
+      const existing = (panels || []).find((p: any) => {
+        const pName = String(p.name || '').toUpperCase().trim();
+        const pInst = String(p.instance_id || '').toUpperCase().trim();
+        return pInst === instanceId || pInst === upperSym || pName === upperSym || pName.startsWith(`${upperSym} -`);
+      });
+
+      if (existing && !isStandardSupabasePanel(existing) && deletePanelAction) {
+        await deletePanelAction(existing.id, { protectStandardAxion: true, skipReload: true });
+      }
+
+      const preset = MASTER_PLATFORM_CATALOG.find(p => p.symbol.toUpperCase() === upperSym);
       let tick = preset?.tickSize;
       let point = preset?.pointValue || 1.0;
       let sl = preset?.defaultSl || 40;
       let tp = preset?.defaultTp || 80;
 
       if (!tick) {
-        if (sym.includes('JPY')) tick = 0.001;
-        else if (sym.startsWith('XAU') || sym.startsWith('GOLD')) tick = 0.01;
-        else if (sym.startsWith('BTC')) tick = 0.10;
-        else if (sym.includes('USD') || sym.includes('EUR') || sym.includes('GBP')) tick = 0.00001;
+        if (upperSym.includes('JPY')) tick = 0.001;
+        else if (upperSym.startsWith('XAU') || upperSym.startsWith('GOLD')) tick = 0.01;
+        else if (upperSym.startsWith('BTC')) tick = 0.10;
+        else if (upperSym.includes('USD') || upperSym.includes('EUR') || upperSym.includes('GBP')) tick = 0.00001;
         else tick = 0.01;
       }
 
-      const instanceId = sym.toLowerCase();
-      const finalName = effectiveSuffix.trim() ? `${sym} - ${effectiveSuffix.trim()}` : sym;
+      const finalName = effectiveSuffix.trim() ? `${upperSym} - ${effectiveSuffix.trim()}` : upperSym;
       const success = await createPanelAction(finalName, instanceId, point, tick, sl, tp);
       if (success) {
         importedCount++;
@@ -476,12 +539,12 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
     setImportProgress(null);
 
     if (addLog) {
-      addLog('SISTEMA', `✅ ${importedCount} ativo(s) da ${activeTab.toUpperCase()} incluído(s) com sucesso!`, 'sucesso');
+      addLog('SISTEMA', `✅ ${importedCount} ativo(s) da ${activeTab.toUpperCase()} incluído(s)/sincronizado(s) com sucesso!`, 'sucesso');
     }
 
     // Troca o gráfico para o primeiro ativo novo importado
     if (toImport.length > 0 && switchPanel) {
-      const firstSym = toImport[0];
+      const firstSym = toImport[0].toUpperCase().trim();
       const targetFullName = effectiveSuffix.trim() ? `${firstSym} - ${effectiveSuffix.trim()}` : firstSym;
       setTimeout(() => {
         const found = (panels || []).find((p: any) => 
@@ -798,16 +861,22 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
                   filteredCatalog.map(item => {
                     const isAlreadyImported = isSymbolAlreadyImported(item.symbol);
                     const isChecked = selectedSymbols.has(item.symbol);
+                    const matchingPanel = platformSyncedPanels.find((p: any) => {
+                      const pName = String(p.name || '').toUpperCase().trim();
+                      const pInst = String(p.instance_id || '').toUpperCase().trim();
+                      const up = item.symbol.toUpperCase().trim();
+                      return pInst === up.toLowerCase() || pInst === up || pName === up || pName.startsWith(`${up} -`) || pName.startsWith(`${up}/`);
+                    });
 
                     return (
                       <div
                         key={item.symbol}
-                        onClick={() => !isAlreadyImported && handleToggleSymbol(item.symbol)}
+                        onClick={() => handleToggleSymbol(item.symbol)}
                         className={`px-3 py-2 rounded-lg border flex items-center justify-between transition select-none ${
-                          isAlreadyImported
-                            ? 'bg-slate-900/40 border-slate-800 text-slate-400 opacity-70 cursor-default'
-                            : isChecked
+                          isChecked
                             ? 'bg-blue-950/60 border-blue-500 text-blue-200 shadow-sm cursor-pointer'
+                            : isAlreadyImported
+                            ? 'bg-slate-900/60 border-slate-700/80 text-slate-300 hover:bg-slate-800/80 cursor-pointer'
                             : 'bg-slate-900/80 border-slate-800/80 text-slate-300 hover:bg-slate-800/90 hover:border-slate-700 cursor-pointer'
                         }`}
                       >
@@ -825,18 +894,48 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({ isOpen, on
                           </div>
                         </div>
 
-                        <div className="shrink-0 flex items-center gap-2">
+                        <div className="shrink-0 flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                           {isAlreadyImported ? (
-                            <span className="text-[9px] font-black text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/60 flex items-center gap-1">
-                              <span>✓</span>
-                              <span>Ativado</span>
-                            </span>
+                            <>
+                              <span className="text-[9px] font-black text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/60 flex items-center gap-1">
+                                <span>✓</span>
+                                <span>Ativo</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleReimportSymbol(item.symbol)}
+                                disabled={isImporting}
+                                className="px-2 py-0.5 rounded bg-blue-900/60 hover:bg-blue-800 border border-blue-600/50 text-blue-200 text-[10px] font-bold transition cursor-pointer flex items-center gap-1 active:scale-95 shadow-sm disabled:opacity-50"
+                                title="Re-incluir e atualizar as configurações deste ativo no gráfico"
+                              >
+                                <span>🔄</span>
+                                <span>Re-incluir</span>
+                              </button>
+                              {matchingPanel && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeletePanels([matchingPanel])}
+                                  disabled={deletingIds.has(matchingPanel.id) || isDeletingAll}
+                                  className="px-1.5 py-0.5 rounded bg-rose-950/80 hover:bg-rose-900 border border-rose-700/60 text-rose-300 hover:text-white text-[10px] font-bold transition cursor-pointer active:scale-95 shadow-sm disabled:opacity-50"
+                                  title="Excluir este ativo do gráfico"
+                                >
+                                  🗑️
+                                </button>
+                              )}
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => handleToggleSymbol(item.symbol)}
+                                className="w-4 h-4 accent-blue-500 rounded cursor-pointer ml-1"
+                                title="Marcar para inclusão/atualização em lote"
+                              />
+                            </>
                           ) : (
                             <input
                               type="checkbox"
                               checked={isChecked}
-                              onChange={() => {}}
-                              className="w-4 h-4 accent-blue-500 rounded pointer-events-none cursor-pointer"
+                              onChange={() => handleToggleSymbol(item.symbol)}
+                              className="w-4 h-4 accent-blue-500 rounded cursor-pointer"
                             />
                           )}
                         </div>

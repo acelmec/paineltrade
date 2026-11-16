@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useApp } from '../context/AppContext';
 import {
   fetchPlatformConnectionsSupabase,
   savePlatformConnectionsSupabase,
@@ -7,7 +8,7 @@ import {
   type PlatformConnection,
   type DetectedAccountDetail
 } from '../services/connectionsService';
-import { createDemoAccountSupabase, updateAccountSupabase, type BrokerAccount } from '../services/db';
+import { createDemoAccountSupabase, updateAccountSupabase, isStandardSupabasePanel, type BrokerAccount } from '../services/db';
 
 interface ConnectionsHubProps {
   onSelectConnection?: (conn: PlatformConnection, detectedAcc?: DetectedAccountDetail) => void;
@@ -24,6 +25,8 @@ export const ConnectionsHub: React.FC<ConnectionsHubProps> = ({ onSelectConnecti
   const [importingAccId, setImportingAccId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, { online: boolean; message: string; latency?: number }>>({});
   const [feedback, setFeedback] = useState<string | null>(null);
+
+  const { panels, deletePanelAction } = useApp() as any;
 
   // Modal para Incluir / Editar Conexão
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -132,6 +135,39 @@ export const ConnectionsHub: React.FC<ConnectionsHubProps> = ({ onSelectConnecti
 
   const handleDeleteConnection = async (id: string, name: string) => {
     if (!window.confirm(`Deseja realmente remover a conexão "${name}"?`)) return;
+
+    const targetConn = connections.find(c => c.id === id);
+    const plat = targetConn?.platform;
+
+    // Se houver ativos associados a esta plataforma, oferece limpeza completa dos painéis órfãos
+    if (plat && deletePanelAction && panels && panels.length > 0) {
+      const platPanels = panels.filter((p: any) => {
+        if (isStandardSupabasePanel(p)) return false;
+        const pName = String(p.name || '').toUpperCase();
+        const pInst = String(p.instance_id || '').toUpperCase();
+        if (plat === 'binance') return pName.includes('BINANCE') || pInst.endsWith('USDT') || pName.includes('USDT');
+        if (plat === 'mt4' || plat === 'mt5') {
+          if (pName.includes('BINANCE') || pInst.endsWith('USDT') || pName.includes('CTRADER') || pName.includes('NT8')) return false;
+          return pName.includes('ACTIV') || pName.includes('PEPPER') || pName.includes('MT4') || pName.includes('MT5') ||
+            ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'NZDUSD', 'EURGBP', 'EURJPY', 'GBPJPY', 'XAUUSD', 'XAGUSD', 'USOIL', 'UKOIL', 'US30', 'US500', 'USTEC', 'GER40', 'BTCUSD', 'ETHUSD'].some(s => pName.startsWith(s) || pInst === s.toLowerCase());
+        }
+        if (plat === 'ctrader') return pName.includes('CTRADER');
+        if (plat === 'nt8') return pName.includes('NT8') || pName.includes('NINJA');
+        return false;
+      });
+
+      if (platPanels.length > 0) {
+        const cleanAssets = window.confirm(
+          `Esta conexão possui ${platPanels.length} ativo(s) sincronizado(s) no gráfico (${platPanels.map((p: any) => p.name).slice(0, 3).join(', ')}...).\n\nDeseja remover esses ativos do gráfico para uma limpeza completa?`
+        );
+        if (cleanAssets) {
+          for (let i = 0; i < platPanels.length; i++) {
+            await deletePanelAction(platPanels[i].id, { protectStandardAxion: true, skipReload: i < platPanels.length - 1 });
+          }
+        }
+      }
+    }
+
     const filtered = connections.filter(c => c.id !== id);
     setConnections(filtered);
     setSaving(true);
@@ -139,6 +175,18 @@ export const ConnectionsHub: React.FC<ConnectionsHubProps> = ({ onSelectConnecti
     setSaving(false);
     setFeedback(`🗑️ Conexão "${name}" excluída.`);
     setTimeout(() => setFeedback(null), 3500);
+  };
+
+  const handlePurgeGhostAccounts = async (conn: PlatformConnection) => {
+    try {
+      const host = (conn.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
+      const res = await fetch(`${host}/accounts/cleanup`, { method: 'POST', signal: AbortSignal.timeout(3000) });
+      if (res.ok) {
+        setFeedback('🧹 Cache de contas do Gateway limpo com sucesso!');
+      }
+    } catch (_) {}
+    await handleTestPing(conn);
+    setTimeout(() => setFeedback(null), 4000);
   };
 
   const handleSaveAll = async () => {
@@ -489,9 +537,22 @@ export const ConnectionsHub: React.FC<ConnectionsHubProps> = ({ onSelectConnecti
                       <span className="flex items-center gap-1.5">
                         <span>{getPlatformIcon(conn.platform)}</span> Contas Reais Detectadas:
                       </span>
-                      <span className="text-[10px] text-sky-400 font-mono">
-                        {conn.detected_accounts_detail.length} conta(s) online
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-sky-400 font-mono">
+                          {conn.detected_accounts_detail.length} conta(s) online
+                        </span>
+                        {(conn.platform === 'mt4' || conn.platform === 'mt5') && (
+                          <button
+                            type="button"
+                            onClick={() => handlePurgeGhostAccounts(conn)}
+                            className="px-2 py-0.5 rounded bg-sky-900/60 hover:bg-sky-800 text-sky-200 border border-sky-600/50 text-[10px] font-semibold transition cursor-pointer flex items-center gap-1"
+                            title="Limpar contas fantasmas e inativas do Gateway VPS"
+                          >
+                            <span>🧹</span>
+                            <span>Limpar Fantasmas</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     <div className="space-y-1.5">

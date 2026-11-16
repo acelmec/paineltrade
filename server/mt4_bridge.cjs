@@ -59,11 +59,26 @@ const server = http.createServer((req, res) => {
 function cleanAccountNumber(acc) {
   if (!acc) return '';
   const str = String(acc).trim();
-  const stripped = str.replace(/^(?:MT4|MT5|MetaTrader\s*[45]?)\s*[-_#]?\s*/i, '').trim();
-  const digits = stripped.replace(/\D/g, '');
-  if (digits) return digits;
-  return str;
+  const digits = str.replace(/\D/g, '');
+  if (digits.length >= 4 && digits.length <= 12) {
+    return digits;
+  }
+  return '';
 }
+
+// Limpeza contínua de contas inativas
+setInterval(() => {
+  const now = Date.now();
+  for (const [acc, info] of accountsConnected.entries()) {
+    const isNumeric = /^\d{4,12}$/.test(String(acc));
+    const ageMs = now - (info?.lastSeen ? new Date(info.lastSeen).getTime() : 0);
+    if (!isNumeric || ageMs > 60000) {
+      accountsConnected.delete(acc);
+      accountsPositions.delete(acc);
+      accountsTradesHistory.delete(acc);
+    }
+  }
+}, 15000);
 
 function getMt4Queue(accNum) {
   const clean = cleanAccountNumber(accNum);
@@ -166,15 +181,12 @@ function getMt4Queue(accNum) {
           platform: query.platform || existing.platform || 'mt4'
         };
         accountsConnected.set(accNum, accInfo);
-        if (rawAcc && rawAcc !== accNum) accountsConnected.set(rawAcc, accInfo);
 
         if (Array.isArray(bodyData.positions)) {
           accountsPositions.set(accNum, bodyData.positions);
-          if (rawAcc && rawAcc !== accNum) accountsPositions.set(rawAcc, bodyData.positions);
         }
         if (Array.isArray(bodyData.history)) {
           accountsTradesHistory.set(accNum, bodyData.history);
-          if (rawAcc && rawAcc !== accNum) accountsTradesHistory.set(rawAcc, bodyData.history);
         }
 
         // Suporte a lote de cotações enviado no body de /commands para todos os ativos do Market Watch
@@ -295,7 +307,14 @@ function getMt4Queue(accNum) {
   if (req.method === 'GET' && (pathname === '/accounts' || pathname === '/mt4/accounts')) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     const accList = [];
+    const now = Date.now();
     for (const [acc, info] of accountsConnected.entries()) {
+      const isNumeric = /^\d{4,12}$/.test(String(acc));
+      const ageMs = now - (info?.lastSeen ? new Date(info.lastSeen).getTime() : 0);
+      if (!isNumeric || ageMs > 60000) {
+        accountsConnected.delete(acc);
+        continue;
+      }
       accList.push({
         id: `mt_${acc}`,
         account_number: acc,

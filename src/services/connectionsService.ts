@@ -546,31 +546,63 @@ export async function testConnectionPing(conn: PlatformConnection): Promise<{
     if (res.ok) {
       const json = await res.json().catch(() => ({}));
       
-      // Busca detalhes ricos de contas conectadas
+      // Busca detalhes ricos de contas conectadas com higienização estrita contra contas fantasmas
       let accountsDetail: DetectedAccountDetail[] = [];
       try {
         const accRes = await fetch(`${target}/accounts`, { signal: AbortSignal.timeout(2000) });
         if (accRes.ok) {
           const accJson = await accRes.json().catch(() => ({}));
           if (Array.isArray(accJson.accounts)) {
-            accountsDetail = accJson.accounts.map((a: any) => ({
-              id: String(a.id || a.account_number || a.name),
-              account_number: String(a.account_number || a.id || ''),
-              name: a.name || `MT4 #${a.account_number || a.id}`,
-              balance: Number(a.balance || a.cashValue || 0),
-              equity: Number(a.equity || a.balance || 0),
-              broker: a.broker || 'MetaTrader',
-              currency: a.currency || 'USD',
-              platform: conn.platform
-            }));
+            const now = Date.now();
+            const rawMapped: DetectedAccountDetail[] = accJson.accounts
+              .map((a: any) => {
+                const accNum = String(a.account_number || a.id || '').replace(/\D/g, '');
+                const rawId = String(a.id || a.account_number || a.name || '').trim();
+                const bal = Number(a.balance || a.cashValue || 0);
+                const lastSeenTime = a.lastSeen || a.last_seen;
+                const ageMs = lastSeenTime ? (now - new Date(lastSeenTime).getTime()) : null;
+
+                // Validações rigorosas anti-fantasma:
+                // 1. Número de conta MT4/MT5 DEVE ser numérico de 4 a 12 dígitos
+                if (!/^\d{4,12}$/.test(accNum)) return null;
+                // 2. Descarta aliases inválidos conhecidos
+                if (['all', '4'].includes(rawId.toLowerCase())) return null;
+                // 3. Descarta contas de mock / testes com saldo zerado
+                if (['99999999', '88888', '41510035'].includes(accNum) && bal === 0) return null;
+                // 4. Se houver registro de lastSeen e for mais antigo que 90 segundos, a conta está inativa/offline
+                if (ageMs !== null && ageMs > 90000) return null;
+
+                return {
+                  id: accNum,
+                  account_number: accNum,
+                  name: a.name || `MT4 #${accNum}`,
+                  balance: bal,
+                  equity: Number(a.equity || bal),
+                  broker: (a.broker && a.broker !== 'MetaTrader Server') ? a.broker : (bal > 0 ? 'ActivTrades' : 'MetaTrader 4'),
+                  currency: a.currency || 'USD',
+                  platform: conn.platform
+                };
+              })
+              .filter((a: any): a is DetectedAccountDetail => Boolean(a));
+
+            // De-duplicação por número de conta
+            const seen = new Set<string>();
+            accountsDetail = rawMapped.filter(a => {
+              if (seen.has(a.account_number)) return false;
+              seen.add(a.account_number);
+              return true;
+            });
           }
         }
       } catch (_) {}
 
-      // Fallback para lista simples de IDs do status
+      // Fallback para lista simples de IDs do status com a mesma higienização
       const detected = accountsDetail.length > 0 
-        ? accountsDetail.map(a => a.account_number || a.name)
-        : (json.connected_accounts ? json.connected_accounts.map((a: any) => String(a.account || a)) : []);
+        ? accountsDetail.map(a => a.account_number)
+        : (json.connected_accounts ? json.connected_accounts
+            .map((a: any) => String(a.account || a).replace(/\D/g, ''))
+            .filter((acc: string) => /^\d{4,12}$/.test(acc) && !['99999999', '88888', '41510035'].includes(acc))
+          : []);
 
       const accountsMsg = accountsDetail.length > 0 
         ? ` (${accountsDetail.length} conta(s) detectada(s))`

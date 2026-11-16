@@ -654,11 +654,28 @@ const server = http.createServer((req, res) => {
 function cleanAccountNumber(acc) {
   if (!acc) return '';
   const str = String(acc).trim();
-  const stripped = str.replace(/^(?:MT4|MT5|MetaTrader\s*[45]?)\s*[-_#]?\s*/i, '').trim();
-  const digits = stripped.replace(/\D/g, '');
-  if (digits) return digits;
-  return str;
+  // Limpa prefixos como MT4-, MT5-, #, etc.
+  const digits = str.replace(/\D/g, '');
+  // Contas reais MT4 e MT5 são obrigatoriamente numéricas com 4 a 12 dígitos
+  if (digits.length >= 4 && digits.length <= 12) {
+    return digits;
+  }
+  return '';
 }
+
+// Rotina contínua de limpeza de contas fantasmas e conexões inativas (sem heartbeat por >60s)
+setInterval(() => {
+  const now = Date.now();
+  for (const [acc, info] of mt4AccountsConnected.entries()) {
+    const isNumeric = /^\d{4,12}$/.test(String(acc));
+    const ageMs = now - (info?.lastSeen ? new Date(info.lastSeen).getTime() : 0);
+    if (!isNumeric || ageMs > 60000) {
+      mt4AccountsConnected.delete(acc);
+      mt4PositionsCache.delete(acc);
+      mt4TradesHistoryCache.delete(acc);
+    }
+  }
+}, 15000);
 
 function getMt4Queue(accNum) {
   const clean = cleanAccountNumber(accNum);
@@ -710,15 +727,12 @@ if ((req.method === 'GET' || req.method === 'POST') && pathname === '/commands')
         symbols: parsedSymbols.length > 0 ? parsedSymbols : (existing.symbols || [])
       };
       mt4AccountsConnected.set(accNum, accInfo);
-      if (rawAcc && rawAcc !== accNum) mt4AccountsConnected.set(rawAcc, accInfo);
 
       if (Array.isArray(bodyData.positions)) {
         mt4PositionsCache.set(accNum, bodyData.positions);
-        if (rawAcc && rawAcc !== accNum) mt4PositionsCache.set(rawAcc, bodyData.positions);
       }
       if (Array.isArray(bodyData.history)) {
         mt4TradesHistoryCache.set(accNum, bodyData.history);
-        if (rawAcc && rawAcc !== accNum) mt4TradesHistoryCache.set(rawAcc, bodyData.history);
       }
 
       // Suporte a lote de cotações enviado no body de /commands para todos os ativos do Market Watch
@@ -845,7 +859,14 @@ if ((req.method === 'GET' || req.method === 'POST') && pathname === '/commands')
   if (req.method === 'GET' && (pathname === '/accounts' || pathname === '/mt4/accounts')) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     const accList = [];
+    const now = Date.now();
     for (const [acc, info] of mt4AccountsConnected.entries()) {
+      const isNumeric = /^\d{4,12}$/.test(String(acc));
+      const ageMs = now - (info?.lastSeen ? new Date(info.lastSeen).getTime() : 0);
+      if (!isNumeric || ageMs > 60000) {
+        mt4AccountsConnected.delete(acc);
+        continue;
+      }
       accList.push({
         id: acc,
         account_number: acc,
@@ -866,6 +887,25 @@ if ((req.method === 'GET' || req.method === 'POST') && pathname === '/commands')
       });
     }
     res.end(JSON.stringify({ accounts: accList }));
+    return;
+  }
+
+  // 1.1b POST /accounts/cleanup: Força a purga imediata de contas fantasmas e reseta o cache de contas
+  if (req.method === 'POST' && (pathname === '/accounts/cleanup' || pathname === '/mt4/accounts/cleanup')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    const purged = [];
+    const now = Date.now();
+    for (const [acc, info] of mt4AccountsConnected.entries()) {
+      const isNumeric = /^\d{4,12}$/.test(String(acc));
+      const ageMs = now - (info?.lastSeen ? new Date(info.lastSeen).getTime() : 0);
+      if (!isNumeric || ageMs > 30000) {
+        purged.push(acc);
+        mt4AccountsConnected.delete(acc);
+        mt4PositionsCache.delete(acc);
+        mt4TradesHistoryCache.delete(acc);
+      }
+    }
+    res.end(JSON.stringify({ success: true, purged, remaining: Array.from(mt4AccountsConnected.keys()) }));
     return;
   }
 
