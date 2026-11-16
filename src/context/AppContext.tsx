@@ -4790,18 +4790,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // 2. Convenção de Timestamp de Barra por Plataforma/Conexão:
-    // - MT4 / MT5 / Binance: 13:40:01 pertence ao candle das 13:40 (horário de abertura do minuto)
-    // - NT8 (NinjaTrader 8): 13:40:01 pertence ao candle das 13:41 (horário de fechamento do minuto)
-    const activePlat = (
-      activeAccountRef.current?.platform ||
-      (typeof window !== 'undefined' ? localStorage.getItem('vortex_active_account_platform') : '') ||
-      ''
-    ).toLowerCase();
+    // 2. Convenção de Timestamp de Barra por Ativo e Plataforma:
+    // - ATIVOS SUPABASE & NT8 (NinjaTrader): 22:48:15 pertence ao candle em formação das 22:49:00 (horário de fechamento da barra)
+    // - BINANCE / MT4 / MT5 / cTrader: 22:48:15 pertence ao candle em formação das 22:48:00 (horário de abertura da barra)
     const effPanel = targetPanel || activePanelRef.current;
     const pInst = String(effPanel?.instance_id || '').toLowerCase();
     const pName = String(effPanel?.name || '').toUpperCase();
-    const isExplicitMtOrBinance =
+    const isStandardSupabase = isStandardSupabasePanel(effPanel);
+
+    // Identificação precisa por ativo (ativos padrão Supabase NUNCA são tratados como Binance nem MT4):
+    const isNt8OrSupabase = isStandardSupabase || (effPanel as any)?.platform === 'ninjatrader' || pInst.startsWith('nt8_') || pName.includes(' - NT8') || (
+      !pName.includes('BINANCE') && !pInst.endsWith('usdt') && !/USDT|BUSD|USDC/i.test(pName) && !pName.includes(' - MT4') && !pName.includes(' - MT5') && !pName.includes('ACTIVTRADES') &&
+      /^(NQ|MNQ|ES|MES|YM|MYM|RTY|M2K|CL|MCL|GC|MGC|WIN|WDO|RUSSELL|SP500|NASDAQ|GOLD|OIL)/i.test(pName)
+    );
+
+    const isExplicitMtOrBinance = !isNt8OrSupabase && (
       pInst.startsWith('mt4_') ||
       pInst.startsWith('mt5_') ||
       pName.includes('ACTIVTRADES') ||
@@ -4810,12 +4813,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       pName.includes('BINANCE') ||
       pInst.endsWith('usdt') ||
       /USDT|BUSD|USDC/i.test(pName) ||
-      activePlat === 'mt4' ||
-      activePlat === 'mt5' ||
-      activePlat === 'binance';
-    const isExplicitNt8 =
-      !isExplicitMtOrBinance &&
-      (pInst.startsWith('nt8_') || pName.includes(' - NT8') || activePlat === 'nt8');
+      (effPanel as any)?.platform === 'binance' ||
+      (effPanel as any)?.platform === 'mt4' ||
+      (effPanel as any)?.platform === 'mt5' ||
+      (effPanel as any)?.platform === 'ctrader'
+    );
 
     const baseFloorBucketMs = Math.floor(tickMs / 60000) * 60000;
 
@@ -4830,13 +4832,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const lastCandleBucketMs = !isNaN(lastCandleMs) ? Math.floor(lastCandleMs / 60000) * 60000 : baseFloorBucketMs;
 
-    // Se a conexão for NT8 (ou se a última vela do feed NT8 já estiver estampada no minuto de fechamento baseFloorBucketMs + 60000),
-    // alinha o bucket ao minuto de fechamento (ex: 13:40:01 -> 13:41:00). Para MT4/MT5, mantém estritamente 13:40:00.
-    const tickBucketMs = isExplicitMtOrBinance
-      ? baseFloorBucketMs
-      : (isExplicitNt8 || lastCandleBucketMs === baseFloorBucketMs + 60000)
+    // Se o ativo for NinjaTrader 8 ou Supabase (End of Bar / Close Time):
+    // Às 22:48:15, o candle em formação é o das 22:49:00 (baseFloorBucketMs + 60000). O primeiro fechado é 22:48:00.
+    // Para Binance / MT4 / cTrader (Start of Bar / Open Time):
+    // Às 22:48:15, o candle em formação é o das 22:48:00 (baseFloorBucketMs).
+    const tickBucketMs = isNt8OrSupabase
       ? ((tickMs % 60000 > 0) ? baseFloorBucketMs + 60000 : baseFloorBucketMs)
-      : baseFloorBucketMs;
+      : (isExplicitMtOrBinance ? baseFloorBucketMs : ((lastCandleBucketMs === baseFloorBucketMs + 60000 && tickMs % 60000 > 0) ? baseFloorBucketMs + 60000 : baseFloorBucketMs));
 
     // Cotação defasada (tick de um minuto anterior à última vela): NÃO altera e JAMAIS apaga velas reais do histórico.
     if (lastCandleBucketMs > tickBucketMs) {
@@ -9037,8 +9039,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const now = Date.now();
 
-      // Atualização imediata do preço em tempo real no candle em formação (somente se a cotação for recente <= 45s)
-      const isMDataTimestampFresh = mData?.updated_at ? (Date.now() - (parseInputToDate(mData.updated_at)?.getTime() || 0) <= 45000) : false;
+      // Atualização imediata do preço em tempo real no candle em formação
+      const isMDataTimestampFresh = mData?.updated_at ? (Date.now() - (parseInputToDate(mData.updated_at)?.getTime() || 0) <= 90000) : true;
       if (mData && isMDataTimestampFresh && mData.price && mData.price !== '--' && cache.candles && cache.candles.length > 0) {
         const mBid = parseNumericValue((mData as any).bid);
         const mAsk = parseNumericValue((mData as any).ask);
@@ -9349,9 +9351,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
             let finalCandlesList = cleanAndSanitizeCandles(sortedCandles).slice(-maxCandleLimit);
 
-            // 3. Aplicar o preço em tempo real imediatamente sobre o histórico recém baixado (apenas se a cotação for recente <= 45s)
+            // 3. Aplicar o preço em tempo real imediatamente sobre o histórico recém baixado
             const liveMDataNow = mData || cache.marketData;
-            const isMDataRecent = liveMDataNow?.updated_at ? (Date.now() - (parseInputToDate(liveMDataNow.updated_at)?.getTime() || 0) <= 45000) : false;
+            const isMDataRecent = liveMDataNow?.updated_at ? (Date.now() - (parseInputToDate(liveMDataNow.updated_at)?.getTime() || 0) <= 90000) : true;
             if (liveMDataNow && isMDataRecent && liveMDataNow.price && liveMDataNow.price !== '--') {
               const mBid = parseNumericValue((liveMDataNow as any).bid);
               const mAsk = parseNumericValue((liveMDataNow as any).ask);

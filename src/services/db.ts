@@ -3848,27 +3848,35 @@ export async function fetchCandlesSupabase(
 
   onProgress?.(15, 0, limit);
 
-  // 0. Detecção de plataforma ativa e separação estrita entre Ativos de Corretora (MT4/MT5/NT8) vs Binance
+  // 0. Detecção de plataforma ativa e separação estrita entre Ativos de Corretora (MT4/MT5/NT8) vs Binance vs Padrão Supabase
   const rawSym = (targetPanelObj?.symbol || targetPanelObj?.name || targetPanelObj?.instance_id || queryId || '').toUpperCase();
   const baseSym = rawSym.split(/[-_(\s]/)[0].trim().replace(/[^A-Z0-9]/g, '');
   const hasBrokerSuffix = rawSym.includes(' - ') && !rawSym.includes('BINANCE');
-
-  // Identificação do tipo de ativo baseada PRIMARIAMENTE no próprio painel/ativo
-  const isPanelMt = (targetPanelObj as any)?.platform === 'mt4' ||
-                    (targetPanelObj as any)?.platform === 'mt5' ||
-                    (targetPanelObj as any)?.source === 'mt4' ||
-                    (targetPanelObj?.instance_id || '').startsWith('mt4_') ||
-                    hasBrokerSuffix ||
-                    rawSym.includes('ACTIVETRADE') ||
-                    rawSym.includes('ACTIVTRADES') ||
-                    rawSym.includes('PEPPERSTONE');
-
+  const isStandardSupabase = isStandardSupabasePanel(targetPanelObj);
   const activePlat = typeof window !== 'undefined' ? (localStorage.getItem('vortex_active_account_platform') || '') : '';
-  const isBinancePanel = rawSym.includes('BINANCE') || /USDT|BUSD|USDC/i.test(baseSym) || (!isPanelMt && activePlat === 'binance');
+
+  // Identificação do tipo de ativo baseada PRIMARIAMENTE no próprio painel/ativo (ativos Supabase NUNCA são MT4 nem Binance)
+  const isPanelMt = !isStandardSupabase && (
+    (targetPanelObj as any)?.platform === 'mt4' ||
+    (targetPanelObj as any)?.platform === 'mt5' ||
+    (targetPanelObj as any)?.source === 'mt4' ||
+    (targetPanelObj?.instance_id || '').startsWith('mt4_') ||
+    hasBrokerSuffix ||
+    rawSym.includes('ACTIVETRADE') ||
+    rawSym.includes('ACTIVTRADES') ||
+    rawSym.includes('PEPPERSTONE')
+  );
+
+  const isBinancePanel = !isStandardSupabase && !isPanelMt && (
+    rawSym.includes('BINANCE') ||
+    /USDT|BUSD|USDC/i.test(baseSym) ||
+    (targetPanelObj as any)?.platform === 'binance' ||
+    (!hasBrokerSuffix && !rawSym.startsWith('PAINEL_') && !['NASDAQ', 'SP500', 'RUSSEL2000', 'DOWJONES', 'OIL', 'GOLD'].includes(baseSym) && ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'DOGE', 'ADA'].includes(baseSym))
+  );
   const isMtFeed = isPanelMt && !isBinancePanel;
 
-  const isCryptoAsset = isBinancePanel || (!isMtFeed && /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK|NEAR|SUI|PEPE)/i.test(baseSym));
-  const isForexOrCfd = isMtFeed || /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(baseSym);
+  const isCryptoAsset = isBinancePanel || (!isStandardSupabase && !isMtFeed && /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK|NEAR|SUI|PEPE)/i.test(baseSym));
+  const isForexOrCfd = !isStandardSupabase && (isMtFeed || /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(baseSym));
 
   if (isMtFeed) {
     // Garante que o WebSocket da Binance seja imediatamente desativado para nunca colidir com o Bid/Ask da corretora MT4/MT5

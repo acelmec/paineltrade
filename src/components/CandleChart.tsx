@@ -12,7 +12,7 @@ import {
   type MomentumMatrixProcessedSeries
 } from '../services/db';
 import { useApp, calculateFVGs } from '../context/AppContext';
-import { getAccountManualStrategyId, saveAccountStrategySupabase, updateStrategyReportLevelsSupabase } from '../services/db';
+import { getAccountManualStrategyId, saveAccountStrategySupabase, updateStrategyReportLevelsSupabase, isStandardSupabasePanel } from '../services/db';
 import { getChartTimeFromDate, parseInputToDate, getTradingSessionKey, isCandleInSessionPause, getSaoPauloDate, formatSaoPauloDayMonth, formatSaoPauloTime } from '../utils/date';
 import {
   calculateIndicator,
@@ -9586,17 +9586,35 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
               const sym = (activePanel?.symbol || activePanel?.name || '').toUpperCase();
               const inst = (activePanel?.instance_id || '').toUpperCase();
               const fullStr = `${sym} ${inst}`.toUpperCase();
-              const isBrokerAsset = (sym.includes(' - ') && !sym.includes('BINANCE')) || sym.includes('ACTIVTRADES') || sym.includes('ACTIVETRADE') || sym.includes('PEPPERSTONE');
-              const isMt = isBrokerAsset || (activePanel as any)?.platform === 'mt4' || (activePanel as any)?.platform === 'mt5' || (activePanel as any)?.source === 'mt4' || (activePanel?.instance_id || '').startsWith('mt4_') || (activeAccount?.platform === 'mt4' && /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX|BTC|ETH)/i.test(sym));
-              const isBinance = !isMt && (sym.includes('BINANCE') || /USDT|BUSD|USDC/i.test(sym) || (activeAccount?.platform === 'binance' && !isBrokerAsset));
-              const isNt8 = !isMt && !isBinance && ((activePanel as any)?.platform === 'ninjatrader' || activeAccount?.platform === 'ninjatrader' || (isStreamerWsConnected() && /^(NQ|MNQ|ES|MES|YM|MYM|RTY|M2K|CL|MCL|GC|MGC|FDAX|FESX|WIN|WDO|RUSSELL)/i.test(sym)));
+              const isStandardSupabase = isStandardSupabasePanel(activePanel);
+              const isBrokerAsset = !isStandardSupabase && ((sym.includes(' - ') && !sym.includes('BINANCE')) || sym.includes('ACTIVTRADES') || sym.includes('ACTIVETRADE') || sym.includes('PEPPERSTONE'));
+              const isMt = !isStandardSupabase && (isBrokerAsset || (activePanel as any)?.platform === 'mt4' || (activePanel as any)?.platform === 'mt5' || (activePanel as any)?.source === 'mt4' || (activePanel?.instance_id || '').startsWith('mt4_'));
+              const isBinance = !isStandardSupabase && !isMt && (sym.includes('BINANCE') || /USDT|BUSD|USDC/i.test(sym) || (activePanel as any)?.platform === 'binance');
+              const isNt8 = isStandardSupabase
+                ? isStreamerWsConnected()
+                : (!isMt && !isBinance && ((activePanel as any)?.platform === 'ninjatrader' || sym.includes(' - NT8') || (isStreamerWsConnected() && /^(NQ|MNQ|ES|MES|YM|MYM|RTY|M2K|CL|MCL|GC|MGC|FDAX|FESX|WIN|WDO|RUSSELL)/i.test(sym))));
 
               let badge = {
                 shortLabel: 'Axion Feed',
                 dotColor: 'bg-sky-400',
-                title: 'Consumindo cotações e histórico via Feed Axion Cloud'
+                title: 'Consumindo cotações e histórico via Feed Axion Cloud (Supabase)'
               };
-              if (isMt) {
+
+              if (isStandardSupabase) {
+                if (isNt8) {
+                  badge = {
+                    shortLabel: 'NT8 Local',
+                    dotColor: 'bg-emerald-400 animate-pulse',
+                    title: 'Transmissão em tempo real do NinjaTrader 8 Local (:8002)'
+                  };
+                } else {
+                  badge = {
+                    shortLabel: 'Axion Feed',
+                    dotColor: 'bg-sky-400',
+                    title: 'Consumindo cotações e histórico via Feed Axion Cloud (Supabase)'
+                  };
+                }
+              } else if (isMt) {
                 let broker = 'ActivTrades';
                 if (sym.includes(' - ')) {
                   const parts = sym.split(' - ');
@@ -9625,7 +9643,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                   dotColor: 'bg-amber-400',
                   title: `Cotações e Ordens em tempo real via ${bLabel}`
                 };
-              } else if (activeAccount?.platform === 'ctrader') {
+              } else if ((activePanel as any)?.platform === 'ctrader' || activeAccount?.platform === 'ctrader') {
                 badge = {
                   shortLabel: 'cTrader',
                   dotColor: 'bg-purple-400',

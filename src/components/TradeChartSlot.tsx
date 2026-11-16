@@ -9,6 +9,7 @@ import type { WidgetConfig } from '../utils/widgetRegistry';
 import type { DrawingItem, DrawingToolType } from '../types/chartDrawings';
 import type { ChartSlotConfig } from '../types/chartLayout';
 import { AssetSearchSelect } from './AssetSearchSelect';
+import { isStandardSupabasePanel } from '../services/db';
 
 function getShortIndicatorName(ind: IndicatorConfig): string {
   switch (ind.type) {
@@ -265,17 +266,32 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
             const sym = (slotPanel?.symbol || slotPanel?.name || '').toUpperCase();
             const inst = (slotPanel?.instance_id || '').toUpperCase();
             const fullStr = `${sym} ${inst}`.toUpperCase();
-            const isBrokerAsset = (sym.includes(' - ') && !sym.includes('BINANCE')) || sym.includes('ACTIVTRADES') || sym.includes('ACTIVETRADE') || sym.includes('PEPPERSTONE');
-            const isMt = isBrokerAsset || (slotPanel as any)?.platform === 'mt4' || (slotPanel as any)?.platform === 'mt5' || (slotPanel as any)?.source === 'mt4' || (slotPanel?.instance_id || '').startsWith('mt4_') || (activeAccount?.platform === 'mt4' && /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX|BTC|ETH)/i.test(sym));
-            const isBinance = !isMt && (sym.includes('BINANCE') || /USDT|BUSD|USDC/i.test(sym) || (activeAccount?.platform === 'binance' && !isBrokerAsset));
-            const isNt8 = !isMt && !isBinance && ((slotPanel as any)?.platform === 'ninjatrader' || (isStreamerWsConnected() && /^(NQ|MNQ|ES|MES|YM|MYM|RTY|M2K|CL|MCL|GC|MGC|FDAX|FESX|WIN|WDO|RUSSELL)/i.test(sym)));
+            const isStandardSupabase = isStandardSupabasePanel(slotPanel);
+            const isBrokerAsset = !isStandardSupabase && ((sym.includes(' - ') && !sym.includes('BINANCE')) || sym.includes('ACTIVTRADES') || sym.includes('ACTIVETRADE') || sym.includes('PEPPERSTONE'));
+            const isMt = !isStandardSupabase && (isBrokerAsset || (slotPanel as any)?.platform === 'mt4' || (slotPanel as any)?.platform === 'mt5' || (slotPanel as any)?.source === 'mt4' || (slotPanel?.instance_id || '').startsWith('mt4_'));
+            const isBinance = !isStandardSupabase && !isMt && (sym.includes('BINANCE') || /USDT|BUSD|USDC/i.test(sym) || (slotPanel as any)?.platform === 'binance');
+            const isNt8 = isStandardSupabase
+              ? isStreamerWsConnected()
+              : (!isMt && !isBinance && ((slotPanel as any)?.platform === 'ninjatrader' || sym.includes(' - NT8') || (isStreamerWsConnected() && /^(NQ|MNQ|ES|MES|YM|MYM|RTY|M2K|CL|MCL|GC|MGC|FDAX|FESX|WIN|WDO|RUSSELL)/i.test(sym))));
 
             let label = 'Axion Feed';
             let dotColor = 'bg-sky-400';
             let badgeStyle = 'bg-sky-950/40 border-sky-500/30 text-sky-300';
-            let title = 'Consumindo cotações e histórico via Feed Axion Cloud';
+            let title = 'Consumindo cotações e histórico via Feed Axion Cloud (Supabase)';
 
-            if (isMt) {
+            if (isStandardSupabase) {
+              if (isNt8) {
+                label = 'NT8 Local';
+                dotColor = 'bg-emerald-400 animate-pulse';
+                badgeStyle = 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300';
+                title = 'Transmissão em tempo real do NinjaTrader 8 Local (:8002)';
+              } else {
+                label = 'Axion Feed';
+                dotColor = 'bg-sky-400';
+                badgeStyle = 'bg-sky-950/40 border-sky-500/30 text-sky-300';
+                title = 'Consumindo cotações e histórico via Feed Axion Cloud (Supabase)';
+              }
+            } else if (isMt) {
               let broker = 'ActivTrades';
               if (sym.includes(' - ')) {
                 const parts = sym.split(' - ');
@@ -300,7 +316,7 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
               dotColor = 'bg-amber-400';
               badgeStyle = 'bg-amber-950/40 border-amber-500/30 text-amber-300';
               title = `Cotações e Ordens em tempo real via ${label}`;
-            } else if (activeAccount?.platform === 'ctrader') {
+            } else if ((slotPanel as any)?.platform === 'ctrader' || activeAccount?.platform === 'ctrader') {
               label = 'cTrader';
               dotColor = 'bg-purple-400';
               badgeStyle = 'bg-purple-950/40 border-purple-500/30 text-purple-300';
