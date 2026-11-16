@@ -113,6 +113,7 @@ import {
 import { fetchStreamerMarketData, isStreamerWsConnected } from '../services/vortexStreamer';
 import { getLocalPlatformConnections } from '../services/connectionsService';
 import { executeCTraderOrder } from '../services/ctraderService';
+import { isTickMatchingPanel } from '../utils/marketSource';
 import { PRESET_ATM_STRATEGIES, resolveAlgorithmAtm, type ATMStrategy, type ATMBracket } from '../utils/atmRegistry';
 
 function extractPriceActionFromCandles(candles: Candle[]) {
@@ -13788,6 +13789,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
               bid: bidMain,
               ask: askMain,
               volume: 1,
+              source: acc.platform || 'mt4',
               updated_at: snap.updated_at || new Date().toISOString()
             }
           }));
@@ -13810,6 +13812,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                 bid: qBid > 0 ? qBid : numPrice,
                 ask: qAsk > 0 ? qAsk : numPrice,
                 volume: Number(qData.volume || 1),
+                source: acc.platform || 'mt4',
                 updated_at: snap.updated_at || new Date().toISOString()
               }
             }));
@@ -13964,6 +13967,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                     bid: Number(qData.bid || numPrice),
                     ask: Number(qData.ask || numPrice),
                     volume: Number(qData.volume || 1),
+                    source: 'mt4',
                     updated_at: qData.updated_at || new Date().toISOString()
                   }
                 }));
@@ -15289,6 +15293,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                     bid: Number(d.bid || dPrice),
                     ask: Number(d.ask || dPrice),
                     volume: Number(d.volume || 1),
+                    source: 'nt8',
                     updated_at: d.updated_at || new Date().toISOString()
                   }
                 }));
@@ -15787,22 +15792,13 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       if (!detail || !detail.price || detail.price <= 0) return;
 
       const sym = (detail.symbol || '').toUpperCase();
-      const pan = (detail.panel || '').toUpperCase();
       const numPrice = Number(detail.price);
 
-      // 1. Identificar todos os painéis correspondentes no cache (incluindo ativos sincronizados ex: ETHUSD e ETHUSD - ActivTrades)
+      // 1. Identificar com precisão estrita os painéis correspondentes no cache (sem contaminação cruzada entre fontes)
       const currentPanels = allPanelsRef.current || [];
+      const curAcc = activeAccountRef.current || activeAccount;
       const matchedPanels = currentPanels.filter((p: any) => {
-        const pName = (p.name || p.id || '').toUpperCase();
-        const pSym = (p.symbol || '').toUpperCase();
-        const pInst = (p.instance_id || '').toUpperCase();
-
-        if (pan && (pName.toLowerCase() === pan.toLowerCase() || pInst.toLowerCase() === pan.toLowerCase())) return true;
-        if (pSym && pSym === sym) return true;
-        if (pInst && pInst === sym) return true;
-        if (isSameAsset(pSym || pName, sym)) return true;
-        if (isSameAsset(pInst, sym)) return true;
-        return false;
+        return isTickMatchingPanel(detail, p, curAcc);
       });
 
       if (matchedPanels.length === 0) return;

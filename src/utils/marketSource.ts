@@ -326,3 +326,88 @@ export function filterAccountsForAsset(accounts: any[], panel: any): any[] {
   // Fallback: todas as contas que não sejam NT8 execução pura
   return accounts.filter(acc => cleanStr(acc.platform) !== 'nt8');
 }
+
+/**
+ * Validação rigorosa de correspondência entre um tick recebido e um painel/gráfico.
+ * IMPEDE CONTAMINAÇÃO CRUZADA entre Binance, MetaTrader, cTrader e Supabase/NT8.
+ * NUNCA utiliza isSameAsset (que funde incorretamente BTCUSDT com BTCUSD).
+ */
+export function isTickMatchingPanel(detail: any, panel: any, activeAccount?: any): boolean {
+  if (!detail || !panel) return false;
+
+  const tickSym = String(detail.symbol || detail.panel || '').toUpperCase().trim();
+  const tickSrc = String(detail.source || '').toLowerCase().trim();
+  if (!tickSym) return false;
+
+  const panelSource = resolveAssetSource(panel, activeAccount);
+  const pName = String(panel.name || panel.id || '').toUpperCase().trim();
+  const pSym = String(panel.symbol || '').toUpperCase().trim();
+  const pInst = String(panel.instance_id || '').toUpperCase().trim();
+
+  // 1. Ecossistema BINANCE
+  if (panelSource.ecosystem === 'binance') {
+    // Rejeita qualquer tick explicitamente vindo de MT4/MT5/cTrader/NT8/Supabase
+    if (tickSrc && !['binance', 'crypto'].includes(tickSrc)) return false;
+
+    const cleanSym = tickSym.replace(/[^A-Z0-9]/g, '');
+    const cleanPSym = pSym.replace(/[^A-Z0-9]/g, '');
+    const cleanPInst = pInst.replace(/[^A-Z0-9]/g, '');
+    const cleanPName = pName.replace(/[^A-Z0-9]/g, '');
+
+    // Match estrito: deve ser exatamente o mesmo par (ex: BTCUSDT bate com BTCUSDT, jamais com BTCUSD)
+    if (cleanSym === cleanPSym || cleanSym === cleanPInst) return true;
+    if (cleanPName.startsWith(cleanSym) || pName.startsWith(cleanSym)) return true;
+    return false;
+  }
+
+  // 2. Ecossistema METATRADER (MT4 / MT5)
+  if (panelSource.ecosystem === 'mt') {
+    // Rejeita qualquer tick explicitamente vindo da Binance, cTrader, NT8 ou Supabase
+    if (tickSrc && !['mt', 'mt4', 'mt5', 'metatrader'].includes(tickSrc)) return false;
+
+    // Rejeita tickers com terminação USDT/BUSD/USDC (típicos de crypto spot/futuros Binance)
+    if (tickSym.endsWith('USDT') || tickSym.endsWith('BUSD') || tickSym.endsWith('USDC')) return false;
+
+    const basePName = pName.split('-')[0].trim();
+    if (tickSym === pSym || tickSym === pInst) return true;
+    if (tickSym === basePName) return true;
+    if (pInst.toLowerCase() === tickSym.toLowerCase() || pInst.toLowerCase() === `mt4_${tickSym.toLowerCase()}`) return true;
+    return false;
+  }
+
+  // 3. Ecossistema CTRADER
+  if (panelSource.ecosystem === 'ctrader') {
+    if (tickSrc && tickSrc !== 'ctrader') return false;
+    const basePName = pName.split('-')[0].trim();
+    return tickSym === pSym || tickSym === pInst || tickSym === basePName;
+  }
+
+  // 4. Ecossistema SUPABASE / NINJATRADER 8
+  if (panelSource.ecosystem === 'supabase' || panelSource.ecosystem === 'nt8') {
+    // Rejeita ticks de Binance ou MetaTrader
+    if (tickSrc && ['binance', 'mt', 'mt4', 'mt5', 'ctrader'].includes(tickSrc)) return false;
+    if (/USDT|BUSD|USDC/i.test(tickSym)) return false;
+    if (/^(BTC|ETH|SOL|BNB|EURUSD|GBPUSD|AUDUSD|USDJPY)/i.test(tickSym)) return false;
+
+    if (tickSym === pSym || tickSym === pInst || tickSym === pName) return true;
+
+    // Ativos canônicos padrão: NQ -> NASDAQ, ES -> SP500, RTY -> RUSSEL2000, YM -> DOWJONES, CL -> OIL, GC -> GOLD
+    const canonicalMap: Record<string, string[]> = {
+      'NASDAQ': ['NQ', 'MNQ', 'NASDAQ'],
+      'SP500': ['ES', 'MES', 'SP500', 'S&P500'],
+      'RUSSEL2000': ['RTY', 'M2K', 'RUSSELL2000', 'RUSSEL2000', 'RUSSELL'],
+      'DOWJONES': ['YM', 'MYM', 'DOWJONES', 'DOW'],
+      'OIL': ['CL', 'MCL', 'OIL', 'PETROLEO'],
+      'GOLD': ['GC', 'MGC', 'GOLD', 'OURO']
+    };
+    for (const [canon, aliases] of Object.entries(canonicalMap)) {
+      if (pName.includes(canon) || pInst.includes(canon.toLowerCase())) {
+        if (aliases.includes(tickSym)) return true;
+      }
+    }
+    return false;
+  }
+
+  return false;
+}
+

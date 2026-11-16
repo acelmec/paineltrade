@@ -412,6 +412,7 @@ export function subscribeBinanceMarketData(symbol = 'BTCUSDT', isFutures = false
                 bid: bid,
                 ask: ask,
                 spread: Number((ask - bid).toFixed(4)),
+                source: 'binance',
                 updated_at: new Date().toISOString()
               }
             }));
@@ -446,6 +447,7 @@ export function subscribeBinanceMarketData(symbol = 'BTCUSDT', isFutures = false
               low: Number(k.l || price),
               close: price,
               volume: Number(k.v || 0),
+              source: 'binance',
               timestamp: new Date(k.t).toISOString(),
               updated_at: new Date(msg.E || Date.now()).toISOString(),
               isBar: k.x === true // k.x é true quando a vela consolidou/fechou!

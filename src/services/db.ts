@@ -3885,13 +3885,6 @@ export async function fetchCandlesSupabase(
     /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(baseSym)
   );
 
-  if (isMtFeed) {
-    // Garante que o WebSocket da Binance seja imediatamente desativado para nunca colidir com o Bid/Ask da corretora MT4/MT5
-    try {
-      import('./binanceService').then(m => m.unsubscribeBinanceMarketData?.()).catch(() => {});
-    } catch {}
-  }
-
   // 0.1 Para Criptoativos (BTCUSDT, ETHUSDT, SOLUSDT, BTCUSD, ETHUSD, etc.), prioridade máxima para a Binance REST API
   // A Binance fornece histórico contínuo M1 autêntico em tempo real para os gráficos globais
   if (isCryptoAsset) {
@@ -3904,17 +3897,15 @@ export async function fetchCandlesSupabase(
       }
 
       const isFutures = rawSym.includes('FUTUR') || rawSym.includes('PERP') || activePlat === 'binance';
-      const { fetchBinanceCandles, subscribeBinanceMarketData, unsubscribeBinanceMarketData } = await import('./binanceService');
+      const { fetchBinanceCandles, subscribeBinanceMarketData } = await import('./binanceService');
       const queryLimit = limit > 0 ? Math.min(Math.max(limit, 50), 1000) : 1000;
       const binanceCandles = await fetchBinanceCandles(cleanSym, '1m', queryLimit, Boolean(isFutures));
       if (binanceCandles && binanceCandles.length > 0) {
         onProgress?.(100, binanceCandles.length, limit);
         saveLocalCandles(queryId, binanceCandles);
-        // Se a conta ou ativo for MT4/Corretora, o WebSocket da Binance NUNCA é ativado para não colidir com o Bid/Ask da corretora
+        // Inscreve WebSocket da Binance apenas se o gráfico for do ecossistema Binance, sem desinscrever concorrentemente outros gráficos abertos
         if (!isMtFeed) {
           subscribeBinanceMarketData(cleanSym, Boolean(isFutures));
-        } else {
-          unsubscribeBinanceMarketData();
         }
         return binanceCandles;
       }

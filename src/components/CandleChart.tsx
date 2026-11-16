@@ -13,7 +13,7 @@ import {
 } from '../services/db';
 import { useApp, calculateFVGs } from '../context/AppContext';
 import { getAccountManualStrategyId, saveAccountStrategySupabase, updateStrategyReportLevelsSupabase, isStandardSupabasePanel } from '../services/db';
-import { resolveAssetSource } from '../utils/marketSource';
+import { resolveAssetSource, isTickMatchingPanel } from '../utils/marketSource';
 import { getChartTimeFromDate, parseInputToDate, getTradingSessionKey, isCandleInSessionPause, getSaoPauloDate, formatSaoPauloDayMonth, formatSaoPauloTime } from '../utils/date';
 import {
   calculateIndicator,
@@ -2906,13 +2906,9 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     const handleLiveStreamerTick = (e: any) => {
       const detail = e.detail;
       if (!detail || !candleSeriesRef.current) return;
-      const tickSym = String(detail.symbol || detail.panel || '').toUpperCase();
-      const mySym = String(activePanel?.symbol || activePanel?.name || '').toUpperCase();
-      const myInst = String(activePanel?.instance_id || '').toUpperCase();
 
-      const isMatch = tickSym === mySym || tickSym === myInst ||
-        isSameAsset(mySym, tickSym) || isSameAsset(myInst, tickSym);
-
+      // Validação estrita por fonte e par exato (impede que ticks da Binance contaminem MT4 ou Supabase)
+      const isMatch = isTickMatchingPanel(detail, activePanel, activeAccount);
       if (!isMatch) return;
 
       const bidVal = Number(detail.bid || 0);
@@ -4204,7 +4200,12 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       }
     }
 
-    const currentBucketSec = Math.floor(tickSec / bucketSec) * bucketSec;
+    // Convenção de tempo por ecossistema:
+    // Para NT8 e Supabase (End of Bar / Close Time): o candle em formação é referenciado pelo horário de término (ex: 22:48:15 fecha às 22:49:00).
+    // Para Binance / MT4 / MT5 / cTrader (Start of Bar / Open Time): o candle em formação é referenciado pelo horário de início (22:48:00).
+    const currentBucketSec = isNt8OrSupabaseAsset
+      ? ((tickSec % bucketSec > 0) ? (Math.floor(tickSec / bucketSec) + 1) * bucketSec : Math.floor(tickSec / bucketSec) * bucketSec)
+      : Math.floor(tickSec / bucketSec) * bucketSec;
 
     // REGRA DE OURO INVIOLÁVEL: CANDLE FECHADO É SAGRADO E NUNCA PODE SER MUTADO!
     // Se o último candle do array possui tempo anterior ao bucket corrente (currentBucketSec > lastCandleTimeSec),
