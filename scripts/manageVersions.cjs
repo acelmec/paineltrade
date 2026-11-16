@@ -48,10 +48,10 @@ function getNextVersionFolder(dateStr = getFormattedDate()) {
 /**
  * Encontra a última pasta de versão existente para a data informada (ou data mais recente)
  */
-function getLastVersionFolder() {
+function getLastVersionFolder(excludeName = null) {
   if (!fs.existsSync(publicDir)) return null;
   const entries = fs.readdirSync(publicDir, { withFileTypes: true })
-    .filter(e => e.isDirectory() && /^V\d{8}_\d{2}$/.test(e.name))
+    .filter(e => e.isDirectory() && /^V\d{8}_\d{2}$/.test(e.name) && (!excludeName || e.name !== excludeName))
     .map(e => e.name)
     .sort()
     .reverse();
@@ -110,6 +110,7 @@ function resolveSourceFile(type) {
  */
 function saveVersion(targetType = 'all') {
   const next = getNextVersionFolder();
+  const lastFolder = getLastVersionFolder(next.folderName);
   fs.mkdirSync(next.folderPath, { recursive: true });
 
   console.log(`\n=== [GERENCIADOR DE VERSÕES PUBLIC] ===`);
@@ -118,8 +119,6 @@ function saveVersion(targetType = 'all') {
   const typesToCopy = targetType === 'all' 
     ? ['easypanel', 'windows', 'android'] 
     : [targetType];
-
-  const lastFolder = getLastVersionFolder();
 
   // Se for atualização individual, copia os outros 2 pacotes da última versão para manter a pasta íntegra
   const allTypes = ['easypanel', 'windows', 'android'];
