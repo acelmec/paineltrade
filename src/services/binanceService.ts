@@ -338,52 +338,51 @@ export async function fetchBinanceCandles(
 }
 
 // =========================================================================
-// WEBSOCKET NATIVO EM TEMPO REAL (CANDLES 1M & PREÇO TICK-BY-TICK)
+// WEBSOCKET NATIVO EM TEMPO REAL MULTI-SÍMBOLO (CANDLES 1M & PREÇO TICK-BY-TICK)
+// Suporta múltiplos gráficos abertos concorrentemente no Multi-Chart Grid
 // =========================================================================
-let activeBinanceWs: WebSocket | null = null;
-let activeSubscribedSymbol = '';
-let lastBinanceBid = 0;
-let lastBinanceAsk = 0;
+const activeBinanceSockets = new Map<string, WebSocket>();
+const binanceBookMap = new Map<string, { bid: number; ask: number; lastPrice?: number }>();
 
 export function subscribeBinanceMarketData(symbol = 'BTCUSDT', isFutures = false): void {
   if (typeof window === 'undefined') return;
 
   const cleanSym = symbol.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+  if (!cleanSym) return;
 
   // Bloqueio apenas se o próprio símbolo solicitado NÃO for de cripto
   const isCryptoSymbol = cleanSym.endsWith('usdt') || cleanSym.endsWith('busd') || cleanSym.endsWith('usdc') ||
     /^(btc|eth|sol|bnb|xrp|doge|ada|avax|dot|link|near|sui|pepe)/i.test(cleanSym);
 
   if (!isCryptoSymbol) {
-    const activePlat = localStorage.getItem('vortex_active_account_platform');
-    if (activePlat && ['mt4', 'mt5', 'nt8'].includes(activePlat.toLowerCase())) {
-      console.log('[BinanceService] ⛔ Subscrição Binance ignorada para ativo não-cripto:', cleanSym);
-      unsubscribeBinanceMarketData();
-      return;
-    }
-  }
-  if (activeBinanceWs && activeSubscribedSymbol === cleanSym && activeBinanceWs.readyState === WebSocket.OPEN) {
     return;
   }
 
-  // Encerra conexão anterior se mudar de símbolo
-  if (activeBinanceWs) {
-    try { activeBinanceWs.close(); } catch {}
-    activeBinanceWs = null;
+  const socketKey = `${cleanSym}_${isFutures ? 'f' : 's'}`;
+
+  // Se já existe conexão ativa ou conectando para este par específico, reaproveita sem fechar
+  const existingWs = activeBinanceSockets.get(socketKey);
+  if (existingWs && (existingWs.readyState === WebSocket.OPEN || existingWs.readyState === WebSocket.CONNECTING)) {
+    return;
   }
 
-  activeSubscribedSymbol = cleanSym;
-  // Subscrição combinada: kline de 1m + bookTicker (Bid/Ask em tempo real)
+  // Se existia uma conexão morta, limpa
+  if (existingWs) {
+    try { existingWs.close(); } catch {}
+    activeBinanceSockets.delete(socketKey);
+  }
+
+  // Subscrição combinada dedicada: kline de 1m + bookTicker (Bid/Ask em tempo real ultra-rápido)
   const wsUrl = isFutures
     ? `wss://fstream.binance.com/stream?streams=${cleanSym}@kline_1m/${cleanSym}@bookTicker`
     : `wss://stream.binance.com:9443/stream?streams=${cleanSym}@kline_1m/${cleanSym}@bookTicker`;
 
   try {
     const ws = new WebSocket(wsUrl);
-    activeBinanceWs = ws;
+    activeBinanceSockets.set(socketKey, ws);
 
     ws.onopen = () => {
-      console.log(`[BinanceService] 🔌 WebSocket ao vivo conectado para ${cleanSym.toUpperCase()}`);
+      console.log(`[BinanceService] 🔌 WebSocket ao vivo conectado para [${socketKey.toUpperCase()}]`);
     };
 
     ws.onmessage = (event) => {
@@ -392,20 +391,27 @@ export function subscribeBinanceMarketData(symbol = 'BTCUSDT', isFutures = false
         const msg = raw?.data || raw;
         if (!msg) return;
 
-        // Atualização de BookTicker (Melhor Bid e Melhor Ask com Spread real)
+        // 1. Atualização ultra-rápida de BookTicker (Melhor Bid e Melhor Ask com Spread real)
         if (msg.b && msg.a) {
-          lastBinanceBid = Number(msg.b);
-          lastBinanceAsk = Number(msg.a);
+          const bid = Number(msg.b);
+          const ask = Number(msg.a);
           const sym = String(msg.s || cleanSym).toUpperCase();
-          if (typeof window !== 'undefined' && lastBinanceBid > 0 && lastBinanceAsk > 0) {
+
+          const book = binanceBookMap.get(cleanSym) || { bid, ask };
+          book.bid = bid;
+          book.ask = ask;
+          binanceBookMap.set(cleanSym, book);
+
+          if (typeof window !== 'undefined' && bid > 0 && ask > 0) {
+            const midPrice = book.lastPrice || bid;
             window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
               detail: {
                 symbol: sym,
                 panel: sym,
-                price: lastBinanceBid,
-                bid: lastBinanceBid,
-                ask: lastBinanceAsk,
-                spread: Number((lastBinanceAsk - lastBinanceBid).toFixed(4)),
+                price: midPrice,
+                bid: bid,
+                ask: ask,
+                spread: Number((ask - bid).toFixed(4)),
                 updated_at: new Date().toISOString()
               }
             }));
@@ -413,14 +419,18 @@ export function subscribeBinanceMarketData(symbol = 'BTCUSDT', isFutures = false
           return;
         }
 
+        // 2. Atualização de Candle de 1 minuto em tempo real
         if (!msg.k) return;
 
         const k = msg.k;
         const sym = String(k.s || cleanSym).toUpperCase();
         const price = Number(k.c || 0);
 
-        const curBid = lastBinanceBid > 0 ? lastBinanceBid : price;
-        const curAsk = lastBinanceAsk > 0 ? lastBinanceAsk : (price > 0 ? price + 0.5 : price);
+        const book = binanceBookMap.get(cleanSym) || { bid: price, ask: price };
+        book.lastPrice = price;
+        if (!book.bid || book.bid <= 0) book.bid = price;
+        if (!book.ask || book.ask <= 0) book.ask = price;
+        binanceBookMap.set(cleanSym, book);
 
         if (price > 0 && typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
@@ -428,9 +438,9 @@ export function subscribeBinanceMarketData(symbol = 'BTCUSDT', isFutures = false
               symbol: sym,
               panel: sym,
               price: price,
-              bid: curBid,
-              ask: curAsk,
-              spread: Number((curAsk - curBid).toFixed(4)),
+              bid: book.bid,
+              ask: book.ask,
+              spread: Number((book.ask - book.bid).toFixed(4)),
               open: Number(k.o || price),
               high: Number(k.h || price),
               low: Number(k.l || price),
@@ -446,25 +456,39 @@ export function subscribeBinanceMarketData(symbol = 'BTCUSDT', isFutures = false
     };
 
     ws.onerror = (err) => {
-      console.warn('[BinanceService] Erro no WebSocket da Binance:', err);
+      console.warn(`[BinanceService] Erro no WebSocket da Binance [${socketKey}]:`, err);
     };
 
     ws.onclose = () => {
-      console.log(`[BinanceService] WebSocket fechado para ${cleanSym.toUpperCase()}`);
-      if (activeSubscribedSymbol === cleanSym) {
-        setTimeout(() => subscribeBinanceMarketData(cleanSym, isFutures), 3000);
-      }
+      console.log(`[BinanceService] WebSocket fechado para [${socketKey.toUpperCase()}]`);
+      activeBinanceSockets.delete(socketKey);
+      // Reconexão automática resiliente
+      setTimeout(() => {
+        if (typeof window !== 'undefined') {
+          subscribeBinanceMarketData(cleanSym, isFutures);
+        }
+      }, 3000);
     };
   } catch (err) {
-    console.warn('[BinanceService] Falha ao iniciar WebSocket Binance:', err);
+    console.warn(`[BinanceService] Falha ao iniciar WebSocket Binance [${socketKey}]:`, err);
   }
 }
 
-export function unsubscribeBinanceMarketData(): void {
-  if (activeBinanceWs) {
-    activeSubscribedSymbol = '';
-    try { activeBinanceWs.close(); } catch {}
-    activeBinanceWs = null;
+export function unsubscribeBinanceMarketData(symbol?: string): void {
+  if (symbol) {
+    const cleanSym = symbol.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+    for (const [key, ws] of activeBinanceSockets.entries()) {
+      if (key.startsWith(cleanSym)) {
+        try { ws.close(); } catch {}
+        activeBinanceSockets.delete(key);
+      }
+    }
+  } else {
+    // Fecha todos
+    for (const ws of activeBinanceSockets.values()) {
+      try { ws.close(); } catch {}
+    }
+    activeBinanceSockets.clear();
   }
 }
 

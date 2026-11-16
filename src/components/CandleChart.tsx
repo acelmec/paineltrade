@@ -2820,15 +2820,15 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     return false;
   }, [activePanel]);
 
-  // Regra Inviolável: Ativos com conexão Supabase e NT8 possuem plotagem da linha de preço ativa por padrão!
+  // Regra Inviolável: A linha de preço (Price Line) vem ativa por padrão para todos os ativos no Vortex!
   const shouldShowPriceLine = useMemo(() => {
-    if (isNt8OrSupabaseAsset) {
-      return settings?.chart_price_line_visible !== false;
+    if (settings?.chart_price_line_visible !== undefined) {
+      return settings.chart_price_line_visible !== false;
     }
     const saved = typeof window !== 'undefined' ? localStorage.getItem('vortex_chart_price_line_visible') : null;
     if (saved !== null) return saved === 'true';
-    return settings?.chart_price_line_visible === true;
-  }, [isNt8OrSupabaseAsset, settings?.chart_price_line_visible]);
+    return true; // Padrão: SEMPRE TRUE para todos os ativos (Supabase, NT8, Binance, MT4, cTrader)!
+  }, [settings?.chart_price_line_visible]);
 
   // Sincronização em tempo real das Linhas de ASK e BID na escala do gráfico
   useEffect(() => {
@@ -2836,7 +2836,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     const bidVal = Number(marketData?.bid || 0);
     const askVal = Number(marketData?.ask || 0);
 
-    if (bidVal > 0 && askVal > 0 && askVal > bidVal) {
+    if (bidVal > 0 && askVal > 0 && askVal >= bidVal) {
       // Oculta o card duplicado do candle para exibir estritamente as etiquetas ASK e BID na escala
       try {
         candleSeriesRef.current.applyOptions({ lastValueVisible: false });
@@ -2861,7 +2861,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         } catch (_) {}
       }
 
-      // 2. Linha de BID / Compra / Referência do Candle no MT4-MT5 (Verde sólido contínuo)
+      // 2. Linha de BID / Compra / Referência (Verde sólido contínuo)
       if (!bidPriceLineRef.current) {
         try {
           bidPriceLineRef.current = candleSeriesRef.current.createPriceLine({
@@ -2884,7 +2884,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         candleSeriesRef.current.applyOptions({
           lastValueVisible: true,
           priceLineVisible: shouldShowPriceLine,
-          priceLineColor: isNt8OrSupabaseAsset ? '#10b981' : '#ef4444'
+          priceLineColor: isNt8OrSupabaseAsset ? '#10b981' : (showPva ? '#b91c1c' : '#10b981')
         });
       } catch (_) {}
 
@@ -2897,7 +2897,75 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         bidPriceLineRef.current = null;
       }
     }
-  }, [marketData?.bid, marketData?.ask, shouldShowPriceLine, isNt8OrSupabaseAsset]);
+  }, [marketData?.bid, marketData?.ask, shouldShowPriceLine, isNt8OrSupabaseAsset, showPva]);
+
+  // Listener direto de ticks em tempo real (<1ms) para atualização ultra-rápida das linhas de ASK e BID
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleLiveStreamerTick = (e: any) => {
+      const detail = e.detail;
+      if (!detail || !candleSeriesRef.current) return;
+      const tickSym = String(detail.symbol || detail.panel || '').toUpperCase();
+      const mySym = String(activePanel?.symbol || activePanel?.name || '').toUpperCase();
+      const myInst = String(activePanel?.instance_id || '').toUpperCase();
+
+      const isMatch = tickSym === mySym || tickSym === myInst ||
+        isSameAsset(mySym, tickSym) || isSameAsset(myInst, tickSym);
+
+      if (!isMatch) return;
+
+      const bidVal = Number(detail.bid || 0);
+      const askVal = Number(detail.ask || 0);
+
+      if (bidVal > 0 && askVal > 0 && askVal >= bidVal) {
+        try {
+          candleSeriesRef.current.applyOptions({ lastValueVisible: false });
+        } catch (_) {}
+
+        if (!askPriceLineRef.current) {
+          try {
+            askPriceLineRef.current = candleSeriesRef.current.createPriceLine({
+              price: askVal,
+              color: '#f43f5e',
+              lineWidth: 1,
+              lineStyle: 2,
+              lineVisible: true,
+              axisLabelVisible: true,
+              title: ''
+            });
+          } catch (_) {}
+        } else {
+          try {
+            askPriceLineRef.current.applyOptions({ price: askVal });
+          } catch (_) {}
+        }
+
+        if (!bidPriceLineRef.current) {
+          try {
+            bidPriceLineRef.current = candleSeriesRef.current.createPriceLine({
+              price: bidVal,
+              color: '#10b981',
+              lineWidth: 1,
+              lineStyle: 0,
+              lineVisible: true,
+              axisLabelVisible: true,
+              title: ''
+            });
+          } catch (_) {}
+        } else {
+          try {
+            bidPriceLineRef.current.applyOptions({ price: bidVal });
+          } catch (_) {}
+        }
+      }
+    };
+
+    window.addEventListener('vortex_streamer_tick', handleLiveStreamerTick, { passive: true });
+    return () => {
+      window.removeEventListener('vortex_streamer_tick', handleLiveStreamerTick);
+    };
+  }, [activePanel?.symbol, activePanel?.name, activePanel?.instance_id]);
 
   // Sincronização explícita da Linha de Preço (Price Line) da série principal
   // Ativos Supabase e NT8 possuem plotagem habilitada por padrão!
@@ -6802,7 +6870,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         minMove: 0.01,
       },
       priceLineVisible: shouldShowPriceLine,
-      priceLineColor: isNt8OrSupabaseAsset ? '#10b981' : (showPva ? '#b91c1c' : '#ef4444'),
+      priceLineColor: isNt8OrSupabaseAsset ? '#10b981' : (showPva ? '#b91c1c' : '#10b981'),
       priceLineWidth: 1,
       priceLineStyle: 2,
       lastValueVisible: true,
@@ -8014,7 +8082,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           wickUpColor: colors.wickUpColor,
           wickDownColor: colors.wickDownColor,
           priceLineVisible: shouldShowPriceLine,
-          priceLineColor: isNt8OrSupabaseAsset ? '#10b981' : (showPva ? '#b91c1c' : '#ef4444'),
+          priceLineColor: isNt8OrSupabaseAsset ? '#10b981' : (showPva ? '#b91c1c' : '#10b981'),
           lastValueVisible: true,
         });
       }

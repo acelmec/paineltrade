@@ -166,7 +166,7 @@ export function resolveAssetSource(panel: any, activeAccount?: any): MarketSourc
       badgeDot: 'bg-emerald-400 animate-pulse',
       badgeStyle: 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300',
       badgeTitle: `Conexão Remota ${mtPrefix} (${broker}) via Terminal / VPS`,
-      shouldShowPriceLineDefault: false,
+      shouldShowPriceLineDefault: true,
     };
   }
 
@@ -182,7 +182,7 @@ export function resolveAssetSource(panel: any, activeAccount?: any): MarketSourc
       badgeDot: 'bg-purple-400',
       badgeStyle: 'bg-purple-950/40 border-purple-500/30 text-purple-300',
       badgeTitle: `Conexão cTrader Open API ${broker ? `(${broker})` : ''}`,
-      shouldShowPriceLineDefault: false,
+      shouldShowPriceLineDefault: true,
     };
   }
 
@@ -215,7 +215,7 @@ export function resolveAssetSource(panel: any, activeAccount?: any): MarketSourc
       badgeDot: 'bg-amber-400',
       badgeStyle: 'bg-amber-950/40 border-amber-500/30 text-amber-300',
       badgeTitle: `Cotações e Ordens em tempo real via ${bLabel}`,
-      shouldShowPriceLineDefault: false,
+      shouldShowPriceLineDefault: true,
     };
   }
 
