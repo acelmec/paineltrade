@@ -184,6 +184,17 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
     if (val !== null) return val === 'true';
     return settings?.chart_price_line_visible !== false;
   });
+  const [chartPriceLineMode, setChartPriceLineMode] = useState<string>(() => {
+    return (settings?.chart_price_line_mode as any) || localStorage.getItem('vortex_chart_price_line_mode') || 'bid_ask';
+  });
+  const [chartPriceLineExtension, setChartPriceLineExtension] = useState<string>(() => {
+    return (settings?.chart_price_line_extension as any) || localStorage.getItem('vortex_chart_price_line_extension') || 'partial';
+  });
+  const [chartPriceLineShowLabels, setChartPriceLineShowLabels] = useState<boolean>(() => {
+    const val = localStorage.getItem('vortex_chart_price_line_show_labels');
+    if (val !== null) return val === 'true';
+    return settings?.chart_price_line_show_labels !== false;
+  });
   const [chartCandleBorderVisible, setChartCandleBorderVisible] = useState<boolean>(() => {
     const val = localStorage.getItem('vortex_chart_candle_border_visible');
     if (val !== null) return val === 'true';
@@ -235,6 +246,9 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
       if (settings.chart_grid_color) setChartGridColor(settings.chart_grid_color);
       if (settings.chart_template_mode) setChartTemplateMode(settings.chart_template_mode);
       if (settings.chart_price_line_visible !== undefined) setChartPriceLineVisible(settings.chart_price_line_visible !== false);
+      if (settings.chart_price_line_mode) setChartPriceLineMode(settings.chart_price_line_mode);
+      if (settings.chart_price_line_extension) setChartPriceLineExtension(settings.chart_price_line_extension);
+      if (settings.chart_price_line_show_labels !== undefined) setChartPriceLineShowLabels(settings.chart_price_line_show_labels !== false);
       if (settings.chart_candle_border_visible !== undefined) setChartCandleBorderVisible(settings.chart_candle_border_visible !== false);
       if (settings.chart_scale_font_size) setChartScaleFontSize(Number(settings.chart_scale_font_size));
       setCopilotTheme(settings.copilot_theme || localStorage.getItem('vortex_copilot_theme') || 'ninja_black');
@@ -396,6 +410,9 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
       localStorage.setItem('vortex_chart_grid_color', chartGridColor);
       localStorage.setItem('vortex_chart_template_mode', chartTemplateMode);
       localStorage.setItem('vortex_chart_price_line_visible', String(chartPriceLineVisible));
+      localStorage.setItem('vortex_chart_price_line_mode', chartPriceLineMode);
+      localStorage.setItem('vortex_chart_price_line_extension', chartPriceLineExtension);
+      localStorage.setItem('vortex_chart_price_line_show_labels', String(chartPriceLineShowLabels));
       localStorage.setItem('vortex_chart_candle_border_visible', String(chartCandleBorderVisible));
       localStorage.setItem('vortex_chart_scale_font_size', String(chartScaleFontSize));
       window.dispatchEvent(new CustomEvent('vortex_chart_custom_styles_changed', {
@@ -406,6 +423,9 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
           gridColor: chartGridColor,
           templateMode: chartTemplateMode,
           priceLineVisible: chartPriceLineVisible,
+          priceLineMode: chartPriceLineMode,
+          priceLineExtension: chartPriceLineExtension,
+          priceLineShowLabels: chartPriceLineShowLabels,
           candleBorderVisible: chartCandleBorderVisible,
           scaleFontSize: chartScaleFontSize
         }
@@ -422,6 +442,9 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
       chart_grid_color: chartGridColor,
       chart_template_mode: chartTemplateMode,
       chart_price_line_visible: chartPriceLineVisible,
+      chart_price_line_mode: chartPriceLineMode,
+      chart_price_line_extension: chartPriceLineExtension,
+      chart_price_line_show_labels: chartPriceLineShowLabels,
       chart_candle_border_visible: chartCandleBorderVisible,
       chart_scale_font_size: Number(chartScaleFontSize),
       ai_provider: aiProvider,
@@ -1452,14 +1475,65 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
                 {/* Linha do Preço Atual */}
                 <div className="flex items-center justify-between bg-slate-950 p-2.5 rounded border border-slate-800">
                   <div>
-                    <span className="text-xs font-bold text-slate-200 block">Linha de Preço Atual</span>
-                    <span className="text-[10px] text-slate-400">Linha horizontal no último preço</span>
+                    <span className="text-xs font-bold text-slate-200 block">Linhas de Preço (Price Line)</span>
+                    <span className="text-[10px] text-slate-400">Linhas de cotação no gráfico</span>
                   </div>
                   <label className="toggle-switch scale-90">
                     <input
                       type="checkbox"
                       checked={chartPriceLineVisible}
                       onChange={(e) => setChartPriceLineVisible(e.target.checked)}
+                    />
+                    <span className="toggle-slider"></span>
+                  </label>
+                </div>
+
+                {/* Modo das Linhas de Preço */}
+                <div className="flex items-center justify-between bg-slate-950 p-2.5 rounded border border-slate-800">
+                  <div>
+                    <span className="text-xs font-bold text-slate-200 block">Linhas a Plotar</span>
+                    <span className="text-[10px] text-slate-400">BID, ASK ou Último</span>
+                  </div>
+                  <select
+                    value={chartPriceLineMode}
+                    onChange={(e) => setChartPriceLineMode(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 p-1 rounded text-xs text-blue-400 font-bold outline-none"
+                  >
+                    <option value="bid_ask">BID e ASK (Ambos)</option>
+                    <option value="bid">Apenas BID (Compra)</option>
+                    <option value="ask">Apenas ASK (Venda)</option>
+                    <option value="last">Apenas Último Preço</option>
+                    <option value="all">Todos (BID, ASK e Último)</option>
+                  </select>
+                </div>
+
+                {/* Extensão da Linha de Preço */}
+                <div className="flex items-center justify-between bg-slate-950 p-2.5 rounded border border-slate-800">
+                  <div>
+                    <span className="text-xs font-bold text-slate-200 block">Extensão das Linhas</span>
+                    <span className="text-[10px] text-slate-400">Parcial ou Completa</span>
+                  </div>
+                  <select
+                    value={chartPriceLineExtension}
+                    onChange={(e) => setChartPriceLineExtension(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 p-1 rounded text-xs text-blue-400 font-bold outline-none"
+                  >
+                    <option value="partial">Parcial (Candle até Escala)</option>
+                    <option value="full">Completa (Todo o Gráfico)</option>
+                  </select>
+                </div>
+
+                {/* Rótulo de Preço na Escala */}
+                <div className="flex items-center justify-between bg-slate-950 p-2.5 rounded border border-slate-800">
+                  <div>
+                    <span className="text-xs font-bold text-slate-200 block">Rótulo na Escala de Preço</span>
+                    <span className="text-[10px] text-slate-400">Etiqueta com valor no eixo Y</span>
+                  </div>
+                  <label className="toggle-switch scale-90">
+                    <input
+                      type="checkbox"
+                      checked={chartPriceLineShowLabels}
+                      onChange={(e) => setChartPriceLineShowLabels(e.target.checked)}
                     />
                     <span className="toggle-slider"></span>
                   </label>

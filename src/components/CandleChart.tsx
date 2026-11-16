@@ -842,6 +842,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   const [localTimeframe, setLocalTimeframe] = useState<number>(1);
   const timeframe = timeframeProp !== undefined ? timeframeProp : localTimeframe;
   const setTimeframe = setTimeframeProp !== undefined ? setTimeframeProp : setLocalTimeframe;
+  const [isWaitingDataDismissed, setIsWaitingDataDismissed] = useState<boolean>(false);
   const chartRootRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const mainContainerRef = useRef<HTMLDivElement>(null);
@@ -1072,6 +1073,10 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   } = useApp() as any;
 
   const activePanel = panelProp || appActivePanel;
+
+  useEffect(() => {
+    setIsWaitingDataDismissed(false);
+  }, [activePanel?.id, activePanel?.symbol]);
   const settings = (panelProp && allSettings?.[panelProp.id]) ? allSettings[panelProp.id] : appSettings;
   const marketData = marketDataProp !== undefined ? marketDataProp : contextMarketData;
 
@@ -2803,7 +2808,58 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   const activePriceLinesRef = useRef<any[]>([]);
   const askPriceLineRef = useRef<any>(null);
   const bidPriceLineRef = useRef<any>(null);
+  const lastPriceLineRef = useRef<any>(null);
   const updateTradePriceLinesRef = useRef<(() => void) | null>(null);
+
+  // Identificação do indicador dedicado PRICE_LINE configurado no gráfico
+  const priceLineIndConfig = useMemo(() => {
+    return (activeIndicators || []).find(i => (i.type === 'PRICE_LINE' || i.type === 'PriceLine'));
+  }, [activeIndicators]);
+
+  // Configuração consolidada da Price Line (Bid / Ask / Last / Parcial / Completa)
+  // Regra Estrita: SOMENTE plota se o indicador PRICE_LINE estiver presente e ativo no gráfico!
+  const resolvedPriceLineConfig = useMemo(() => {
+    if (!priceLineIndConfig || !priceLineIndConfig.visible) {
+      return {
+        enabled: false,
+        plotMode: 'none' as const,
+        lineExtension: 'partial' as const,
+        showLabels: false,
+        bidColor: '#10b981',
+        bidLineStyle: 'solid' as const,
+        askColor: '#f43f5e',
+        askLineStyle: 'dashed' as const,
+        lastColor: '#38bdf8',
+        lastLineStyle: 'solid' as const,
+        lineWidth: 1
+      };
+    }
+
+    const p = priceLineIndConfig.params || {};
+    const st = priceLineIndConfig.style || {};
+    return {
+      enabled: true,
+      plotMode: (p.plotMode || 'bid_ask') as 'bid_ask' | 'bid' | 'ask' | 'last' | 'all' | 'none',
+      lineExtension: (p.lineExtension || 'partial') as 'partial' | 'full',
+      showLabels: p.showLabels !== false,
+      bidColor: st.color || '#10b981',
+      bidLineStyle: (st.lineStyle || 'solid') as 'solid' | 'dashed' | 'dotted',
+      askColor: st.secondaryColor || '#f43f5e',
+      askLineStyle: (p.askLineStyle || 'dashed') as 'solid' | 'dashed' | 'dotted',
+      lastColor: p.lastColor || st.tertiaryColor || '#38bdf8',
+      lastLineStyle: (p.lastLineStyle || 'solid') as 'solid' | 'dashed' | 'dotted',
+      lineWidth: (st.lineWidth || 1) as 1 | 2 | 3 | 4
+    };
+  }, [priceLineIndConfig]);
+
+  const resolvedPriceLineConfigRef = useRef(resolvedPriceLineConfig);
+  resolvedPriceLineConfigRef.current = resolvedPriceLineConfig;
+
+  const toLwLineStyle = (s?: string) => {
+    if (s === 'dashed') return 2;
+    if (s === 'dotted') return 1;
+    return 0;
+  };
 
   // Identificação do ativo: Supabase & NT8
   const isNt8OrSupabaseAsset = useMemo(() => {
@@ -2820,74 +2876,18 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     return false;
   }, [activePanel]);
 
-  // Regra Inviolável: A linha de preço (Price Line) vem ativa por padrão para todos os ativos no Vortex!
-  const shouldShowPriceLine = useMemo(() => {
-    if (settings?.chart_price_line_visible !== undefined) {
-      return settings.chart_price_line_visible !== false;
-    }
-    const saved = typeof window !== 'undefined' ? localStorage.getItem('vortex_chart_price_line_visible') : null;
-    if (saved !== null) return saved === 'true';
-    return true; // Padrão: SEMPRE TRUE para todos os ativos (Supabase, NT8, Binance, MT4, cTrader)!
-  }, [settings?.chart_price_line_visible]);
-
-  // Sincronização em tempo real das Linhas de ASK e BID na escala do gráfico
+  // Sincronização em tempo real das Linhas de Preço (BID, ASK e LAST) na escala do gráfico
   useEffect(() => {
     if (!candleSeriesRef.current) return;
-    const bidVal = Number(marketData?.bid || 0);
-    const askVal = Number(marketData?.ask || 0);
+    const cfg = resolvedPriceLineConfig;
 
-    if (bidVal > 0 && askVal > 0 && askVal >= bidVal) {
-      // Oculta o card duplicado do candle para exibir estritamente as etiquetas ASK e BID na escala
-      try {
-        candleSeriesRef.current.applyOptions({ lastValueVisible: false });
-      } catch (_) {}
-
-      // 1. Linha de ASK / Venda (Vermelho tracejado, estendendo-se horizontalmente por todo o gráfico)
-      if (!askPriceLineRef.current) {
-        try {
-          askPriceLineRef.current = candleSeriesRef.current.createPriceLine({
-            price: askVal,
-            color: '#f43f5e',
-            lineWidth: 1,
-            lineStyle: 2, // Dashed
-            lineVisible: true,
-            axisLabelVisible: true,
-            title: '' // Sem rótulo 'ASK' na legenda, exibe diretamente o preço na escala
-          });
-        } catch (_) {}
-      } else {
-        try {
-          askPriceLineRef.current.applyOptions({ price: askVal, color: '#f43f5e', lineVisible: true, title: '' });
-        } catch (_) {}
-      }
-
-      // 2. Linha de BID / Compra / Referência (Verde sólido contínuo)
-      if (!bidPriceLineRef.current) {
-        try {
-          bidPriceLineRef.current = candleSeriesRef.current.createPriceLine({
-            price: bidVal,
-            color: '#10b981',
-            lineWidth: 1,
-            lineStyle: 0, // Solid
-            lineVisible: true,
-            axisLabelVisible: true,
-            title: '' // Sem rótulo 'BID' na legenda, exibe diretamente o preço na escala
-          });
-        } catch (_) {}
-      } else {
-        try {
-          bidPriceLineRef.current.applyOptions({ price: bidVal, color: '#10b981', lineVisible: true, title: '' });
-        } catch (_) {}
-      }
-    } else {
+    if (!cfg.enabled || cfg.plotMode === 'none') {
       try {
         candleSeriesRef.current.applyOptions({
-          lastValueVisible: true,
-          priceLineVisible: shouldShowPriceLine,
-          priceLineColor: isNt8OrSupabaseAsset ? '#10b981' : (showPva ? '#b91c1c' : '#10b981')
+          lastValueVisible: false,
+          priceLineVisible: false
         });
       } catch (_) {}
-
       if (askPriceLineRef.current) {
         try { candleSeriesRef.current.removePriceLine(askPriceLineRef.current); } catch (_) {}
         askPriceLineRef.current = null;
@@ -2896,10 +2896,134 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         try { candleSeriesRef.current.removePriceLine(bidPriceLineRef.current); } catch (_) {}
         bidPriceLineRef.current = null;
       }
+      if (lastPriceLineRef.current) {
+        try { candleSeriesRef.current.removePriceLine(lastPriceLineRef.current); } catch (_) {}
+        lastPriceLineRef.current = null;
+      }
+      return;
     }
-  }, [marketData?.bid, marketData?.ask, shouldShowPriceLine, isNt8OrSupabaseAsset, showPva]);
 
-  // Listener direto de ticks em tempo real (<1ms) para atualização ultra-rápida das linhas de ASK e BID
+    const lastVal = (marketData?.price && Number(marketData.price) > 0)
+      ? Number(marketData.price)
+      : ((chartDataRef.current && chartDataRef.current.length > 0) ? chartDataRef.current[chartDataRef.current.length - 1].close : 0);
+
+    const rawBid = Number(marketData?.bid || 0);
+    const rawAsk = Number(marketData?.ask || 0);
+    const chartTick = resolvePanelTickSize(activePanel, settings);
+    const hasDistinctSpread = rawBid > 0 && rawAsk > 0 && rawAsk > rawBid;
+
+    const bidVal = hasDistinctSpread ? rawBid : (lastVal > 0 ? lastVal : 0);
+    const askVal = hasDistinctSpread ? rawAsk : (lastVal > 0 ? Number((lastVal + chartTick).toFixed(getTickDecimals(chartTick) || 2)) : 0);
+
+    const shouldShowBid = (cfg.plotMode === 'bid_ask' || cfg.plotMode === 'bid' || cfg.plotMode === 'all') && bidVal > 0;
+    const shouldShowAsk = (cfg.plotMode === 'bid_ask' || cfg.plotMode === 'ask' || cfg.plotMode === 'all') && askVal > 0;
+    const shouldShowLast = (cfg.plotMode === 'last' || cfg.plotMode === 'all') && lastVal > 0;
+
+    const isFullLine = cfg.lineExtension === 'full';
+
+    // Desativa a linha nativa repetitiva padrão do candleSeries para não sobrepor etiquetas
+    try {
+      candleSeriesRef.current.applyOptions({ lastValueVisible: false, priceLineVisible: false });
+    } catch (_) {}
+
+    // 1. Linha de ASK / Venda
+    if (shouldShowAsk) {
+      if (!askPriceLineRef.current) {
+        try {
+          askPriceLineRef.current = candleSeriesRef.current.createPriceLine({
+            price: askVal,
+            color: cfg.askColor,
+            lineWidth: cfg.lineWidth,
+            lineStyle: toLwLineStyle(cfg.askLineStyle),
+            lineVisible: isFullLine,
+            axisLabelVisible: cfg.showLabels,
+            title: ''
+          });
+        } catch (_) {}
+      } else {
+        try {
+          askPriceLineRef.current.applyOptions({
+            price: askVal,
+            color: cfg.askColor,
+            lineWidth: cfg.lineWidth,
+            lineStyle: toLwLineStyle(cfg.askLineStyle),
+            lineVisible: isFullLine,
+            axisLabelVisible: cfg.showLabels,
+            title: ''
+          });
+        } catch (_) {}
+      }
+    } else if (askPriceLineRef.current) {
+      try { candleSeriesRef.current.removePriceLine(askPriceLineRef.current); } catch (_) {}
+      askPriceLineRef.current = null;
+    }
+
+    // 2. Linha de BID / Compra
+    if (shouldShowBid) {
+      if (!bidPriceLineRef.current) {
+        try {
+          bidPriceLineRef.current = candleSeriesRef.current.createPriceLine({
+            price: bidVal,
+            color: cfg.bidColor,
+            lineWidth: cfg.lineWidth,
+            lineStyle: toLwLineStyle(cfg.bidLineStyle),
+            lineVisible: isFullLine,
+            axisLabelVisible: cfg.showLabels,
+            title: ''
+          });
+        } catch (_) {}
+      } else {
+        try {
+          bidPriceLineRef.current.applyOptions({
+            price: bidVal,
+            color: cfg.bidColor,
+            lineWidth: cfg.lineWidth,
+            lineStyle: toLwLineStyle(cfg.bidLineStyle),
+            lineVisible: isFullLine,
+            axisLabelVisible: cfg.showLabels,
+            title: ''
+          });
+        } catch (_) {}
+      }
+    } else if (bidPriceLineRef.current) {
+      try { candleSeriesRef.current.removePriceLine(bidPriceLineRef.current); } catch (_) {}
+      bidPriceLineRef.current = null;
+    }
+
+    // 3. Linha de LAST / Último Preço
+    if (shouldShowLast) {
+      if (!lastPriceLineRef.current) {
+        try {
+          lastPriceLineRef.current = candleSeriesRef.current.createPriceLine({
+            price: lastVal,
+            color: cfg.lastColor,
+            lineWidth: cfg.lineWidth,
+            lineStyle: toLwLineStyle(cfg.lastLineStyle),
+            lineVisible: isFullLine,
+            axisLabelVisible: cfg.showLabels,
+            title: ''
+          });
+        } catch (_) {}
+      } else {
+        try {
+          lastPriceLineRef.current.applyOptions({
+            price: lastVal,
+            color: cfg.lastColor,
+            lineWidth: cfg.lineWidth,
+            lineStyle: toLwLineStyle(cfg.lastLineStyle),
+            lineVisible: isFullLine,
+            axisLabelVisible: cfg.showLabels,
+            title: ''
+          });
+        } catch (_) {}
+      }
+    } else if (lastPriceLineRef.current) {
+      try { candleSeriesRef.current.removePriceLine(lastPriceLineRef.current); } catch (_) {}
+      lastPriceLineRef.current = null;
+    }
+  }, [marketData?.bid, marketData?.ask, marketData?.price, resolvedPriceLineConfig]);
+
+  // Listener direto de ticks em tempo real (<1ms) para atualização ultra-rápida das linhas de ASK, BID e LAST
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -2907,51 +3031,82 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       const detail = e.detail;
       if (!detail || !candleSeriesRef.current) return;
 
-      // Validação estrita por fonte e par exato (impede que ticks da Binance contaminem MT4 ou Supabase)
       const isMatch = isTickMatchingPanel(detail, activePanel, activeAccount);
       if (!isMatch) return;
 
-      const bidVal = Number(detail.bid || 0);
-      const askVal = Number(detail.ask || 0);
+      const cfg = resolvedPriceLineConfigRef.current;
+      if (!cfg.enabled || cfg.plotMode === 'none') return;
 
-      if (bidVal > 0 && askVal > 0 && askVal >= bidVal) {
-        try {
-          candleSeriesRef.current.applyOptions({ lastValueVisible: false });
-        } catch (_) {}
+      const lastVal = Number(detail.price || 0);
+      const rawBid = Number(detail.bid || 0);
+      const rawAsk = Number(detail.ask || 0);
+      const chartTick = resolvePanelTickSize(activePanel, settings);
+      const hasDistinctSpread = rawBid > 0 && rawAsk > 0 && rawAsk > rawBid;
 
+      const bidVal = hasDistinctSpread ? rawBid : (lastVal > 0 ? lastVal : 0);
+      const askVal = hasDistinctSpread ? rawAsk : (lastVal > 0 ? Number((lastVal + chartTick).toFixed(getTickDecimals(chartTick) || 2)) : 0);
+
+      const shouldShowBid = (cfg.plotMode === 'bid_ask' || cfg.plotMode === 'bid' || cfg.plotMode === 'all') && bidVal > 0;
+      const shouldShowAsk = (cfg.plotMode === 'bid_ask' || cfg.plotMode === 'ask' || cfg.plotMode === 'all') && askVal > 0;
+      const shouldShowLast = (cfg.plotMode === 'last' || cfg.plotMode === 'all') && lastVal > 0;
+      const isFullLine = cfg.lineExtension === 'full';
+
+      if (shouldShowAsk) {
         if (!askPriceLineRef.current) {
           try {
             askPriceLineRef.current = candleSeriesRef.current.createPriceLine({
               price: askVal,
-              color: '#f43f5e',
-              lineWidth: 1,
-              lineStyle: 2,
-              lineVisible: true,
-              axisLabelVisible: true,
+              color: cfg.askColor,
+              lineWidth: cfg.lineWidth,
+              lineStyle: toLwLineStyle(cfg.askLineStyle),
+              lineVisible: isFullLine,
+              axisLabelVisible: cfg.showLabels,
               title: ''
             });
           } catch (_) {}
         } else {
           try {
-            askPriceLineRef.current.applyOptions({ price: askVal });
+            askPriceLineRef.current.applyOptions({ price: askVal, lineVisible: isFullLine, axisLabelVisible: cfg.showLabels });
           } catch (_) {}
         }
+      }
 
+      if (shouldShowBid) {
         if (!bidPriceLineRef.current) {
           try {
             bidPriceLineRef.current = candleSeriesRef.current.createPriceLine({
               price: bidVal,
-              color: '#10b981',
-              lineWidth: 1,
-              lineStyle: 0,
-              lineVisible: true,
-              axisLabelVisible: true,
+              color: cfg.bidColor,
+              lineWidth: cfg.lineWidth,
+              lineStyle: toLwLineStyle(cfg.bidLineStyle),
+              lineVisible: isFullLine,
+              axisLabelVisible: cfg.showLabels,
               title: ''
             });
           } catch (_) {}
         } else {
           try {
-            bidPriceLineRef.current.applyOptions({ price: bidVal });
+            bidPriceLineRef.current.applyOptions({ price: bidVal, lineVisible: isFullLine, axisLabelVisible: cfg.showLabels });
+          } catch (_) {}
+        }
+      }
+
+      if (shouldShowLast) {
+        if (!lastPriceLineRef.current) {
+          try {
+            lastPriceLineRef.current = candleSeriesRef.current.createPriceLine({
+              price: lastVal,
+              color: cfg.lastColor,
+              lineWidth: cfg.lineWidth,
+              lineStyle: toLwLineStyle(cfg.lastLineStyle),
+              lineVisible: isFullLine,
+              axisLabelVisible: cfg.showLabels,
+              title: ''
+            });
+          } catch (_) {}
+        } else {
+          try {
+            lastPriceLineRef.current.applyOptions({ price: lastVal, lineVisible: isFullLine, axisLabelVisible: cfg.showLabels });
           } catch (_) {}
         }
       }
@@ -2962,21 +3117,6 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       window.removeEventListener('vortex_streamer_tick', handleLiveStreamerTick);
     };
   }, [activePanel?.symbol, activePanel?.name, activePanel?.instance_id]);
-
-  // Sincronização explícita da Linha de Preço (Price Line) da série principal
-  // Ativos Supabase e NT8 possuem plotagem habilitada por padrão!
-  useEffect(() => {
-    if (!candleSeriesRef.current) return;
-    try {
-      candleSeriesRef.current.applyOptions({
-        priceLineVisible: shouldShowPriceLine,
-        priceLineColor: isNt8OrSupabaseAsset ? '#10b981' : (showPva ? '#b91c1c' : '#ef4444'),
-        priceLineWidth: 1,
-        priceLineStyle: 2,
-        lastValueVisible: true,
-      });
-    } catch (_) {}
-  }, [shouldShowPriceLine, isNt8OrSupabaseAsset, showPva]);
   const isFocusedRef = useRef<boolean>(isFocused);
   isFocusedRef.current = isFocused;
   const activePanelIdRef = useRef<string | null>(activePanel?.id || null);
@@ -5342,6 +5482,58 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           }
         }
 
+        // F. Renderizar Linhas de Preço Parciais (PRICE LINE: BID, ASK e LAST)
+        // A linha parcial inicia à direita do candle corrente até a margem esquerda da escala de preço vertical
+        const pLineCfg = resolvedPriceLineConfigRef.current;
+        if (pLineCfg && pLineCfg.enabled && pLineCfg.lineExtension === 'partial' && pLineCfg.plotMode !== 'none') {
+          const lastCandle = (chartData && chartData.length > 0) ? chartData[chartData.length - 1] : null;
+          if (lastCandle && timeScale) {
+            let xCoord = chartAreaWidth - 80;
+            try {
+              const coord = timeScale.timeToCoordinate(lastCandle.time as any);
+              if (coord !== null && typeof coord === 'number' && Number.isFinite(coord)) {
+                xCoord = coord;
+              }
+            } catch (_) {}
+
+            const startX = Math.min(chartAreaWidth - 2, Math.max(0, xCoord + 4));
+            const endX = chartAreaWidth;
+
+            if (endX > startX) {
+              const lVal = (marketData?.price && Number(marketData.price) > 0) ? Number(marketData.price) : lastCandle.close;
+              const rawB = Number(marketData?.bid || 0);
+              const rawA = Number(marketData?.ask || 0);
+              const hasSpread = rawB > 0 && rawA > 0 && rawA > rawB;
+              const tickSz = resolvePanelTickSize(activePanel, settings);
+              const bVal = hasSpread ? rawB : (lVal > 0 ? lVal : 0);
+              const aVal = hasSpread ? rawA : (lVal > 0 ? Number((lVal + tickSz).toFixed(getTickDecimals(tickSz) || 2)) : 0);
+
+              const shouldBid = (pLineCfg.plotMode === 'bid_ask' || pLineCfg.plotMode === 'bid' || pLineCfg.plotMode === 'all') && bVal > 0;
+              const shouldAsk = (pLineCfg.plotMode === 'bid_ask' || pLineCfg.plotMode === 'ask' || pLineCfg.plotMode === 'all') && aVal > 0;
+              const shouldLast = (pLineCfg.plotMode === 'last' || pLineCfg.plotMode === 'all') && lVal > 0;
+
+              const drawPartialPriceLine = (price: number, color: string, style: 'solid' | 'dashed' | 'dotted', width: number) => {
+                const y = safePriceToY(price);
+                if (y !== null && !isNaN(y) && y >= 0 && y <= cHeight) {
+                  ctx.save();
+                  ctx.strokeStyle = color;
+                  ctx.lineWidth = width;
+                  ctx.setLineDash(style === 'dashed' ? [5, 4] : style === 'dotted' ? [2, 3] : []);
+                  ctx.beginPath();
+                  ctx.moveTo(startX, y);
+                  ctx.lineTo(endX, y);
+                  ctx.stroke();
+                  ctx.restore();
+                }
+              };
+
+              if (shouldBid) drawPartialPriceLine(bVal, pLineCfg.bidColor, pLineCfg.bidLineStyle, pLineCfg.lineWidth);
+              if (shouldAsk) drawPartialPriceLine(aVal, pLineCfg.askColor, pLineCfg.askLineStyle, pLineCfg.lineWidth);
+              if (shouldLast) drawPartialPriceLine(lVal, pLineCfg.lastColor, pLineCfg.lastLineStyle, pLineCfg.lineWidth);
+            }
+          }
+        }
+
         ctx.restore();
       }
 
@@ -6882,11 +7074,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         precision: 2,
         minMove: 0.01,
       },
-      priceLineVisible: shouldShowPriceLine,
-      priceLineColor: isNt8OrSupabaseAsset ? '#10b981' : (showPva ? '#b91c1c' : '#10b981'),
-      priceLineWidth: 1,
-      priceLineStyle: 2,
-      lastValueVisible: true,
+      priceLineVisible: false,
+      lastValueVisible: false,
       autoscaleInfoProvider: (original: any) => {
         const defaultInfo = original();
         
@@ -7961,6 +8150,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       candleSeriesRef.current = null;
       askPriceLineRef.current = null;
       bidPriceLineRef.current = null;
+      lastPriceLineRef.current = null;
       lastChartDataLengthRef.current = 0;
       lastChartDataTimeRef.current = 0;
       markersPluginRef.current = null;
@@ -8094,9 +8284,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           borderColor: colors.borderColor,
           wickUpColor: colors.wickUpColor,
           wickDownColor: colors.wickDownColor,
-          priceLineVisible: shouldShowPriceLine,
-          priceLineColor: isNt8OrSupabaseAsset ? '#10b981' : (showPva ? '#b91c1c' : '#10b981'),
-          lastValueVisible: true,
+          priceLineVisible: false,
+          lastValueVisible: false,
         });
       }
 
@@ -9586,11 +9775,23 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
   return (
     <div ref={chartRootRef} className="flex flex-col w-full h-full min-h-0 select-none relative" style={{ height: height || '100%' }} onDoubleClickCapture={onDoubleClick}>
-      {Boolean(((loadingProgress?.isLoading && (loadingProgress.percent < 100) && (!aggregatedCandles || aggregatedCandles.length === 0 || loadingProgress?.isExplicitDaysChange)) || ((!aggregatedCandles || aggregatedCandles.length === 0) && !isSimulator)) && tempViewMode === 'candles') && (
+      {Boolean(!isWaitingDataDismissed && ((loadingProgress?.isLoading && (loadingProgress.percent < 100) && (!aggregatedCandles || aggregatedCandles.length === 0 || loadingProgress?.isExplicitDaysChange)) || ((!aggregatedCandles || aggregatedCandles.length === 0) && !isSimulator)) && tempViewMode === 'candles') && (
         <div className={`absolute inset-0 z-[60] flex flex-col items-center justify-center p-6 text-center select-none transition-all duration-300 ${
           chartData.length === 0 ? 'bg-[#090d16]/95' : 'bg-[#090d16]/75 backdrop-blur-sm'
         }`}>
-          <div className="bg-[#111726]/95 border border-slate-700/80 shadow-2xl rounded-2xl p-6 max-w-sm w-full flex flex-col items-center gap-4 animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-[#111726]/95 border border-slate-700/80 shadow-2xl rounded-2xl p-6 max-w-sm w-full flex flex-col items-center gap-4 animate-in fade-in zoom-in-95 duration-200 relative">
+            {/* Botão fechar popup */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsWaitingDataDismissed(true);
+              }}
+              className="absolute top-3 right-3 text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-700 p-1.5 rounded-lg transition text-xs font-bold leading-none cursor-pointer"
+              title="Fechar aviso"
+            >
+              ✕
+            </button>
             {loadingProgress?.isLoading ? (
               <>
                 {/* SVG Circular Gauge */}
@@ -9642,19 +9843,19 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                 </div>
               </>
             ) : (
-              <div className="flex flex-col items-center text-center space-y-3 py-2">
+              <div className="flex flex-col items-center text-center space-y-3 py-2 w-full">
                 <div className="w-12 h-12 rounded-full bg-blue-950/80 border border-blue-600/50 flex items-center justify-center text-xl shadow-lg">
                   📊
                 </div>
                 <div>
                   <h4 className="text-sm font-black text-white">
-                    Aguardando Dados: {(activePanel?.name || 'Ativo').toUpperCase()}
+                    Aguardando Dados: {(activePanel?.name || activePanel?.symbol || 'Ativo').toUpperCase()}
                   </h4>
                   <p className="text-[11px] text-slate-400 mt-1 max-w-xs leading-relaxed">
-                    Nenhum candle gravado ainda no banco de dados para este ativo. Inicie o robô AxionGatewayEA no seu MT4 ou aguarde o fluxo de ticks da corretora para iniciar o gráfico.
+                    Nenhum dado recebido ainda para este ativo. Verifique se a sua conexão de dados está ativa ou aguarde o fluxo de cotações para iniciar o gráfico.
                   </p>
                 </div>
-                <div className="flex items-center gap-2 pt-1">
+                <div className="flex items-center justify-center gap-2 pt-1 w-full">
                   <button
                     type="button"
                     onClick={(e) => {
@@ -9665,6 +9866,16 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
                   >
                     <span>🔄</span>
                     <span>Tentar Novamente</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsWaitingDataDismissed(true);
+                    }}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg border border-slate-700 shadow transition active:scale-95 cursor-pointer"
+                  >
+                    Fechar
                   </button>
                 </div>
               </div>

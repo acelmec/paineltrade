@@ -47,6 +47,7 @@ import {
   mirrorToLocalServer,
   resolveAccountExecutionSymbol,
   resolvePanelTickSize,
+  normalizeMarketDataSpread,
   roundToTick,
   fetchAtmStrategiesSupabase,
   getLocalBrokerAccounts,
@@ -9013,12 +9014,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const lastC = cache.candles[cache.candles.length - 1];
         const lastCPrice = Number(lastC.close);
         if (lastCPrice > 0) {
+          const fallbackTick = resolvePanelTickSize(targetPanel, targetSettings);
           mData = {
             symbol: targetPanel.symbol || targetPanel.name || 'M2K',
             price: String(lastCPrice),
             bid: lastCPrice,
-            ask: lastCPrice,
-            spread: 0.1,
+            ask: Number((lastCPrice + fallbackTick).toFixed(6)),
+            spread: fallbackTick,
             zScore: cache.marketData?.zScore || 0,
             atrRatio: cache.marketData?.atrRatio || 1,
             estado: cache.marketData?.estado || 'NORMAL',
@@ -9035,6 +9037,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           };
           cache.marketData = mData;
         }
+      }
+
+      // Normalização mandatória de BID, ASK e SPREAD (garante distinção e evita '--' permanente em dados do Supabase)
+      if (mData) {
+        mData = normalizeMarketDataSpread(mData, targetPanel, targetSettings);
+        cache.marketData = mData;
       }
 
       const now = Date.now();
@@ -14710,9 +14718,10 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         if (!cache.marketData) {
           fetchMarketDataSupabase(instanceMarket).then(mData => {
             if (mData) {
-              cache.marketData = mData;
-              if (checkIsActive()) setMarketData(mData);
-              runMarketLogicForPanel(panel, panelSettings, cache, mData, cache.forces, cache.gammaLevels);
+              const normalized = normalizeMarketDataSpread(mData, panel, panelSettings) || mData;
+              cache.marketData = normalized;
+              if (checkIsActive()) setMarketData(normalized);
+              runMarketLogicForPanel(panel, panelSettings, cache, normalized, cache.forces, cache.gammaLevels);
             }
           });
         }
@@ -14723,9 +14732,10 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         if (!cache.marketData) {
           fetchMarketDataSupabase(instanceMarket).then(mData => {
             if (mData) {
-              cache.marketData = mData;
-              if (checkIsActive()) setMarketData(mData);
-              runMarketLogicForPanel(panel, panelSettings, cache, mData, cache.forces, cache.gammaLevels);
+              const normalized = normalizeMarketDataSpread(mData, panel, panelSettings) || mData;
+              cache.marketData = normalized;
+              if (checkIsActive()) setMarketData(normalized);
+              runMarketLogicForPanel(panel, panelSettings, cache, normalized, cache.forces, cache.gammaLevels);
             }
           });
         }
@@ -14916,9 +14926,16 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
               side: String(t.side || 'COMPRA').toUpperCase()
             })) : [];
 
+            const rawBid = data.bid !== undefined && data.bid !== null ? Number(data.bid) : undefined;
+            const rawAsk = data.ask !== undefined && data.ask !== null ? Number(data.ask) : undefined;
+            const rawSpread = data.spread !== undefined && data.spread !== null ? Number(data.spread) : undefined;
+
             const mData: MarketData = {
               symbol: data.symbol || '--',
               price: data.price !== undefined ? String(data.price) : '--',
+              bid: rawBid,
+              ask: rawAsk,
+              spread: rawSpread,
               zScore: Number(data.zscore || 0),
               atrRatio: Number(data.atr_ratio || 0),
               estado: data.estado || 'AGUARDANDO',
@@ -14931,10 +14948,12 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
               sellVolume: Number(data.sell_volume || 0),
               printsPerSecond: Number(data.print_rate || 0),
               blockTrades: formattedTrades,
+              imbalance_dir: data.imbalance_dir || undefined,
               updated_at: data.updated_at
             };
 
-            runMarketLogicForPanel(panel, panelSettings, cache, mData, cache.forces, cache.gammaLevels);
+            const normalizedMData = normalizeMarketDataSpread(mData, panel, panelSettings) || mData;
+            runMarketLogicForPanel(panel, panelSettings, cache, normalizedMData, cache.forces, cache.gammaLevels);
           }
         );
 
@@ -15816,9 +15835,13 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         }
         const cache = panelDataCache.current[matchedPanel.id];
 
-        const numBid = Number(detail.bid || numPrice);
-        const numAsk = Number(detail.ask || numPrice);
-        const numSpread = Number(Math.max(0, numAsk - numBid).toFixed(5));
+        const panelTick = resolvePanelTickSize(matchedPanel, allSettings[matchedPanel.id]);
+        const rawBid = (detail.bid && Number(detail.bid) > 0) ? Number(detail.bid) : 0;
+        const rawAsk = (detail.ask && Number(detail.ask) > 0) ? Number(detail.ask) : 0;
+        const hasStreamSpread = rawBid > 0 && rawAsk > 0 && rawAsk > rawBid;
+        const numBid = hasStreamSpread ? rawBid : (numPrice > 0 ? numPrice : 0);
+        const numAsk = hasStreamSpread ? rawAsk : (numPrice > 0 ? Number((numPrice + panelTick).toFixed(6)) : 0);
+        const numSpread = Number(Math.max(panelTick, numAsk - numBid).toFixed(5));
         const prevM = cache.marketData;
         const bidAskChanged = !prevM || prevM.bid !== numBid || prevM.ask !== numAsk || Number(prevM.price) !== numPrice;
         const liveMetrics = computeLiveCandleMetrics(cache.candles || [], numPrice);

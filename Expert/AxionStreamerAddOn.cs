@@ -481,6 +481,8 @@ namespace NinjaTrader.NinjaScript.AddOns
             public List<BlockTradeItem> BlockTrades { get; set; } = new List<BlockTradeItem>();
             public int TotalBlockTradesCaptured { get; set; } = 0;
             public double CurrentPrice { get; set; }
+            public double CurrentBid { get; set; }
+            public double CurrentAsk { get; set; }
             public double CurrentOpen { get; set; }
             public double CurrentHigh { get; set; }
             public double CurrentLow { get; set; }
@@ -1046,8 +1048,12 @@ namespace NinjaTrader.NinjaScript.AddOns
                     lock (stream.DataLock)
                     {
                         string btJson = stream.GetBlockTradesJson();
+                        double curBid = stream.CurrentBid > 0 ? stream.CurrentBid : stream.CurrentPrice;
+                        double curAsk = stream.CurrentAsk > 0 ? stream.CurrentAsk : stream.CurrentPrice;
                         json = $"{{\"symbol\":\"{stream.RootSymbol}\",\"panel\":\"{stream.TargetPanel}\"," +
                                $"\"price\":{stream.CurrentPrice.ToString("F2", CultureInfo.InvariantCulture)}," +
+                               $"\"bid\":{curBid.ToString("F2", CultureInfo.InvariantCulture)}," +
+                               $"\"ask\":{curAsk.ToString("F2", CultureInfo.InvariantCulture)}," +
                                $"\"open\":{stream.CurrentOpen.ToString("F2", CultureInfo.InvariantCulture)}," +
                                $"\"high\":{stream.CurrentHigh.ToString("F2", CultureInfo.InvariantCulture)}," +
                                $"\"low\":{stream.CurrentLow.ToString("F2", CultureInfo.InvariantCulture)}," +
@@ -1649,18 +1655,28 @@ namespace NinjaTrader.NinjaScript.AddOns
             // 1. Rastreamento contínuo das cotações de Bid e Ask do Book para determinação precisa de agressão (T&S)
             if (e.MarketDataType == MarketDataType.Ask)
             {
-                if (e.Price > 0) _lastAsk = e.Price;
+                if (e.Price > 0)
+                {
+                    _lastAsk = e.Price;
+                    _streamData.CurrentAsk = e.Price;
+                }
                 return;
             }
             if (e.MarketDataType == MarketDataType.Bid)
             {
-                if (e.Price > 0) _lastBid = e.Price;
+                if (e.Price > 0)
+                {
+                    _lastBid = e.Price;
+                    _streamData.CurrentBid = e.Price;
+                }
                 return;
             }
 
             if (e.MarketDataType == MarketDataType.Last)
             {
                 _streamData.CurrentPrice = e.Price;
+                if (e.Bid > 0) { _lastBid = e.Bid; _streamData.CurrentBid = e.Bid; }
+                if (e.Ask > 0) { _lastAsk = e.Ask; _streamData.CurrentAsk = e.Ask; }
                 _streamData.LastUpdateUtc = DateTime.UtcNow;
 
                 // Atualizar barra de 1m corrente diretamente a partir dos ticks de mercado do NT8
@@ -1697,9 +1713,14 @@ namespace NinjaTrader.NinjaScript.AddOns
                     _streamData.MarkCandlesDirty();
                 }
 
+                double curBid = _streamData.CurrentBid > 0 ? _streamData.CurrentBid : _streamData.CurrentPrice;
+                double curAsk = _streamData.CurrentAsk > 0 ? _streamData.CurrentAsk : _streamData.CurrentPrice;
+
                 AxionAddOnStreamServer.BroadcastWebSocket(
                     $"{{\"type\":\"market_data\",\"symbol\":\"{_streamData.RootSymbol}\",\"panel\":\"{_streamData.TargetPanel}\"," +
                     $"\"price\":{_streamData.CurrentPrice.ToString("F2", CultureInfo.InvariantCulture)}," +
+                    $"\"bid\":{curBid.ToString("F2", CultureInfo.InvariantCulture)}," +
+                    $"\"ask\":{curAsk.ToString("F2", CultureInfo.InvariantCulture)}," +
                     $"\"volume\":{_streamData.CurrentVolume}," +
                     $"\"updated_at\":\"{_streamData.LastUpdateUtc:o}\"}}"
                 );

@@ -83,11 +83,19 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
 
   const tickSize = resolvePanelTickSize(effectivePanel, effectiveSettings);
   const boletaDecimals = tickSize < 1 ? Math.max(2, getTickDecimals(tickSize)) : 2;
-  const liveBid = Number(effectiveMarketData?.bid || livePrice);
-  const liveAsk = Number(effectiveMarketData?.ask || livePrice);
+  const rawBid = Number(effectiveMarketData?.bid || 0);
+  const rawAsk = Number(effectiveMarketData?.ask || 0);
+  const hasDistinctSpread = rawBid > 0 && rawAsk > 0 && rawAsk > rawBid;
+
+  const liveBid = hasDistinctSpread
+    ? rawBid
+    : (livePrice > 0 ? livePrice : 0);
+  const liveAsk = hasDistinctSpread
+    ? rawAsk
+    : (livePrice > 0 ? Number((livePrice + tickSize).toFixed(boletaDecimals)) : 0);
   const liveSpread = (liveAsk > 0 && liveBid > 0 && liveAsk >= liveBid)
     ? Number((liveAsk - liveBid).toFixed(boletaDecimals))
-    : 0;
+    : (livePrice > 0 ? tickSize : 0);
 
   // Tabs: LOTE vs FINANCEIRO (derivado diretamente de sizingMode para evitar dessincronia)
 

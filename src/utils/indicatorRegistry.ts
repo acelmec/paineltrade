@@ -1177,6 +1177,63 @@ export const INDICATOR_DEFINITIONS: Record<string, IndicatorDefinition> = {
     ],
     defaultStyle: { color: '#06b6d4', lineWidth: 2, lineStyle: 'solid', secondaryColor: '#f97316' }
   },
+  PRICE_LINE: {
+    type: 'PRICE_LINE',
+    name: 'Price Line (Linhas de Preço BID & ASK)',
+    category: 'Níveis',
+    description: 'Linhas horizontais de Preço em tempo real (BID, ASK ou Último Preço) estilo NinjaTrader, com suporte a linhas Completas ou Parciais (do candle atual até a margem da escala) e controle de rótulo na escala.',
+    overlay: true,
+    paramDefs: [
+      {
+        key: 'plotMode',
+        label: 'Linhas a Exibir',
+        type: 'select',
+        default: 'bid_ask',
+        options: [
+          { label: 'BID e ASK (Ambos)', value: 'bid_ask' },
+          { label: 'Apenas BID (Compra)', value: 'bid' },
+          { label: 'Apenas ASK (Venda)', value: 'ask' },
+          { label: 'Apenas Último Preço (Last)', value: 'last' },
+          { label: 'Todos (BID, ASK e Último Preço)', value: 'all' },
+          { label: 'Nenhum (Ocultar Linhas)', value: 'none' }
+        ]
+      },
+      {
+        key: 'lineExtension',
+        label: 'Extensão das Linhas',
+        type: 'select',
+        default: 'partial',
+        options: [
+          { label: 'Parcial (Candle atual até Escala)', value: 'partial' },
+          { label: 'Completa (Atravessa todo o gráfico)', value: 'full' }
+        ]
+      },
+      {
+        key: 'showLabels',
+        label: 'Exibir Rótulo de Preço na Escala Vertical',
+        type: 'boolean',
+        default: true
+      },
+      {
+        key: 'askLineStyle',
+        label: 'Estilo da Linha ASK',
+        type: 'select',
+        default: 'dashed',
+        options: [
+          { label: 'Tracejada ( - - - )', value: 'dashed' },
+          { label: 'Sólida (───)', value: 'solid' },
+          { label: 'Pontilhada ( • • • )', value: 'dotted' }
+        ]
+      }
+    ],
+    defaultStyle: {
+      color: '#10b981',
+      secondaryColor: '#f43f5e',
+      tertiaryColor: '#38bdf8',
+      lineWidth: 1,
+      lineStyle: 'solid'
+    }
+  },
   STRIKE_LEVELS: {
     type: 'STRIKE_LEVELS',
     name: 'Strike Levels (Níveis Gamma & Opções)',

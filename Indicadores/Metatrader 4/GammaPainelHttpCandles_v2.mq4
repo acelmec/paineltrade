@@ -389,8 +389,15 @@ string BuildMarketDataJson(bool includeClusters = false)
    }
    tradesJson += "]";
 
+   double bidVal = MarketInfo(g_symbol, MODE_BID);
+   double askVal = MarketInfo(g_symbol, MODE_ASK);
+   double ptVal  = MarketInfo(g_symbol, MODE_POINT);
+   if(bidVal <= 0) bidVal = g_safePrice;
+   if(askVal <= 0 || askVal < bidVal) askVal = (bidVal > 0) ? bidVal + (ptVal > 0 ? ptVal : 0.25) : g_safePrice;
+   double spdVal = (askVal >= bidVal && bidVal > 0) ? (askVal - bidVal) : (ptVal > 0 ? ptVal : 0.25);
+
    string json = StringFormat(
-      "{\"instance_id\":\"%s\",\"symbol\":\"%s\",\"ts\":\"%s\",\"price\":%s," +
+      "{\"instance_id\":\"%s\",\"symbol\":\"%s\",\"ts\":\"%s\",\"price\":%s,\"bid\":%s,\"ask\":%s,\"spread\":%s," +
       "\"buy_volume\":%d,\"sell_volume\":%d,\"total_volume\":%d,\"delta\":%d,\"delta_pct\":%s," +
       "\"ratio\":%s,\"imbalance_pct\":%s,\"imbalance_dir\":\"%s\",\"print_rate\":%s," +
       "\"buy_prints\":%d,\"sell_prints\":%d,\"large_trade_count\":%d,\"last_large_trade_price\":%s," +
@@ -400,6 +407,9 @@ string BuildMarketDataJson(bool includeClusters = false)
       g_symbol,
       tsStr,
       F(g_safePrice, g_digits),
+      F(bidVal, g_digits),
+      F(askVal, g_digits),
+      F(spdVal, g_digits),
       g_safeBuyVol,
       g_safeSellVol,
       totalVol,

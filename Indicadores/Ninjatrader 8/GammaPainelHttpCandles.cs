@@ -79,6 +79,8 @@ namespace NinjaTrader.NinjaScript.Indicators
         //  DADOS DE MERCADO (SAFE VARIABLES - PAINEL ORIGINAL)
         // ================================================================
         private double safePrice = 0;
+        private double safeBid = 0;
+        private double safeAsk = 0;
         private long safeBuyVol = 0, safeSellVol = 0;
         private long safeBuyPrints = 0, safeSellPrints = 0;
         private double safePrintRate = 0;
@@ -261,8 +263,20 @@ namespace NinjaTrader.NinjaScript.Indicators
         // ================================================================
         protected override void OnMarketData(MarketDataEventArgs e)
         {
-            if (e.MarketDataType == MarketDataType.Last)
+            if (e.MarketDataType == MarketDataType.Bid && e.Price > 0)
             {
+                safeBid = e.Price;
+            }
+            else if (e.MarketDataType == MarketDataType.Ask && e.Price > 0)
+            {
+                safeAsk = e.Price;
+            }
+            else if (e.MarketDataType == MarketDataType.Last)
+            {
+                if (e.Price > 0) safePrice = e.Price;
+                if (e.Bid > 0) safeBid = e.Bid;
+                if (e.Ask > 0) safeAsk = e.Ask;
+
                 long vol = (long)e.Volume;
                 if (vol > 0)
                 {
@@ -619,12 +633,22 @@ namespace NinjaTrader.NinjaScript.Indicators
             else if (imbalancePct < -0.5) imbalanceDir = "LEVE_VENDA";
             double deltaPct = totalVol > 0 ? (double)safeBuyVol / totalVol * 100 : 50.0;
 
+            double tSize = (Instrument != null && Instrument.MasterInstrument != null) ? Instrument.MasterInstrument.TickSize : 0.25;
+            if (tSize <= 0) tSize = 0.25;
+
+            double sendBid = safeBid > 0 ? safeBid : safePrice;
+            double sendAsk = (safeAsk > 0 && safeAsk >= sendBid) ? safeAsk : (sendBid > 0 ? sendBid + tSize : safePrice);
+            double sendSpread = (sendAsk >= sendBid && sendBid > 0) ? (sendAsk - sendBid) : tSize;
+
             var sb = new StringBuilder();
             sb.Append("{");
             sb.Append("\"instance_id\":\"").Append(instanceId).Append("\",");
             sb.Append("\"symbol\":\"").Append(safeSymbol).Append("\",");
             sb.Append("\"ts\":\"").Append(DateTime.Now.ToString("HH:mm:ss")).Append("\",");
             sb.Append("\"price\":").Append(F(safePrice)).Append(",");
+            sb.Append("\"bid\":").Append(F(sendBid)).Append(",");
+            sb.Append("\"ask\":").Append(F(sendAsk)).Append(",");
+            sb.Append("\"spread\":").Append(F(sendSpread)).Append(",");
             sb.Append("\"buy_volume\":").Append(safeBuyVol).Append(",");
             sb.Append("\"sell_volume\":").Append(safeSellVol).Append(",");
             sb.Append("\"total_volume\":").Append(totalVol).Append(",");

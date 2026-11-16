@@ -161,6 +161,37 @@ export function formatPriceByTick(price: number, tickSize: number = 0.25): strin
   return price.toFixed(decimals);
 }
 
+export function normalizeMarketDataSpread(mData: MarketData | null, panel?: any, settings?: any): MarketData | null {
+  if (!mData) return null;
+  const pNum = Number(mData.price || 0);
+  if (isNaN(pNum) || pNum <= 0) return mData;
+
+  const tick = resolvePanelTickSize(panel, settings);
+  const rawBid = mData.bid !== undefined && mData.bid !== null ? Number(mData.bid) : 0;
+  const rawAsk = mData.ask !== undefined && mData.ask !== null ? Number(mData.ask) : 0;
+  const hasDistinctSpread = rawBid > 0 && rawAsk > 0 && rawAsk > rawBid;
+
+  if (hasDistinctSpread) {
+    mData.spread = Number((rawAsk - rawBid).toFixed(6));
+    return mData;
+  }
+
+  // Se não há Bid/Ask distintos (ex: fonte Supabase REST sem L2 book), deriva spread de 1 tick padrão ou spread existente
+  const spreadVal = (mData.spread !== undefined && mData.spread !== null && Number(mData.spread) > 0)
+    ? Number(mData.spread)
+    : tick;
+
+  mData.spread = spreadVal;
+  if ((mData as any).imbalance_dir === 'COMPRADOR') {
+    mData.ask = pNum;
+    mData.bid = Number((pNum - spreadVal).toFixed(6));
+  } else {
+    mData.bid = pNum;
+    mData.ask = Number((pNum + spreadVal).toFixed(6));
+  }
+  return mData;
+}
+
 export interface BlockTrade {
   time: string;
   price: number;
@@ -189,6 +220,7 @@ export interface MarketData {
   buyVolume: number;
   sellVolume: number;
   originalSentiment?: number;
+  imbalance_dir?: string;
   updated_at?: string;
 }
 
@@ -340,9 +372,16 @@ export async function fetchMarketDataSupabase(instanceId: string): Promise<Marke
         };
       }) : [];
 
+      const bNum = data.bid !== undefined && data.bid !== null ? Number(data.bid) : undefined;
+      const aNum = data.ask !== undefined && data.ask !== null ? Number(data.ask) : undefined;
+      const sNum = data.spread !== undefined && data.spread !== null ? Number(data.spread) : undefined;
+
       return {
         symbol: data.symbol || '--',
         price: data.price !== undefined ? String(data.price) : '--',
+        bid: bNum,
+        ask: aNum,
+        spread: sNum,
         zScore: Number(data.zscore || 0),
         atrRatio: Number(data.atr_ratio || 0),
         estado: data.estado || 'AGUARDANDO',
@@ -357,6 +396,7 @@ export async function fetchMarketDataSupabase(instanceId: string): Promise<Marke
         sellVolume: Number(data.sell_volume || 0),
         printsPerSecond: Number(data.print_rate || 0),
         blockTrades: formattedTrades,
+        imbalance_dir: data.imbalance_dir || undefined,
         updated_at: data.updated_at
       };
     } catch {

@@ -283,10 +283,23 @@ export function subscribeMarketMatrix(callback: (data: MarketMatrixData) => void
   };
 }
 
+// Alinhamento estável QQQ -> NQ (idêntico ao NinjaTrader AxionGrixLevels)
+// O basis só é calibrado UMA VEZ por leitura de novo feed e permanece 100% estático
+// entre atualizações do feed, impedindo que oscilações de ticks e spread movam as linhas.
+let cachedBasisFeedKey = '';
+let cachedBasisValue = NaN;
+
+export function resetMarketMatrixBasis(): void {
+  cachedBasisFeedKey = '';
+  cachedBasisValue = NaN;
+}
+
 /**
  * Converte um nível de Strike do QQQ para pontos do NQ/MNQ.
- * Segue a exata calibração do NinjaTrader AxionGrixLevels:
+ * Segue a exata calibração estável do NinjaTrader AxionGrixLevels:
  * Preço NQ = (qqqPrice * fator) + basis
+ * O basis é recalculado apenas quando chega um novo feed (mudança de hora_et ou dados),
+ * com histerese de 2 pontos e trava de 80 pontos para máxima estabilidade visual.
  */
 export function convertQqqToNq(
   qqqPrice: number,
@@ -299,15 +312,31 @@ export function convertQqqToNq(
   if (!qqqPrice || isNaN(qqqPrice)) return NaN;
   const factor = manualFactor > 0 ? manualFactor : (feed?.fator && feed.fator > 0 ? feed.fator : 41.2375);
 
-  let basis = manualBase;
-  if (calibrateWithPrice && currentPrice && currentPrice > 0 && feed?.qqq && feed.qqq > 0) {
-    const rawBasis = currentPrice - (feed.qqq * factor);
-    // Histerese e limite de sanidade (se passar de 80 pts, mantém base manual/0)
-    if (Math.abs(rawBasis) <= 80) {
-      basis = rawBasis;
+  if (!calibrateWithPrice) {
+    return (qqqPrice * factor) + manualBase;
+  }
+
+  // Identificador único da versão dos dados do feed
+  const feedKey = feed ? `${feed.data || ''}_${feed.hora_et || ''}_${(feed.qqq || 0).toFixed(2)}_${(feed.fator || 0).toFixed(4)}` : '';
+
+  // Só recalibra a base se for uma leitura de feed nova e tivermos preço de referência válido
+  if (feedKey && feedKey !== cachedBasisFeedKey) {
+    if (currentPrice && currentPrice > 0 && feed && feed.qqq > 0) {
+      const rawBasis = currentPrice - (feed.qqq * factor);
+      if (Math.abs(rawBasis) > 80) {
+        // Calibração fora do limite de sanidade (mantém base manual)
+        cachedBasisValue = manualBase;
+      } else {
+        // Histerese de 2.0 pontos (idêntica ao AxionGrixLevels.cs.txt linha 441)
+        if (isNaN(cachedBasisValue) || Math.abs(rawBasis - cachedBasisValue) > 2.0) {
+          cachedBasisValue = rawBasis;
+        }
+      }
+      cachedBasisFeedKey = feedKey;
     }
   }
 
+  const basis = !isNaN(cachedBasisValue) ? cachedBasisValue : manualBase;
   return (qqqPrice * factor) + basis;
 }
 
