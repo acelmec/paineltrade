@@ -242,6 +242,21 @@ export async function savePlatformConnectionsSupabase(conns: PlatformConnection[
 }
 
 /**
+ * Resolve a URL HTTP do Gateway MetaTrader, adaptando para proxy seguro (/gateway)
+ * quando a aplicação web estiver rodando em HTTPS (eliminando Mixed Content do navegador).
+ */
+export function resolveGatewayHttpUrl(rawUrl?: string): string {
+  const defaultUrl = 'http://144.126.141.254';
+  const clean = (rawUrl || defaultUrl).trim().replace(/\/+$/, '');
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    if (clean.includes('144.126.141.254') || clean.startsWith('/gateway')) {
+      return `${window.location.origin}/gateway`;
+    }
+  }
+  return clean;
+}
+
+/**
  * Testa o ping e conectividade de uma conexão específica em tempo real
  */
 export async function testConnectionPing(conn: PlatformConnection): Promise<{
@@ -539,85 +554,207 @@ export async function testConnectionPing(conn: PlatformConnection): Promise<{
   }
 
   // MetaTrader 4 ou MetaTrader 5 (Gateway VPS)
+  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  const rawTarget = (conn.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
+  const proxyTarget = isHttps ? resolveGatewayHttpUrl(rawTarget) : null;
+  const targetsToTry = proxyTarget && proxyTarget !== rawTarget ? [proxyTarget, rawTarget] : [rawTarget];
+
+  for (const target of targetsToTry) {
+    try {
+      const res = await fetch(`${target}/status`, { signal: AbortSignal.timeout(2500) });
+      const latency = Date.now() - start;
+      if (res.ok) {
+        const json = await res.json().catch(() => ({}));
+        
+        // Busca detalhes ricos de contas conectadas com higienização estrita contra contas fantasmas
+        let accountsDetail: DetectedAccountDetail[] = [];
+        try {
+          const accRes = await fetch(`${target}/accounts`, { signal: AbortSignal.timeout(2000) });
+          if (accRes.ok) {
+            const accJson = await accRes.json().catch(() => ({}));
+            if (Array.isArray(accJson.accounts)) {
+              const now = Date.now();
+              const rawMapped: DetectedAccountDetail[] = accJson.accounts
+                .map((a: any) => {
+                  const accNum = String(a.account_number || a.id || '').replace(/\D/g, '');
+                  const rawId = String(a.id || a.account_number || a.name || '').trim();
+                  const bal = Number(a.balance || a.cashValue || 0);
+                  const lastSeenTime = a.lastSeen || a.last_seen;
+                  const ageMs = lastSeenTime ? (now - new Date(lastSeenTime).getTime()) : null;
+
+                  // Validações rigorosas anti-fantasma:
+                  // 1. Número de conta MT4/MT5 DEVE ser numérico de 4 a 12 dígitos
+                  if (!/^\d{4,12}$/.test(accNum)) return null;
+                  // 2. Descarta aliases inválidos conhecidos
+                  if (['all', '4'].includes(rawId.toLowerCase())) return null;
+                  // 3. Descarta contas de mock / testes com saldo zerado
+                  if (['99999999', '88888', '41510035'].includes(accNum) && bal === 0) return null;
+                  // 4. Se houver registro de lastSeen e for mais antigo que 90 segundos, a conta está inativa/offline
+                  if (ageMs !== null && ageMs > 90000) return null;
+
+                  return {
+                    id: accNum,
+                    account_number: accNum,
+                    name: a.name || `MT4 #${accNum}`,
+                    balance: bal,
+                    equity: Number(a.equity || bal),
+                    broker: (a.broker && a.broker !== 'MetaTrader Server') ? a.broker : (bal > 0 ? 'ActivTrades' : 'MetaTrader 4'),
+                    currency: a.currency || 'USD',
+                    platform: conn.platform
+                  };
+                })
+                .filter((a: any): a is DetectedAccountDetail => Boolean(a));
+
+              // De-duplicação por número de conta
+              const seen = new Set<string>();
+              accountsDetail = rawMapped.filter(a => {
+                if (seen.has(a.account_number)) return false;
+                seen.add(a.account_number);
+                return true;
+              });
+            }
+          }
+        } catch (_) {}
+
+        // Fallback para lista simples de IDs do status com a mesma higienização
+        const detected = accountsDetail.length > 0 
+          ? accountsDetail.map(a => a.account_number)
+          : (json.connected_accounts ? json.connected_accounts
+              .map((a: any) => String(a.account || a).replace(/\D/g, ''))
+              .filter((acc: string) => /^\d{4,12}$/.test(acc) && !['99999999', '88888', '41510035'].includes(acc))
+            : []);
+
+        const accountsMsg = accountsDetail.length > 0 
+          ? ` (${accountsDetail.length} conta(s) detectada(s))`
+          : (detected.length > 0 ? ` (${detected.length} conta(s) ativa(s))` : ' (Aguardando EA no MT4)');
+
+        return {
+          online: true,
+          latencyMs: latency,
+          message: `Gateway ${conn.platform.toUpperCase()} Ativo${accountsMsg} (${latency}ms)`,
+          detectedAccounts: detected,
+          detectedAccountsDetail: accountsDetail
+        };
+      }
+    } catch (_) {
+      // Continua para o próximo target ou fallback
+    }
+  }
+
+  // Fallback Resiliente via WebSocket Hub (indispensável quando a Web roda em HTTPS e o navegador bloqueia HTTP direto por Mixed Content)
   try {
-    const target = (conn.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
-    const res = await fetch(`${target}/status`, { signal: AbortSignal.timeout(3500) });
-    const latency = Date.now() - start;
-    if (res.ok) {
-      const json = await res.json().catch(() => ({}));
-      
-      // Busca detalhes ricos de contas conectadas com higienização estrita contra contas fantasmas
-      let accountsDetail: DetectedAccountDetail[] = [];
+    const wsUrl = isHttps && typeof window !== 'undefined'
+      ? `wss://${window.location.host}/ws`
+      : (conn.host_url?.startsWith('ws') ? conn.host_url : 'ws://144.126.141.254/ws');
+
+    return await new Promise((resolve) => {
+      let finished = false;
+      let testWs: WebSocket | null = null;
+      const timer = setTimeout(() => {
+        if (!finished) {
+          finished = true;
+          try { testWs?.close(); } catch {}
+          resolve({
+            online: false,
+            latencyMs: 0,
+            message: `Offline ou inatingível em ${conn.host_url}`
+          });
+        }
+      }, 4000);
+
       try {
-        const accRes = await fetch(`${target}/accounts`, { signal: AbortSignal.timeout(2000) });
-        if (accRes.ok) {
-          const accJson = await accRes.json().catch(() => ({}));
-          if (Array.isArray(accJson.accounts)) {
-            const now = Date.now();
-            const rawMapped: DetectedAccountDetail[] = accJson.accounts
-              .map((a: any) => {
-                const accNum = String(a.account_number || a.id || '').replace(/\D/g, '');
-                const rawId = String(a.id || a.account_number || a.name || '').trim();
-                const bal = Number(a.balance || a.cashValue || 0);
-                const lastSeenTime = a.lastSeen || a.last_seen;
-                const ageMs = lastSeenTime ? (now - new Date(lastSeenTime).getTime()) : null;
+        testWs = new WebSocket(wsUrl);
+      } catch {
+        clearTimeout(timer);
+        resolve({
+          online: false,
+          latencyMs: 0,
+          message: `Offline ou inatingível em ${conn.host_url}`
+        });
+        return;
+      }
 
-                // Validações rigorosas anti-fantasma:
-                // 1. Número de conta MT4/MT5 DEVE ser numérico de 4 a 12 dígitos
-                if (!/^\d{4,12}$/.test(accNum)) return null;
-                // 2. Descarta aliases inválidos conhecidos
-                if (['all', '4'].includes(rawId.toLowerCase())) return null;
-                // 3. Descarta contas de mock / testes com saldo zerado
-                if (['99999999', '88888', '41510035'].includes(accNum) && bal === 0) return null;
-                // 4. Se houver registro de lastSeen e for mais antigo que 90 segundos, a conta está inativa/offline
-                if (ageMs !== null && ageMs > 90000) return null;
+      const detectedAccounts: string[] = [];
+      const detectedDetails: DetectedAccountDetail[] = [];
 
-                return {
+      testWs.onopen = () => {
+        try {
+          testWs?.send(JSON.stringify({ type: 'subscribe', channel: 'quotes' }));
+        } catch {}
+      };
+
+      testWs.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.instance_id && (msg.instance_id.startsWith('mt4_sync') || msg.instance_id.startsWith('mt5_sync'))) {
+            const data = msg.data || {};
+            const accNum = String(data.account || '').replace(/\D/g, '');
+            const bal = Number(data.balance || 0);
+            const broker = String(data.broker || (bal > 0 ? 'ActivTrades Markets Limited' : 'MetaTrader 4'));
+
+            if (/^\d{4,12}$/.test(accNum) && !['99999999', '88888', '41510035'].includes(accNum)) {
+              if (!detectedAccounts.includes(accNum)) {
+                detectedAccounts.push(accNum);
+                detectedDetails.push({
                   id: accNum,
                   account_number: accNum,
-                  name: a.name || `MT4 #${accNum}`,
+                  name: `MT4 #${accNum}`,
                   balance: bal,
-                  equity: Number(a.equity || bal),
-                  broker: (a.broker && a.broker !== 'MetaTrader Server') ? a.broker : (bal > 0 ? 'ActivTrades' : 'MetaTrader 4'),
-                  currency: a.currency || 'USD',
+                  equity: Number(data.equity || bal),
+                  broker: broker !== 'MetaTrader 4' ? broker : 'ActivTrades Markets Limited',
+                  currency: data.currency || 'USD',
                   platform: conn.platform
-                };
-              })
-              .filter((a: any): a is DetectedAccountDetail => Boolean(a));
+                });
+              }
+            }
+          }
 
-            // De-duplicação por número de conta
-            const seen = new Set<string>();
-            accountsDetail = rawMapped.filter(a => {
-              if (seen.has(a.account_number)) return false;
-              seen.add(a.account_number);
-              return true;
+          if (detectedAccounts.length > 0 && !finished) {
+            finished = true;
+            clearTimeout(timer);
+            const latency = Date.now() - start;
+            try { testWs?.close(); } catch {}
+            resolve({
+              online: true,
+              latencyMs: latency,
+              message: `Gateway ${conn.platform.toUpperCase()} Ativo (${detectedAccounts.length} conta(s) detectada(s)) (${latency}ms)`,
+              detectedAccounts,
+              detectedAccountsDetail: detectedDetails
             });
           }
-        }
-      } catch (_) {}
-
-      // Fallback para lista simples de IDs do status com a mesma higienização
-      const detected = accountsDetail.length > 0 
-        ? accountsDetail.map(a => a.account_number)
-        : (json.connected_accounts ? json.connected_accounts
-            .map((a: any) => String(a.account || a).replace(/\D/g, ''))
-            .filter((acc: string) => /^\d{4,12}$/.test(acc) && !['99999999', '88888', '41510035'].includes(acc))
-          : []);
-
-      const accountsMsg = accountsDetail.length > 0 
-        ? ` (${accountsDetail.length} conta(s) detectada(s))`
-        : (detected.length > 0 ? ` (${detected.length} conta(s) ativa(s))` : ' (Aguardando EA no MT4)');
-
-      return {
-        online: true,
-        latencyMs: latency,
-        message: `Gateway ${conn.platform.toUpperCase()} Ativo${accountsMsg} (${latency}ms)`,
-        detectedAccounts: detected,
-        detectedAccountsDetail: accountsDetail
+        } catch {}
       };
-    }
-    return { online: false, latencyMs: latency, message: `Gateway retornou HTTP ${res.status}` };
-  } catch (e: any) {
+
+      // Se o WS abriu com sucesso, aguarda 2.2s; se não capturar mt4_sync mas estiver aberto, confirma gateway online
+      setTimeout(() => {
+        if (!finished && testWs && testWs.readyState === WebSocket.OPEN) {
+          finished = true;
+          clearTimeout(timer);
+          const latency = Date.now() - start;
+          try { testWs?.close(); } catch {}
+          resolve({
+            online: true,
+            latencyMs: latency,
+            message: `Gateway ${conn.platform.toUpperCase()} Ativo via Nuvem (${latency}ms)`,
+            detectedAccounts,
+            detectedAccountsDetail: detectedDetails
+          });
+        }
+      }, 2200);
+
+      testWs.onerror = () => {
+        if (!finished) {
+          finished = true;
+          clearTimeout(timer);
+          resolve({
+            online: false,
+            latencyMs: 0,
+            message: `Offline ou inatingível em ${conn.host_url}`
+          });
+        }
+      };
+    });
+  } catch {
     return {
       online: false,
       latencyMs: 0,
