@@ -13,6 +13,7 @@ import {
 } from '../services/db';
 import { useApp, calculateFVGs } from '../context/AppContext';
 import { getAccountManualStrategyId, saveAccountStrategySupabase, updateStrategyReportLevelsSupabase, isStandardSupabasePanel } from '../services/db';
+import { resolveAssetSource } from '../utils/marketSource';
 import { getChartTimeFromDate, parseInputToDate, getTradingSessionKey, isCandleInSessionPause, getSaoPauloDate, formatSaoPauloDayMonth, formatSaoPauloTime } from '../utils/date';
 import {
   calculateIndicator,
@@ -32,7 +33,7 @@ import { ChartDrawingsOverlay } from './ChartDrawingsOverlay';
 import { playPatternSound } from '../utils/soundEffects';
 import { recordChartError } from '../utils/chartErrorLogger';
 import { scanHistoricalIndicatorSignals, type HistoricalIndicatorSignal } from '../utils/replayEngine';
-import { getStreamerBlockTrades, fetchStreamerBlockTrades, isStreamerWsConnected } from '../services/vortexStreamer';
+import { getStreamerBlockTrades, fetchStreamerBlockTrades } from '../services/vortexStreamer';
 import {
   fetchMarketMatrixData,
   subscribeMarketMatrix,
@@ -2804,6 +2805,31 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   const bidPriceLineRef = useRef<any>(null);
   const updateTradePriceLinesRef = useRef<(() => void) | null>(null);
 
+  // Identificação do ativo: Supabase & NT8
+  const isNt8OrSupabaseAsset = useMemo(() => {
+    if (isStandardSupabasePanel(activePanel)) return true;
+    const pName = String(activePanel?.name || activePanel?.symbol || '').toUpperCase();
+    const pInst = String(activePanel?.instance_id || '').toLowerCase();
+    if ((activePanel as any)?.platform === 'ninjatrader') return true;
+    if (pInst.startsWith('nt8_') || pName.includes(' - NT8') || pName.includes('NINJATRADER')) return true;
+    if (!pName.includes('BINANCE') && !pInst.endsWith('usdt') && !/USDT|BUSD|USDC/i.test(pName) && !pName.includes('ACTIVTRADES') && !pName.includes(' - MT4') && !pName.includes(' - MT5')) {
+      if (/^(NQ|MNQ|ES|MES|YM|MYM|RTY|M2K|CL|MCL|GC|MGC|WIN|WDO|RUSSELL|SP500|NASDAQ|GOLD|OIL)/i.test(pName) || pInst.startsWith('painel_')) {
+        return true;
+      }
+    }
+    return false;
+  }, [activePanel]);
+
+  // Regra Inviolável: Ativos com conexão Supabase e NT8 possuem plotagem da linha de preço ativa por padrão!
+  const shouldShowPriceLine = useMemo(() => {
+    if (isNt8OrSupabaseAsset) {
+      return settings?.chart_price_line_visible !== false;
+    }
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('vortex_chart_price_line_visible') : null;
+    if (saved !== null) return saved === 'true';
+    return settings?.chart_price_line_visible === true;
+  }, [isNt8OrSupabaseAsset, settings?.chart_price_line_visible]);
+
   // Sincronização em tempo real das Linhas de ASK e BID na escala do gráfico
   useEffect(() => {
     if (!candleSeriesRef.current) return;
@@ -2855,7 +2881,11 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       }
     } else {
       try {
-        candleSeriesRef.current.applyOptions({ lastValueVisible: true });
+        candleSeriesRef.current.applyOptions({
+          lastValueVisible: true,
+          priceLineVisible: shouldShowPriceLine,
+          priceLineColor: isNt8OrSupabaseAsset ? '#10b981' : '#ef4444'
+        });
       } catch (_) {}
 
       if (askPriceLineRef.current) {
@@ -2867,7 +2897,22 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         bidPriceLineRef.current = null;
       }
     }
-  }, [marketData?.bid, marketData?.ask]);
+  }, [marketData?.bid, marketData?.ask, shouldShowPriceLine, isNt8OrSupabaseAsset]);
+
+  // Sincronização explícita da Linha de Preço (Price Line) da série principal
+  // Ativos Supabase e NT8 possuem plotagem habilitada por padrão!
+  useEffect(() => {
+    if (!candleSeriesRef.current) return;
+    try {
+      candleSeriesRef.current.applyOptions({
+        priceLineVisible: shouldShowPriceLine,
+        priceLineColor: isNt8OrSupabaseAsset ? '#10b981' : (showPva ? '#b91c1c' : '#ef4444'),
+        priceLineWidth: 1,
+        priceLineStyle: 2,
+        lastValueVisible: true,
+      });
+    } catch (_) {}
+  }, [shouldShowPriceLine, isNt8OrSupabaseAsset, showPva]);
   const isFocusedRef = useRef<boolean>(isFocused);
   isFocusedRef.current = isFocused;
   const activePanelIdRef = useRef<string | null>(activePanel?.id || null);
@@ -6756,8 +6801,11 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         precision: 2,
         minMove: 0.01,
       },
-      priceLineVisible: false,
-      priceLineColor: showPva ? '#b91c1c' : '#ef4444',
+      priceLineVisible: shouldShowPriceLine,
+      priceLineColor: isNt8OrSupabaseAsset ? '#10b981' : (showPva ? '#b91c1c' : '#ef4444'),
+      priceLineWidth: 1,
+      priceLineStyle: 2,
+      lastValueVisible: true,
       autoscaleInfoProvider: (original: any) => {
         const defaultInfo = original();
         
@@ -7964,7 +8012,10 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           borderVisible: colors.borderVisible || false,
           borderColor: colors.borderColor,
           wickUpColor: colors.wickUpColor,
-          wickDownColor: colors.wickDownColor
+          wickDownColor: colors.wickDownColor,
+          priceLineVisible: shouldShowPriceLine,
+          priceLineColor: isNt8OrSupabaseAsset ? '#10b981' : (showPva ? '#b91c1c' : '#ef4444'),
+          lastValueVisible: true,
         });
       }
 
@@ -9583,74 +9634,7 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
             {/* Badge de Conexão e Spread Dedicados no Topo de Cada Gráfico */}
             {(() => {
-              const sym = (activePanel?.symbol || activePanel?.name || '').toUpperCase();
-              const inst = (activePanel?.instance_id || '').toUpperCase();
-              const fullStr = `${sym} ${inst}`.toUpperCase();
-              const isStandardSupabase = isStandardSupabasePanel(activePanel);
-              const isBrokerAsset = !isStandardSupabase && ((sym.includes(' - ') && !sym.includes('BINANCE')) || sym.includes('ACTIVTRADES') || sym.includes('ACTIVETRADE') || sym.includes('PEPPERSTONE'));
-              const isMt = !isStandardSupabase && (isBrokerAsset || (activePanel as any)?.platform === 'mt4' || (activePanel as any)?.platform === 'mt5' || (activePanel as any)?.source === 'mt4' || (activePanel?.instance_id || '').startsWith('mt4_'));
-              const isBinance = !isStandardSupabase && !isMt && (sym.includes('BINANCE') || /USDT|BUSD|USDC/i.test(sym) || (activePanel as any)?.platform === 'binance');
-              const isNt8 = isStandardSupabase
-                ? isStreamerWsConnected()
-                : (!isMt && !isBinance && ((activePanel as any)?.platform === 'ninjatrader' || sym.includes(' - NT8') || (isStreamerWsConnected() && /^(NQ|MNQ|ES|MES|YM|MYM|RTY|M2K|CL|MCL|GC|MGC|FDAX|FESX|WIN|WDO|RUSSELL)/i.test(sym))));
-
-              let badge = {
-                shortLabel: 'Axion Feed',
-                dotColor: 'bg-sky-400',
-                title: 'Consumindo cotações e histórico via Feed Axion Cloud (Supabase)'
-              };
-
-              if (isStandardSupabase) {
-                if (isNt8) {
-                  badge = {
-                    shortLabel: 'NT8 Local',
-                    dotColor: 'bg-emerald-400 animate-pulse',
-                    title: 'Transmissão em tempo real do NinjaTrader 8 Local (:8002)'
-                  };
-                } else {
-                  badge = {
-                    shortLabel: 'Axion Feed',
-                    dotColor: 'bg-sky-400',
-                    title: 'Consumindo cotações e histórico via Feed Axion Cloud (Supabase)'
-                  };
-                }
-              } else if (isMt) {
-                let broker = 'ActivTrades';
-                if (sym.includes(' - ')) {
-                  const parts = sym.split(' - ');
-                  broker = parts[parts.length - 1].trim();
-                } else if ((activeAccount as any)?.broker && !['MetaTrader 4', 'MetaTrader 5', 'MetaTrader Server'].includes((activeAccount as any)?.broker)) {
-                  broker = (activeAccount as any)?.broker;
-                }
-                badge = {
-                  shortLabel: `MT4 ${broker}`,
-                  dotColor: 'bg-emerald-400 animate-pulse',
-                  title: `Conexão Remota MT4 (${broker}) via Túnel VPS`
-                };
-              } else if (isNt8) {
-                badge = {
-                  shortLabel: 'NT8 Local',
-                  dotColor: 'bg-emerald-400 animate-pulse',
-                  title: 'Transmissão em tempo real do NinjaTrader 8 Local (:8002)'
-                };
-              } else if (isBinance) {
-                const isFutures = fullStr.includes('FUTUR') || fullStr.includes('PERP') || (activeAccount?.platform === 'binance' && ((activeAccount?.account_name || '').toLowerCase().includes('futuro') || (activeAccount?.connection_host || '').includes('future') || (activeAccount?.connection_host || '').includes('fapi')));
-                const isDemo = fullStr.includes('DEMO') || (activeAccount?.platform === 'binance' && ((activeAccount?.account_name || '').toLowerCase().includes('demo') || (activeAccount?.connection_host || '').includes('testnet')));
-
-                const bLabel = isFutures ? (isDemo ? 'Binance Futuros Demo' : 'Binance Futuros') : (isDemo ? 'Binance Spot Demo' : 'Binance Spot');
-                badge = {
-                  shortLabel: bLabel,
-                  dotColor: 'bg-amber-400',
-                  title: `Cotações e Ordens em tempo real via ${bLabel}`
-                };
-              } else if ((activePanel as any)?.platform === 'ctrader' || activeAccount?.platform === 'ctrader') {
-                badge = {
-                  shortLabel: 'cTrader',
-                  dotColor: 'bg-purple-400',
-                  title: 'Conexão cTrader Spotware Open API / FIX'
-                };
-              }
-
+              const src = resolveAssetSource(activePanel, activeAccount);
               const bVal = Number(marketData?.bid || 0);
               const aVal = Number(marketData?.ask || 0);
               const spr = (aVal > 0 && bVal > 0 && aVal >= bVal) ? (aVal - bVal) : 0;
@@ -9659,11 +9643,11 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
               return (
                 <>
                   <div
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-slate-700/80 bg-[#121622] text-[9px] font-bold text-slate-200 shadow-sm shrink-0 cursor-default select-none"
-                    title={badge.title}
+                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-bold shadow-sm shrink-0 cursor-default select-none ${src.badgeStyle}`}
+                    title={src.badgeTitle}
                   >
-                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${badge.dotColor}`} />
-                    <span className="truncate max-w-[120px]">{badge.shortLabel}</span>
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${src.badgeDot}`} />
+                    <span className="truncate max-w-[140px]">{src.badgeLabel}</span>
                   </div>
 
                   {sprFormatted && (

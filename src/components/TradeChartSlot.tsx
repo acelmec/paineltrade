@@ -3,13 +3,12 @@ import { useApp } from '../context/AppContext';
 import { useIsMobile } from '../utils/platform';
 import { CandleChart } from './CandleChart';
 import { ChartWidgetsOverlay } from './ChartWidgetsOverlay';
-import { isStreamerWsConnected } from '../services/vortexStreamer';
 import type { IndicatorConfig } from '../utils/indicatorRegistry';
 import type { WidgetConfig } from '../utils/widgetRegistry';
 import type { DrawingItem, DrawingToolType } from '../types/chartDrawings';
 import type { ChartSlotConfig } from '../types/chartLayout';
 import { AssetSearchSelect } from './AssetSearchSelect';
-import { isStandardSupabasePanel } from '../services/db';
+import { resolveAssetSource } from '../utils/marketSource';
 
 function getShortIndicatorName(ind: IndicatorConfig): string {
   switch (ind.type) {
@@ -263,73 +262,14 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
 
           {/* Badge de Conexão Dedicada deste Gráfico */}
           {(() => {
-            const sym = (slotPanel?.symbol || slotPanel?.name || '').toUpperCase();
-            const inst = (slotPanel?.instance_id || '').toUpperCase();
-            const fullStr = `${sym} ${inst}`.toUpperCase();
-            const isStandardSupabase = isStandardSupabasePanel(slotPanel);
-            const isBrokerAsset = !isStandardSupabase && ((sym.includes(' - ') && !sym.includes('BINANCE')) || sym.includes('ACTIVTRADES') || sym.includes('ACTIVETRADE') || sym.includes('PEPPERSTONE'));
-            const isMt = !isStandardSupabase && (isBrokerAsset || (slotPanel as any)?.platform === 'mt4' || (slotPanel as any)?.platform === 'mt5' || (slotPanel as any)?.source === 'mt4' || (slotPanel?.instance_id || '').startsWith('mt4_'));
-            const isBinance = !isStandardSupabase && !isMt && (sym.includes('BINANCE') || /USDT|BUSD|USDC/i.test(sym) || (slotPanel as any)?.platform === 'binance');
-            const isNt8 = isStandardSupabase
-              ? isStreamerWsConnected()
-              : (!isMt && !isBinance && ((slotPanel as any)?.platform === 'ninjatrader' || sym.includes(' - NT8') || (isStreamerWsConnected() && /^(NQ|MNQ|ES|MES|YM|MYM|RTY|M2K|CL|MCL|GC|MGC|FDAX|FESX|WIN|WDO|RUSSELL)/i.test(sym))));
-
-            let label = 'Axion Feed';
-            let dotColor = 'bg-sky-400';
-            let badgeStyle = 'bg-sky-950/40 border-sky-500/30 text-sky-300';
-            let title = 'Consumindo cotações e histórico via Feed Axion Cloud (Supabase)';
-
-            if (isStandardSupabase) {
-              if (isNt8) {
-                label = 'NT8 Local';
-                dotColor = 'bg-emerald-400 animate-pulse';
-                badgeStyle = 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300';
-                title = 'Transmissão em tempo real do NinjaTrader 8 Local (:8002)';
-              } else {
-                label = 'Axion Feed';
-                dotColor = 'bg-sky-400';
-                badgeStyle = 'bg-sky-950/40 border-sky-500/30 text-sky-300';
-                title = 'Consumindo cotações e histórico via Feed Axion Cloud (Supabase)';
-              }
-            } else if (isMt) {
-              let broker = 'ActivTrades';
-              if (sym.includes(' - ')) {
-                const parts = sym.split(' - ');
-                broker = parts[parts.length - 1].trim();
-              } else if ((activeAccount as any)?.broker && !['MetaTrader 4', 'MetaTrader 5', 'MetaTrader Server'].includes((activeAccount as any)?.broker)) {
-                broker = (activeAccount as any)?.broker;
-              }
-              label = `MT4 ${broker}`;
-              dotColor = 'bg-emerald-400 animate-pulse';
-              badgeStyle = 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300';
-              title = `Conexão Remota MT4 (${broker}) via Túnel VPS`;
-            } else if (isNt8) {
-              label = 'NT8 Local';
-              dotColor = 'bg-emerald-400 animate-pulse';
-              badgeStyle = 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300';
-              title = 'Transmissão em tempo real do NinjaTrader 8 Local (:8002)';
-            } else if (isBinance) {
-              const isFutures = fullStr.includes('FUTUR') || fullStr.includes('PERP') || (activeAccount?.platform === 'binance' && ((activeAccount?.account_name || '').toLowerCase().includes('futuro') || (activeAccount?.connection_host || '').includes('future') || (activeAccount?.connection_host || '').includes('fapi')));
-              const isDemo = fullStr.includes('DEMO') || (activeAccount?.platform === 'binance' && ((activeAccount?.account_name || '').toLowerCase().includes('demo') || (activeAccount?.connection_host || '').includes('testnet')));
-              
-              label = isFutures ? (isDemo ? 'Binance Futuros Demo' : 'Binance Futuros') : (isDemo ? 'Binance Spot Demo' : 'Binance Spot');
-              dotColor = 'bg-amber-400';
-              badgeStyle = 'bg-amber-950/40 border-amber-500/30 text-amber-300';
-              title = `Cotações e Ordens em tempo real via ${label}`;
-            } else if ((slotPanel as any)?.platform === 'ctrader' || activeAccount?.platform === 'ctrader') {
-              label = 'cTrader';
-              dotColor = 'bg-purple-400';
-              badgeStyle = 'bg-purple-950/40 border-purple-500/30 text-purple-300';
-              title = 'Conexão cTrader Spotware Open API / FIX';
-            }
-
+            const src = resolveAssetSource(slotPanel, activeAccount);
             return (
               <div
-                className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold flex items-center gap-1.5 shrink-0 select-none ${badgeStyle}`}
-                title={title}
+                className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold flex items-center gap-1.5 shrink-0 select-none ${src.badgeStyle}`}
+                title={src.badgeTitle}
               >
-                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
-                <span>{label}</span>
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${src.badgeDot}`} />
+                <span>{src.badgeLabel}</span>
               </div>
             );
           })()}

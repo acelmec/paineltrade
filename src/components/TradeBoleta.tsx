@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { PRESET_ATM_STRATEGIES, type ATMStrategy, type ATMBracket } from '../utils/atmRegistry';
 import { ATMStrategyModal } from './ATMStrategyModal';
@@ -8,6 +8,7 @@ import { resolveLevelPrice, calculateRangeHlLevels } from '../utils/levelPriceRe
 import { checkNinjaStatus, fetchNinjaPositionsAndOrders } from '../services/ninjaGateway';
 import { getLocalPlatformConnections } from '../services/connectionsService';
 import { useIsMobile } from '../utils/platform';
+import { filterAccountsForAsset, resolveAssetSource } from '../utils/marketSource';
 
 interface TradeBoletaProps {
   selectedAsset: string;
@@ -99,16 +100,21 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   const panelNinjaAccounts = (accounts || []).filter((a: any) => isNinjaExecutionAccount(a));
   const syncedNinjaAccountsCount = panelNinjaAccounts.length;
 
-  // Contas operacionais disponíveis na Boleta: Demo Axion, MT4, MT5, Binance e cTrader (exceto Contas Execução NT8)
-  const boletaAccounts = (accounts || []).filter((acc: any) => {
-    const plat = (acc.platform || '').toLowerCase();
-    // Se for explicitamente MT4, MT5, cTrader, Binance ou Axion, SEMPRE é permitida na Boleta!
-    if (['mt4', 'mt5', 'ctrader', 'binance', 'axion'].includes(plat)) return true;
-    if (plat === 'nt8' || isNinjaExecutionAccount(acc)) return false;
-    return true;
-  });
+  // Contas operacionais disponíveis na Boleta: filtradas estritamente com base no ativo em foco!
+  // REGRA INVIOLÁVEL: Se o ativo possui conexão MetaTrader de uma corretora (ex: ActivTrades),
+  // somente as contas MetaTrader daquela corretora devem aparecer na boleta!
+  const boletaAccounts = useMemo(() => {
+    const rawBoletaAccounts = (accounts || []).filter((acc: any) => {
+      const plat = (acc.platform || '').toLowerCase();
+      // Se for explicitamente MT4, MT5, cTrader, Binance ou Axion, é pré-candidata à Boleta
+      if (['mt4', 'mt5', 'ctrader', 'binance', 'axion'].includes(plat)) return true;
+      if (plat === 'nt8' || isNinjaExecutionAccount(acc)) return false;
+      return true;
+    });
+    return filterAccountsForAsset(rawBoletaAccounts, effectivePanel);
+  }, [accounts, effectivePanel]);
 
-  // Garante que a boleta selecione sempre uma Conta Operacional válida
+  // Garante que a boleta selecione sempre a conta correta correspondente ao ativo em foco
   useEffect(() => {
     if (boletaAccounts.length > 0) {
       const isCurrentValid = boletaAccounts.some((a: any) => a.id === activeAccount?.id);
@@ -116,7 +122,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
         switchAccount(boletaAccounts[0]);
       }
     }
-  }, [activeAccount?.id, boletaAccounts.length]);
+  }, [activeAccount?.id, boletaAccounts, switchAccount]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1603,11 +1609,22 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
         <div className={`${bCardBg} p-1.5 rounded-lg border space-y-1`}>
           <div className="flex items-center justify-between">
             <label className={`text-[10px] ${bLabelColor} uppercase tracking-wider block font-bold`}>
-              {activeAccount?.platform === 'mt4' ? 'CONTA METATRADER 4' :
-               activeAccount?.platform === 'mt5' ? 'CONTA METATRADER 5' :
-               activeAccount?.platform === 'binance' ? 'CONTA BINANCE SPOT' :
-               activeAccount?.account_type === 'internal_demo' ? 'CONTA DEMO AXION' :
-               'CONTA OPERACIONAL'}
+              {(() => {
+                const src = resolveAssetSource(effectivePanel, activeAccount);
+                if (src.ecosystem === 'mt') {
+                  return `CONTA METATRADER (${src.broker || 'CORRETORA'})`;
+                }
+                if (src.ecosystem === 'binance') {
+                  return src.subType === 'futures' ? 'CONTA BINANCE FUTUROS' : 'CONTA BINANCE SPOT';
+                }
+                if (src.ecosystem === 'ctrader') {
+                  return `CONTA CTRADER ${src.broker ? `(${src.broker})` : ''}`.trim();
+                }
+                if (activeAccount?.account_type === 'internal_demo' || activeAccount?.platform === 'axion') {
+                  return 'CONTA DEMO AXION';
+                }
+                return 'CONTA OPERACIONAL';
+              })()}
             </label>
             {syncedNinjaAccountsCount > 0 && (
               <span

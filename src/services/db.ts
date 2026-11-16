@@ -3875,8 +3875,15 @@ export async function fetchCandlesSupabase(
   );
   const isMtFeed = isPanelMt && !isBinancePanel;
 
-  const isCryptoAsset = isBinancePanel || (!isStandardSupabase && !isMtFeed && /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK|NEAR|SUI|PEPE)/i.test(baseSym));
-  const isForexOrCfd = !isStandardSupabase && (isMtFeed || /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(baseSym));
+  const isCryptoAsset = !isStandardSupabase && (
+    isBinancePanel ||
+    /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK|NEAR|SUI|PEPE)/i.test(baseSym) ||
+    /USDT|BUSD|USDC/i.test(rawSym)
+  );
+  const isForexOrCfd = !isStandardSupabase && !isCryptoAsset && (
+    isMtFeed ||
+    /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(baseSym)
+  );
 
   if (isMtFeed) {
     // Garante que o WebSocket da Binance seja imediatamente desativado para nunca colidir com o Bid/Ask da corretora MT4/MT5
@@ -3885,9 +3892,9 @@ export async function fetchCandlesSupabase(
     } catch {}
   }
 
-  // 0.1 Para Criptoativos (BTCUSDT, ETHUSDT, SOLUSDT, etc.), prioridade máxima para a Binance REST API
-  // A Binance fornece histórico contínuo M1 autêntico em tempo real (sem delay de 1m nem flat dashes com segundos do Yahoo)
-  if (isCryptoAsset && !isMtFeed) {
+  // 0.1 Para Criptoativos (BTCUSDT, ETHUSDT, SOLUSDT, BTCUSD, ETHUSD, etc.), prioridade máxima para a Binance REST API
+  // A Binance fornece histórico contínuo M1 autêntico em tempo real para os gráficos globais
+  if (isCryptoAsset) {
     try {
       let cleanSym = baseSym;
       if (cleanSym.endsWith('USD') && !cleanSym.endsWith('USDT')) {
