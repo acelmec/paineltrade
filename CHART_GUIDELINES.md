@@ -116,6 +116,18 @@ Esta regra aplica-se **exclusivamente** aos ativos no terminal Axion cuja origem
 
 ---
 
+### F. Regra de Plotagem e Atualização em Tempo Real para Ativos MetaTrader 4 / MetaTrader 5 (`AxionGatewayEA.mq4` / `AxionGatewayEA.mq5`)
+1. **Carregamento Único do Histórico + Atualização Exclusiva da Vela Corrente:**
+   - Para ativos do ecossistema MetaTrader (`isMtPanel`), o histórico de velas fechadas deve ser carregado **uma única vez** ao abrir o gráfico ou alterar o período (`3d`, `7d`, `15d`, `30d`).
+   - É proibido aplicar comparativos ou substituições com Yahoo Finance, ou desviar criptoativos MT4 (`BTCUSD - ActivTrades`, `ETHUSD - ActivTrades`) para a API da Binance (`!isPanelMt`).
+   - Após plotar o histórico fechado, o gráfico atualiza **exclusivamente o candle corrente** e as linhas `BID`/`ASK` com os ticks em tempo real do MetaTrader.
+2. **Alinhamento 1-para-1 de Contrato e Baixa Latência (`<1ms` a `150ms`):**
+   - Cada ativo MT4/MT5 vincula-se de forma estrita ao contrato que alimenta seu histórico (`USTEC -> USATECDEC26`, `US500 -> USA500DEC26`, `US30 -> USAIND*`, `US2000 -> USARUS*`, `XAUUSD -> GOLD`, `USOIL -> LCRUDE*`, `BTCUSD -> BTCUSD`, `ETHUSD -> ETHUSD`), evitando conflito de escala entre contrato contínuo e contrato futuro.
+   - Os ticks chegam via WebSocket (`ws.onmessage`) e via loop dedicado `/quotes` (`150ms`, desacoplado de `mt4_sync_*`), e atualizam diretamente a barra corrente (`candleSeriesRef.current.update(...)`) no `handleLiveStreamerTick` sem aguardar ciclos de re-renderização do React.
+   - O snapshot `mt4_sync_all` / `mt4_sync_<conta>` é exclusivo para estado de conta, posições e histórico de trades, e NUNCA deve despachar `vortex_streamer_tick` para não causar piscadas com cotações antigas.
+
+---
+
 ## 3. Checklist Obrigatório de Verificação Pré-Deploy
 
 Antes de concluir qualquer alteração em arquivos de gráficos, feeds ou indicadores (`CandleChart.tsx`, `AppContext.tsx`, `db.ts`, `vortexStreamer.ts`, `indicatorRegistry.ts`), valide cada item deste checklist:

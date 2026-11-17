@@ -185,6 +185,40 @@ Toda plotagem de gráfico, linha `BID`/`ASK`, badge de `Spread` e painel da `Tra
    - Em todas as funções de roteamento e compatibilidade de ativos (`isSameAsset`, `extractRoot`, `isTickMatchingPanel`, `isMarketDataCompatibleWithPanel`, `resolvePanelTickSize`, `resolvePanelPointValue`), é proibido executar `.includes()` bruto antes da normalização de raiz (`extractRoot`).
    - A verificação do **Dow Jones** (`DOW`, `YM`, `MYM`, `US30`, `USAIND`, `DJ30`, `painel_us30_web`) DEVE obrigatoriamente preceder a verificação do **S&P 500** (`ES`, `MES`, `SP500`, `USA500`, `painel_sp500_web`), pois a string `"DOWJONES"` termina com as letras `"ES"`. Isso impede que pacotes ou cotações do `SP500` (`~7449.00`) contaminem o painel ou desloquem as linhas `BID`/`ASK` do `DOWJONES` (`~51600`).
 
+---
+
+## 14. Constituição de Plotagem Gráfica e Sincronização Ponta a Ponta MetaTrader 4 / MetaTrader 5 (`AxionGatewayEA.mq4` / `AxionGatewayEA.mq5`)
+
+Toda operação de gráficos, cotações em tempo real, contas, posições abertas e histórico de trades para ativos e contas do ecossistema **MetaTrader 4 e MetaTrader 5** (`ecosystem: 'mt'`, `AxionGatewayEA.mq4` e `AxionGatewayEA.mq5`) DEVE seguir estritamente as diretrizes abaixo:
+
+### A. Plotagem Simples, Direta e de Baixa Latência dos Gráficos MT4/MT5
+1. **Carregamento Único do Histórico Fechado (`shouldFetchCandles` em `AppContext.tsx`):**
+   - Ao abrir o gráfico de um ativo sincronizado via MT4/MT5 (ou quando o usuário alterar explicitamente o período `3d`, `7d`, `15d`, `30d`), o sistema busca o histórico disponível do ativo **uma única vez** (`fetchCandlesSupabase` / `/market_candles`), plota os candles fechados consolidados e, **daí para frente, atualiza exclusivamente o candle corrente** com os ticks em tempo real do MetaTrader.
+   - **Proibição de Fontes Externas Arbitrárias:** É terminantemente proibido aplicar comparativos, recortes ou substituições com Yahoo Finance, bem como desviar ativos cripto do MetaTrader (`BTCUSD - ActivTrades`, `ETHUSD - ActivTrades`) para a API da Binance (`!isPanelMt` em `isCryptoAsset`).
+2. **Alinhamento Estrito 1-para-1 entre Ativo e Contrato (`marketSource.ts` e `findMtQuoteForAsset`):**
+   - Cada painel MT4/MT5 deve ser alimentado por um único contrato canônico compatível com a escala do seu histórico (`USTEC -> USATECDEC26`, `US500 -> USA500DEC26`, `US30 -> USAIND*`, `US2000 -> USARUS*`, `XAUUSD -> GOLD`, `USOIL -> LCRUDE*`, `BTCUSD -> BTCUSD`, `ETHUSD -> ETHUSD`), impedindo que cotações de contratos diferentes (ex.: `UsaTec` contínuo vs `UsaTecDec26` futuro) disputem o mesmo gráfico.
+3. **Atualização em Tempo Real (`<1ms` a `150ms`) sem Piscadas ou Atrasos:**
+   - **WebSocket Desbloqueado (`ws.onmessage`):** Pacotes `type: 'market_data'` recebidos via WebSocket da VPS/Gateway (`source: 'mt4'`) disparam imediatamente `vortex_streamer_tick` (`<5ms`) e atualizam `remoteMtQuotesRef.current`.
+   - **Loop Rápido Dedicado `/quotes` (`150ms`):** A leitura HTTP de `/quotes` roda em um Web Worker dedicado a cada `150ms` (`fetchFastMtQuotes`), totalmente desacoplada da sincronização de conta/histórico (`mt4_sync_*` a cada `800ms`), impedindo filas de 1 a 2 segundos.
+   - **Proibição de Ticks a partir de Snapshots Cacheados:** `processMtSyncSnapshot` NUNCA deve despachar `vortex_streamer_tick` a partir de `snap.symbol` ou `snap.quotes` de `mt4_sync_all` / `mt4_sync_<conta>`, evitando que cotações antigas cacheadas no servidor pisquem contra o feed em tempo real `/quotes`.
+   - **Atualização Direta da Barra Corrente (`CandleChart.tsx`):** O listener `handleLiveStreamerTick` atualiza em `<1ms` tanto as linhas `BID`/`ASK`/`LAST` quanto o próprio corpo da vela em formação (`candleSeriesRef.current.update(...)`, referenciada pelo menor preço `BID`), sem aguardar re-renderizações da árvore React.
+
+### B. Sincronização Ponta a Ponta (Bidirecional) de Contas, Operações Abertas e Histórico
+1. **Sincronização Automática de Conta (`Balance`, `Equity`, `Currency`, `Broker`):**
+   - O `AxionGatewayEA` transmite continuamente o saldo real (`AccountBalance`), patrimônio líquido (`AccountEquity`), moeda e corretora da conta conectada.
+   - O Axion atualiza em tempo real o card da conta na Gestão de Contas e no cabeçalho, ajustando automaticamente `initial_balance`, `high_watermark` e `eod_baseline_balance` quando detecta o vínculo inicial da conta real/demo.
+2. **Operações Abertas no MT4/MT5 Exibidas Dentro do Axion (`syncRemoteMtPositions`):**
+   - Qualquer posição aberta diretamente no terminal MetaTrader 4 ou MetaTrader 5 (seja manual no MT4/MT5 ou via outro EA) é espelhada automaticamente no Axion com status `"Em Andamento"`, contendo `ticket`, `symbol`, `side` (`COMPRA`/`VENDA`), `lots`, `entry_price`, `stop_loss`, `take_profit` e `pnl_liquido` real (`profit + commission + swap`).
+   - As linhas visuais de Entrada, Stop Loss e Take Profit são plotadas no gráfico do ativo no Axion.
+   - Alterações de SL/TP ou o encerramento da ordem no MT4/MT5 (por Take Profit, Stop Loss ou fechamento manual) atualizam ou encerram imediatamente a operação no Axion (`Gain` ou `Stop` com o preço real de saída e PnL líquido) e replicam o fechamento para eventuais contas Slaves.
+3. **Operações Abertas no Axion Enviadas/Copiadas para o MT4/MT5 (`dispatchMtGatewayCommand` / `/commands`):**
+   - Ordens disparadas pela `TradeBoleta`, por Robôs/Estratégias (`AlgorithmBuilder`) ou por Copy Trading no Axion são enviadas instantaneamente para a fila `/commands` da conta MT4/MT5 (`open`, `modify`, `close`, `flatten_all`).
+   - O `AxionGatewayEA` consome e executa o comando no `OnTimer()` (`100ms–150ms`) usando `ResolveBrokerSymbol` (mapeando automaticamente nomes como `USTEC`, `US500`, `BTCUSD`, `ETHUSD` para o símbolo exato da corretora).
+   - Assim que o MetaTrader abre a posição e retorna o `ticket`, o Axion vincula o registro local ao `ticket` oficial do MT4/MT5 sem duplicar ordens e aplica em tempo real a governança de risco da conta (Stop Diário, Meta Diária e Drawdown Máximo, disparando `flatten_all` caso violado).
+4. **Sincronização Completa e Unificada do Histórico de Operações (`syncRemoteMtTrades`):**
+   - O histórico do Axion (`StrategyReport` / Relatório de Performance) sincroniza e exibe de forma completa **tanto as operações abertas pelo próprio Axion quanto todas as operações já realizadas que constam no histórico do MetaTrader** (`OrdersHistoryTotal` no MT4 / `HistoryDealsTotal` no MT5).
+   - Cada trade fechado no MetaTrader recebe identificação determinística por conta e ticket (`mt_<account>_<ticket>`), preservando preço de entrada, preço de saída, lote, horários de abertura/fechamento e PnL líquido exato (`profit + commission + swap`), garantindo fidelidade contábil 100% idêntica ao relatório da corretora.
+
 
 
 
