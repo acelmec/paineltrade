@@ -14143,28 +14143,18 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       window.addEventListener('vortex_mt_sync_snapshot', handleRealtimeMtSyncEvent);
     }
 
-    const fetchRemoteMtQuotes = async () => {
-      if (isFetchingQuotes) return;
-      const mtAccounts = (accountsRef.current || []).filter(a => isMtExecutionAccount(a) && a.is_active !== false);
-      const curAcc = activeAccountRef.current;
-      const primaryAcc = (curAcc && isMtExecutionAccount(curAcc)) ? curAcc : mtAccounts[0];
+    let isFetchingFastQuotes = false;
+    let mtFastQuotesTimer: any = null;
 
-      isFetchingQuotes = true;
+    // 1. Loop Ultra-Rápido Dedicado de Cotações (/quotes) a cada 150ms (desacoplado do snapshot pesado mt4_sync_*)
+    const fetchFastMtQuotes = async () => {
+      if (isFetchingFastQuotes) return;
+      isFetchingFastQuotes = true;
       try {
         const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
         const activeConn = mtConns.find(c => c.status === 'online') || mtConns[0];
         const host = (activeConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
-        const isLocalHost = host.includes('localhost') || host.includes('127.0.0.1');
-        const accNum = primaryAcc ? extractMtAccountNumber(primaryAcc) : null;
-
-        // Executa em PARALELO (/quotes + mt4_sync_all + mt4_sync_<accNum>) para latência ultrabaixa (<100ms-250ms)
-        const [quotesRes, syncAllRes, syncAccRes] = await Promise.all([
-          fetch(`${host}/quotes`, { signal: AbortSignal.timeout(1500) }).catch(() => null),
-          primaryAcc ? fetch(`${host}/market_data?instance_id=mt4_sync_all`, { signal: AbortSignal.timeout(1500) }).catch(() => null) : Promise.resolve(null),
-          (primaryAcc && accNum) ? fetch(`${host}/market_data?instance_id=mt4_sync_${accNum}`, { signal: AbortSignal.timeout(1500) }).catch(() => null) : Promise.resolve(null)
-        ]);
-
-        // 1. Cotações Bid/Ask em tempo real de todos os ativos do Market Watch (/quotes)
+        const quotesRes = await fetch(`${host}/quotes`, { signal: AbortSignal.timeout(900) }).catch(() => null);
         if (quotesRes && quotesRes.ok) {
           const quotes = await quotesRes.json().catch(() => null);
           if (quotes && typeof quotes === 'object') {
@@ -14191,6 +14181,32 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
             }
           }
         }
+      } catch (_) {
+      } finally {
+        isFetchingFastQuotes = false;
+      }
+    };
+
+    // 2. Loop Independente de Sincronização de Conta/Posições/Histórico (1000ms) — nunca bloqueia as cotações de gráfico
+    const fetchRemoteMtQuotes = async () => {
+      if (isFetchingQuotes) return;
+      const mtAccounts = (accountsRef.current || []).filter(a => isMtExecutionAccount(a) && a.is_active !== false);
+      const curAcc = activeAccountRef.current;
+      const primaryAcc = (curAcc && isMtExecutionAccount(curAcc)) ? curAcc : mtAccounts[0];
+      if (!primaryAcc) return;
+
+      isFetchingQuotes = true;
+      try {
+        const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
+        const activeConn = mtConns.find(c => c.status === 'online') || mtConns[0];
+        const host = (activeConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
+        const isLocalHost = host.includes('localhost') || host.includes('127.0.0.1');
+        const accNum = primaryAcc ? extractMtAccountNumber(primaryAcc) : null;
+
+        const [syncAllRes, syncAccRes] = await Promise.all([
+          fetch(`${host}/market_data?instance_id=mt4_sync_all`, { signal: AbortSignal.timeout(1500) }).catch(() => null),
+          accNum ? fetch(`${host}/market_data?instance_id=mt4_sync_${accNum}`, { signal: AbortSignal.timeout(1500) }).catch(() => null) : Promise.resolve(null)
+        ]);
 
         // 2. Snapshot Unificado Bypass: seleciona SEMPRE o snapshot mais recente entre mt4_sync_all e mt4_sync_<accNum>
         // (O EA atualiza mt4_sync_all a cada ciclo do timer, evitando travamento de PnL no snapshot inicial mt4_sync_<accNum>)
@@ -14308,11 +14324,14 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       }
     };
 
-    // Ciclo acelerado via Web Worker (250ms) para atualização rápida de preços Bid/Ask e PnL
+    // Ciclo ultra-rápido via Web Worker (150ms) exclusivo para cotações /quotes + ciclo separado (800ms) para estado de conta/posições
+    fetchFastMtQuotes();
     fetchRemoteMtQuotes();
-    mtQuotesTimer = createWorkerInterval(fetchRemoteMtQuotes, 250);
+    mtFastQuotesTimer = createWorkerInterval(fetchFastMtQuotes, 150);
+    mtQuotesTimer = createWorkerInterval(fetchRemoteMtQuotes, 800);
 
     return () => {
+      if (mtFastQuotesTimer) clearWorkerTimer(mtFastQuotesTimer);
       if (mtQuotesTimer) clearWorkerTimer(mtQuotesTimer);
       if (typeof window !== 'undefined') {
         window.removeEventListener('vortex_mt_sync_snapshot', handleRealtimeMtSyncEvent);
@@ -15571,20 +15590,27 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                 }
                 const instLower = String(incomingInst || '').toLowerCase();
                 const isSupabaseOrNt8Inst = instLower.startsWith('painel_') || instLower.startsWith('nt8');
-                if (isSupabaseOrNt8Inst) {
-                  window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
-                    detail: {
-                      symbol: dSym,
-                      panel: String(incomingInst || dSym).toLowerCase(),
-                      price: dPrice,
-                      bid: tickBid,
-                      ask: tickAsk,
-                      volume: Number(d.volume || 1),
-                      source: 'nt8',
-                      updated_at: d.updated_at || new Date().toISOString()
-                    }
-                  }));
+                if (!isSupabaseOrNt8Inst && tickBid > 0) {
+                  remoteMtQuotesRef.current[dSym] = {
+                    symbol: dSym,
+                    bid: tickBid,
+                    ask: tickAsk > 0 ? tickAsk : Number(remoteMtQuotesRef.current[dSym]?.ask || 0),
+                    price: dPrice,
+                    updated_at: d.updated_at || new Date().toISOString()
+                  };
                 }
+                window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
+                  detail: {
+                    symbol: dSym,
+                    panel: String(incomingInst || dSym).toLowerCase(),
+                    price: dPrice,
+                    bid: tickBid,
+                    ask: tickAsk,
+                    volume: Number(d.volume || 1),
+                    source: isSupabaseOrNt8Inst ? 'nt8' : 'mt4',
+                    updated_at: d.updated_at || new Date().toISOString()
+                  }
+                }));
               }
             }
             if (!targetPanel) return;
@@ -16253,9 +16279,9 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
               }
             }
 
-            // Notifica o Multi-Chart Grid para re-renderizar o slot correspondente com nova vela
+            // Notifica o Multi-Chart Grid para re-renderizar o slot correspondente em tempo real (60 FPS)
             const nowT = Date.now();
-            if (!(cache as any)._lastTickBumpAt || nowT - (cache as any)._lastTickBumpAt > 80) {
+            if (!(cache as any)._lastTickBumpAt || nowT - (cache as any)._lastTickBumpAt > 16) {
               (cache as any)._lastTickBumpAt = nowT;
               bumpPanelCacheVersion();
             }

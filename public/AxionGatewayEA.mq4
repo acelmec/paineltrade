@@ -315,13 +315,15 @@ void OnTimer()
    // 1. Consulta imediata de comandos na fila do Axion (GET /commands)
    PollAndProcessCommands();
 
-   // 2. Sincronização completa de Posições Abertas, Histórico Fechado, Saldo, Candles M1 e Market Watch (POST /market_data)
+   // 2. Transmissão contínua e prioritária de cotações do Market Watch a cada ciclo (100ms)
+   BroadcastNextMarketWatchQuotes(12);
+
+   // 3. Sincronização completa de Posições Abertas, Histórico Fechado e Saldo a cada 1000ms (sem bloquear o stream de ticks)
    ulong nowMs = GetTickCount();
-   if(nowMs - lastSyncSnapshotMs >= 200)
+   if(nowMs - lastSyncSnapshotMs >= 1000)
    {
       lastSyncSnapshotMs = nowMs;
       SyncAccountStateToGateway(false);
-      BroadcastNextMarketWatchQuotes(5);
    }
 }
 

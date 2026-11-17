@@ -3039,9 +3039,6 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       const isMatch = isTickMatchingPanel(detail, activePanel, activeAccount);
       if (!isMatch) return;
 
-      const cfg = resolvedPriceLineConfigRef.current;
-      if (!cfg.enabled || cfg.plotMode === 'none') return;
-
       const rawTickBid = Number(detail.bid || 0);
       const rawTickAsk = Number(detail.ask || 0);
       if (rawTickBid > 0 && rawTickAsk > rawTickBid) {
@@ -3057,6 +3054,54 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         : lastCandleClose;
       const tickPrice = Number(detail.price || detail.bid || 0);
       const isTickPriceCoherent = tickPrice > 0 && (lastCandleClose <= 0 || Math.abs(tickPrice - lastCandleClose) / lastCandleClose <= 0.05);
+
+      // Atualização direta (<1ms) da barra corrente no gráfico sem aguardar ciclo de estado do React
+      if (!isSimulator && !isMtTickOnSupabasePanel && isTickPriceCoherent && isHistoryPlottedRef.current && chartDataRef.current && chartDataRef.current.length >= 2) {
+        const lastBar = chartDataRef.current[chartDataRef.current.length - 1];
+        const candleLivePrice = (rawTickBid > 0 && rawTickAsk > 0) ? Math.min(rawTickBid, rawTickAsk) : (rawTickBid > 0 ? rawTickBid : tickPrice);
+        if (lastBar && candleLivePrice > 0) {
+          currentPriceRef.current = candleLivePrice;
+          const tfMin = Math.max(1, timeframe || 1);
+          const bucketSec = tfMin * 60;
+          const lastBarTimeSec = typeof lastBar.time === 'number'
+            ? lastBar.time
+            : (lastBar.timestamp ? getChartTimeFromDate(lastBar.timestamp) : 0);
+          const nowBucketSec = Math.floor((Date.now() / 1000) / bucketSec) * bucketSec;
+
+          if (nowBucketSec === lastBarTimeSec || lastBarTimeSec > nowBucketSec) {
+            const openP = Number(lastBar.open) || candleLivePrice;
+            const updatedBar: any = {
+              ...lastBar,
+              time: lastBarTimeSec,
+              close: candleLivePrice,
+              high: Math.max(Number(lastBar.high || openP), candleLivePrice),
+              low: Math.min(Number(lastBar.low || openP), candleLivePrice)
+            };
+            try {
+              candleSeriesRef.current.update(updatedBar);
+              chartDataRef.current[chartDataRef.current.length - 1] = updatedBar;
+            } catch (_) {}
+          } else if (nowBucketSec > lastBarTimeSec && Math.floor((nowBucketSec - lastBarTimeSec) / bucketSec) <= 3) {
+            const openP = Number(lastBar.close) || candleLivePrice;
+            const newBar: any = {
+              time: nowBucketSec,
+              timestamp: new Date(nowBucketSec * 1000).toISOString(),
+              open: openP,
+              high: Math.max(openP, candleLivePrice),
+              low: Math.min(openP, candleLivePrice),
+              close: candleLivePrice,
+              volume: 0
+            };
+            try {
+              candleSeriesRef.current.update(newBar);
+              chartDataRef.current.push(newBar);
+            } catch (_) {}
+          }
+        }
+      }
+
+      const cfg = resolvedPriceLineConfigRef.current;
+      if (!cfg.enabled || cfg.plotMode === 'none') return;
       const quoteSource = (isMtTickOnSupabasePanel && panelOwnPrice > 0)
         ? { price: panelOwnPrice, bid: panelOwnPrice, ask: 0 }
         : (isTickPriceCoherent ? detail : (panelOwnPrice > 0 ? { price: panelOwnPrice, bid: panelOwnPrice, ask: 0 } : null));

@@ -328,13 +328,13 @@ void OnTick()
 void OnTimer()
 {
    PollAndProcessCommands();
+   BroadcastNextMarketWatchQuotes(12);
 
    ulong nowMs = GetMicrosecondCount() / 1000;
-   if(nowMs - lastSyncSnapshotMs >= 200)
+   if(nowMs - lastSyncSnapshotMs >= 1000)
    {
       lastSyncSnapshotMs = nowMs;
       SyncAccountStateToGateway(false);
-      BroadcastNextMarketWatchQuotes(5);
    }
 }
 
