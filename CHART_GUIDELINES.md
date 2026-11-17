@@ -96,6 +96,21 @@ Ao processar ticks de mercado na vela corrente:
 
 ---
 
+### E. Regra Exclusiva de Plotagem para Ativos Oriundos do Banco de Dados Supabase (`AxionDB`)
+Esta regra aplica-se **exclusivamente** aos ativos no terminal Axion cuja origem de gráfico é o banco de dados Supabase (`isStandardSupabasePanel` / tabela `painelvm_candles_1m` / instâncias `painel_*`):
+
+1. **Alinhamento Temporal em *Open Time* (`-60s` uniforme em Histórico + Vela Corrente):**
+   - O coletor `GammaPainelHttpCandles` grava cada vela M1 (tanto as fechadas em `painelvm_candles_1m` quanto a vela em formação enviada via WebSocket `type: 'candle'`) com *Close Time* (`endDt = dt + 60s`).
+   - Para que o gráfico no terminal Axion plote exatamente o mesmo horário e as mesmas velas do MetaTrader 4 (ex.: às `21:53:30`, vela corrente = `21:53` e vela fechada imediatamente anterior = `21:52`), **todas** as velas oriundas de `painelvm_candles_1m` (`fetchCandlesSupabase` e `postgres_changes`) e do evento WebSocket `type: 'candle'` de painéis Supabase DEVEM subtrair `60000ms` (`-60s`, convertendo *Close Time* para *Open Time*).
+   - **Proibição Absoluta:** NUNCA subtrair `-60s` apenas na última vela sem aplicar a mesma conversão às velas fechadas de `painelvm_candles_1m`, pois isso faz a vela corrente colidir e sobrescrever a última vela fechada. E NUNCA aplicar esse recuo de `-60s` a ativos de outras origens (Binance, MT4/MT5 direto, cTrader) que já operam nativamente em *Open Time*.
+
+2. **Plotagem Estrita de `BID`, `ASK` e `SPREAD` (`realQuote.ts`):**
+   - O indicador `BID` / `ASK` no gráfico, o badge de `Spread` e o painel da `TradeBoleta` devem plotar **somente** preços e diferenças provenientes de banco de dados, WebSocket ou API (`resolveDisplayQuote`).
+   - Nos ativos oriundos do Supabase (`AxionDB`), onde o stream `market_data` (`painel_*_web`) traz o preço ajustado do painel (`InpPriceOffset`), o `BID` é ancorado ao preço próprio do painel (`bid = panelPrice`) e o `ASK` soma a diferença real `(ask - bid)` obtida da fonte MetaTrader (`ask = panelPrice + realSpread`), evitando que cotações brutas sem offset desloquem as linhas em relação ao candle.
+   - **Proibição Absoluta de Fallback para `0.25` (`tickSize`):** É terminantemente proibido atribuir o tick mínimo do ativo (`0.25`) como spread ou diferença entre Bid e Ask quando ocorrer falha ou ausência momentânea de leitura do `ask`. Deve permanecer **sempre a última diferença real conhecida** (`getLastRealSpread` / `rememberRealSpread`). Se nunca houve leitura real de spread para o ativo, o Ask e o Spread não são plotados.
+
+---
+
 ## 3. Checklist Obrigatório de Verificação Pré-Deploy
 
 Antes de concluir qualquer alteração em arquivos de gráficos, feeds ou indicadores (`CandleChart.tsx`, `AppContext.tsx`, `db.ts`, `vortexStreamer.ts`, `indicatorRegistry.ts`), valide cada item deste checklist:

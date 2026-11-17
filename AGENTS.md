@@ -164,6 +164,24 @@ Toda e qualquer rotina de salvamento de versões dos pacotes oficiais DEVE segui
    - O usuário pode solicitar atualizar as três versões simultaneamente ou pedir qualquer uma individualmente ("Atualizar Easypanel", "Atualizar Instalador Windows" ou "Atualizar Android").
 5. **Regra de Ambiguidade Mandatória:** Se a solicitação do usuário for genérica ou não especificar com clareza o que deseja atualizar, o agente DEVE perguntar diretamente qual(is) dos 3 pacotes ele deseja atualizar antes de executar qualquer compilação ou build.
 
+---
+
+## 13. Regra Inviolável de Plotagem para Ativos Oriundos do Banco de Dados Supabase (`AxionDB`)
+
+Toda plotagem de gráfico, linha `BID`/`ASK`, badge de `Spread` e painel da `TradeBoleta` no terminal Axion para **ativos oriundos do banco de dados Supabase** (`isStandardSupabasePanel` / tabela `painelvm_candles_1m` / instâncias `painel_*`) DEVE obedecer estritamente às seguintes regras (detalhadas em [`CHART_GUIDELINES.md`](file:///c:/Users/Pichau/Projetos%20React/VortexWeb/CHART_GUIDELINES.md)):
+
+1. **Escopo Estrito (Somente Origem Supabase / `AxionDB`):**
+   - A conversão de *Close Time* (`dt + 60s`) para *Open Time* (`dt - 60000ms`) aplica-se **exclusivamente** aos ativos oriundos do banco de dados Supabase (`painelvm_candles_1m` em `fetchCandlesSupabase`, `postgres_changes` de `painelvm_candles_1m` e evento WebSocket `type: 'candle'` quando `isStandardSupabasePanel(targetPanel)` for verdadeiro).
+   - Ativos de outras origens diretas (Binance, MT4/MT5 direto, cTrader) já operam nativamente em *Open Time* e NUNCA devem sofrer recuo de `-60s`.
+2. **Alinhamento Temporal Idêntico ao MetaTrader 4 (Sem Engolir a Vela Fechada Anterior):**
+   - Como o coletor `GammaPainelHttpCandles` grava todas as velas M1 com `endDt = dt + 60s`, subtrair `60000ms` de **todas** as velas de origem Supabase garante que às `21:53:30` a vela corrente seja `21:53` e a vela fechada imediatamente anterior seja `21:52`, sem jamais sobrescrever ou perder a última vela fechada.
+   - É proibido aplicar recuo de `-60s` apenas na última vela de forma isolada.
+3. **Plotagem Fiel de `BID`, `ASK` e `SPREAD` (Proibição de Fallback `0.25`):**
+   - O indicador `BID`/`ASK`, o badge de `Spread` e a `TradeBoleta` devem plotar **somente** valores provenientes do banco de dados, WebSocket ou API (`src/utils/realQuote.ts`).
+   - Em caso de falha ou ausência de leitura de `ask`, deve permanecer **sempre a última diferença real conhecida** (`getLastRealSpread`). É terminantemente proibido atribuir `0.25` (`tickSize`) como spread padrão.
+   - Nos ativos `AxionDB`, a diferença real `(ask - bid)` da fonte é aplicada sobre o preço próprio do painel (`bid = panelPrice`, `ask = panelPrice + realSpread`), mantendo a linha `BID` alinhada ao fechamento do candle e a linha `ASK` na distância real do spread.
+
+
 
 
 

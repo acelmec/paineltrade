@@ -15775,7 +15775,12 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
 
               if (c && c.timestamp) {
                 const rawParsed = parseInputToDate(c.timestamp);
-                const openTimeMs = (rawParsed && !isNaN(rawParsed.getTime())) ? (rawParsed.getTime() - 60000) : NaN;
+                // Regra Exclusiva para Ativos oriundos do banco de dados Supabase (AxionDB / painel_*):
+                // O coletor grava Close Time (dt + 60s); convertemos para Open Time (-60000ms) para plotagem idêntica ao MetaTrader 4.
+                const isSupabaseCandleOrigin = isStandardSupabasePanel(targetPanel) || String(msgInst || '').toLowerCase().startsWith('painel_');
+                const openTimeMs = (rawParsed && !isNaN(rawParsed.getTime()))
+                  ? (isSupabaseCandleOrigin ? (rawParsed.getTime() - 60000) : rawParsed.getTime())
+                  : NaN;
                 if (!isNaN(openTimeMs) && openTimeMs > 0) {
                   const openTimeIso = new Date(openTimeMs).toISOString();
                   syncServerClock(openTimeIso);
