@@ -8,6 +8,7 @@ import {
 } from '../utils/indicatorRegistry';
 import type { WidgetConfig } from '../utils/widgetRegistry';
 import { fetchUserLayoutProfilesSupabase, saveUserLayoutProfileSupabase, deleteUserLayoutProfileSupabase, type UserLayoutProfile, fetchAccountChartStateSupabase, saveAccountChartStateSupabase } from '../services/db';
+import { formatAssetNameParts } from '../utils/marketSource';
 import {
   GrixCoreAnalyticsView,
   GrixAnchorsView,
@@ -2076,16 +2077,17 @@ export const Dashboard: React.FC = () => {
                         >
                           {panels && panels.length > 0 ? (
                             panels.map((p: any) => {
-                              const cleanName = p.name ? p.name.replace(/\s*\([^)]*\)/g, '').trim() : 'Painel';
+                              const { assetPart, brokerPart } = formatAssetNameParts(p.name || p.symbol || 'Painel', p);
+                              const label = brokerPart ? `${assetPart} - ${brokerPart}` : assetPart;
                               return (
                                 <option key={p.id} value={p.id} className="bg-slate-900 text-white font-bold">
-                                  {cleanName.toUpperCase()}
+                                  {label.toUpperCase()}
                                 </option>
                               );
                             })
                           ) : (
                             <option value={activePanel?.id || 'main'} className="bg-slate-900 text-white font-bold">
-                              {(activePanel?.name || 'NQ').toUpperCase()}
+                              {((activePanel ? formatAssetNameParts(activePanel.name || activePanel.symbol || 'NASDAQ', activePanel) : { assetPart: 'NASDAQ', brokerPart: 'AxionDB' }).brokerPart ? `${(activePanel ? formatAssetNameParts(activePanel.name || activePanel.symbol || 'NASDAQ', activePanel) : { assetPart: 'NASDAQ', brokerPart: 'AxionDB' }).assetPart} - ${(activePanel ? formatAssetNameParts(activePanel.name || activePanel.symbol || 'NASDAQ', activePanel) : { assetPart: 'NASDAQ', brokerPart: 'AxionDB' }).brokerPart}` : (activePanel?.name || 'NASDAQ')).toUpperCase()}
                             </option>
                           )}
                         </select>

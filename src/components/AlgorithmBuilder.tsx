@@ -20,6 +20,7 @@ import {
   type ATMStrategy
 } from '../utils/atmRegistry';
 import { ATMStrategyModal } from './ATMStrategyModal';
+import { getAssetDisplayName } from '../utils/marketSource';
 
 export const AlgorithmBuilder: React.FC = () => {
   const {
@@ -2055,7 +2056,7 @@ export const AlgorithmBuilder: React.FC = () => {
                 >
                   <option value="">Todos os Ativos</option>
                   {panels.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
+                    <option key={p.id} value={p.id}>{getAssetDisplayName(p)}</option>
                   ))}
                 </select>
               </div>
@@ -2195,7 +2196,7 @@ export const AlgorithmBuilder: React.FC = () => {
               >
                 <option value="all">🌍 Todos os Ativos (Recomendado para Qualquer Ativo)</option>
                 {panels.map(p => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
+                  <option key={p.id} value={p.id}>{getAssetDisplayName(p)}</option>
                 ))}
               </select>
             </div>

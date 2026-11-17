@@ -30,7 +30,7 @@ export const AssetSearchSelect: React.FC<AssetSearchSelectProps> = ({
   const { assetPart, brokerPart } = useMemo(() => {
     if (!currentPanel) return { assetPart: 'ATIVO', brokerPart: null };
     const raw = currentPanel.name || currentPanel.symbol || 'Painel';
-    return formatAssetNameParts(raw);
+    return formatAssetNameParts(raw, currentPanel);
   }, [currentPanel]);
 
   // Fecha dropdown ao clicar fora
@@ -57,7 +57,7 @@ export const AssetSearchSelect: React.FC<AssetSearchSelectProps> = ({
     }
   }, [isOpen]);
 
-  // Filtro de busca inteligente (a partir de 2 caracteres, busca em qualquer parte do nome/símbolo)
+  // Filtro de busca inteligente (a partir de 2 caracteres, busca em qualquer parte do nome/símbolo/rotulação)
   const filteredPanels = useMemo(() => {
     const list = panels || [];
     const query = searchQuery.trim().toLowerCase();
@@ -68,7 +68,9 @@ export const AssetSearchSelect: React.FC<AssetSearchSelectProps> = ({
       const name = String(p.name || '').toLowerCase();
       const sym = String(p.symbol || '').toLowerCase();
       const inst = String(p.instance_id || '').toLowerCase();
-      return name.includes(query) || sym.includes(query) || inst.includes(query);
+      const { assetPart: aPart, brokerPart: bPart } = formatAssetNameParts(p.name || p.symbol || '', p);
+      const formatted = `${aPart} ${bPart || ''}`.toLowerCase();
+      return name.includes(query) || sym.includes(query) || inst.includes(query) || formatted.includes(query);
     });
   }, [panels, searchQuery]);
 
@@ -129,7 +131,7 @@ export const AssetSearchSelect: React.FC<AssetSearchSelectProps> = ({
             {filteredPanels.length > 0 ? (
               filteredPanels.map((p) => {
                 const isSelected = p.id === currentPanelId;
-                const { assetPart: aPart, brokerPart: bPart } = formatAssetNameParts(p.name || p.symbol || 'Painel');
+                const { assetPart: aPart, brokerPart: bPart } = formatAssetNameParts(p.name || p.symbol || 'Painel', p);
                 return (
                   <button
                     key={p.id}

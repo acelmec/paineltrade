@@ -6,6 +6,7 @@ import { getStableManualStrategyId, getAccountManualStrategyId, generateAccountM
 import { sanitizeTimeMask } from '../utils/date';
 import { PatternMLSettings } from './PatternMLSettings';
 import { ImportAssetsModal } from './ImportAssetsModal';
+import { getAssetDisplayName } from '../utils/marketSource';
 interface SettingsProps {
   initialTab?: 'geral' | 'ia_voz' | 'recursos' | 'fontes' | 'telegram' | 'prompts' | 'noticias' | 'prompt_geral' | 'remodelagem_ml';
 }
@@ -3478,7 +3479,7 @@ export const Settings: React.FC<SettingsProps> = ({ initialTab = 'geral' }) => {
                   >
                     <option value="">-- Todos os Painéis (Global) --</option>
                     {panels.map(p => (
-                      <option key={p.id} value={p.id}>{p.name} ({p.instance_id})</option>
+                      <option key={p.id} value={p.id}>{getAssetDisplayName(p)} ({p.instance_id})</option>
                     ))}
                   </select>
                 </div>

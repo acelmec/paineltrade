@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { getAssetDisplayName } from '../utils/marketSource';
 
 export const AlertSettings: React.FC = () => {
   const { settings, allSettings, saveSettings, panels, activePanel, marketData, gammaLevels, forces } = useApp();
@@ -575,7 +576,7 @@ export const AlertSettings: React.FC = () => {
                         >
                           <td className="py-2.5 px-3 font-bold text-white flex items-center gap-1.5">
                             <span className="text-blue-400">📈</span>
-                            <span>{p.name}</span>
+                            <span>{getAssetDisplayName(p)}</span>
                             <span className="text-[10px] text-slate-500 font-normal">({p.instance_id})</span>
                           </td>
                           <td className="py-2.5 px-3 font-medium">
@@ -656,7 +657,7 @@ export const AlertSettings: React.FC = () => {
             >
               {panels.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} ({p.instance_id})
+                  {getAssetDisplayName(p)} ({p.instance_id})
                 </option>
               ))}
             </select>

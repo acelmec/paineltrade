@@ -335,21 +335,25 @@ namespace NinjaTrader.NinjaScript.Indicators
             // --- LÓGICA DE CANDLES 1MIN ---
             if (isTimeframeValid)
             {
+                // Padronização Universal em OPEN TIME (compatível com TradingView, Web, Supabase, Binance, MT4/5 e cTrader):
+                // O NinjaTrader 8 marca barras no encerramento (Close Time). Subtrai 1 minuto para carimbar o início da barra.
+                DateTime openTimeCurrent = Time[0].AddMinutes(-1);
+
                 // Atualiza variáveis seguras do candle em formação (para a Thread ler)
                 safeCurrentOpen = Open[0];
                 safeCurrentHigh = High[0];
                 safeCurrentLow = Low[0];
                 safeCurrentClose = Close[0];
                 safeCurrentVol = (long)Volume[0]; 
-                safeCurrentTime = Time[0]; 
+                safeCurrentTime = openTimeCurrent; 
 
                 if (State == State.Historical)
                 {
                     // Coleta histórico respeitando a quantidade de dias configurada em DaysToLoad
                     DateTime cutoffDate = DateTime.Today.AddDays(-daysToLoad);
-                    if (Time[0] >= cutoffDate)
+                    if (openTimeCurrent >= cutoffDate)
                     {
-                        string json = BuildCandleJson(Time[0], Open[0], High[0], Low[0], Close[0], (long)Volume[0]);
+                        string json = BuildCandleJson(openTimeCurrent, Open[0], High[0], Low[0], Close[0], (long)Volume[0]);
                         lock (historicalCandlesJson) 
                         { 
                             historicalCandlesJson.Add(json); 
@@ -362,7 +366,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 {
                     if (IsFirstTickOfBar && CurrentBar > 0)
                     {
-                        string json = BuildCandleJson(Time[1], Open[1], High[1], Low[1], Close[1], (long)Volume[1]);
+                        DateTime openTimeClosed = Time[1].AddMinutes(-1);
+                        string json = BuildCandleJson(openTimeClosed, Open[1], High[1], Low[1], Close[1], (long)Volume[1]);
                         lock (realtimeClosedCandles) { realtimeClosedCandles.Add(json); }
                     }
                 }

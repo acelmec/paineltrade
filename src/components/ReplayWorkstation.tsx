@@ -24,6 +24,7 @@ import { calculateTradeManagement } from '../utils/levelPriceResolver';
 import { resolveAlgorithmAtm, type ATMStrategy, type ATMBracket } from '../utils/atmRegistry';
 import type { Candle, GammaLevels, FetchProgressInfo, MarketData, ReplayForceItem } from '../services/db';
 import { getRawSystemTime } from '../utils/date';
+import { getAssetDisplayName } from '../utils/marketSource';
 import {
   fetchAvailableCandleDateBoundsSupabase,
   fetchCandlesByDateRangeSupabase,
@@ -2059,7 +2060,7 @@ export const ReplayWorkstation: React.FC = () => {
             >
               {panels?.map((p: any) => (
                 <option key={p.id} value={p.id} className="bg-slate-900">
-                  {p.name?.replace(/\s*\([^)]*\)/g, '').trim()} [Replay]
+                  {getAssetDisplayName(p)} [Replay]
                 </option>
               ))}
             </select>

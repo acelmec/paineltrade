@@ -86,6 +86,15 @@ export default defineConfig({
       '/api/ml': {
         target: 'http://127.0.0.1:8080',
         changeOrigin: true
+      },
+      '/yahoo-api': {
+        target: 'https://query1.finance.yahoo.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/yahoo-api/, ''),
+        secure: true,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        }
       }
     },
     watch: {

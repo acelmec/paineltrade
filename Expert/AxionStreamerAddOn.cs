@@ -1454,12 +1454,17 @@ namespace NinjaTrader.NinjaScript.AddOns
                     {
                         _streamData.Candles.Clear();
 
+                        int tfMin = Math.Max(1, _streamData.TimeframeMinutes);
                         for (int i = 0; i < bars.Count; i++)
                         {
+                            // O NinjaTrader 8 marca barras de tempo no encerramento (Close Time).
+                            // Para padronização universal em OPEN TIME (compatível com Web, Supabase, Binance, MT4/5 e cTrader),
+                            // convertemos para o início da barra (Start of Bar / Open Time).
                             DateTime timeMarket = bars.GetTime(i);
+                            DateTime openTime = timeMarket.AddMinutes(-tfMin);
                             _streamData.Candles.Add(new AxionAddOnStreamServer.CandleItem
                             {
-                                timestamp = FormatMarketTimestamp(timeMarket),
+                                timestamp = FormatMarketTimestamp(openTime),
                                 open = bars.GetOpen(i),
                                 high = bars.GetHigh(i),
                                 low = bars.GetLow(i),
@@ -1477,7 +1482,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                             _streamData.CurrentLow = bars.GetLow(lastIdx);
                             _streamData.CurrentClose = bars.GetClose(lastIdx);
                             _streamData.CurrentVolume = (long)bars.GetVolume(lastIdx);
-                            _streamData.CurrentTimestamp = FormatMarketTimestamp(bars.GetTime(lastIdx));
+                            _streamData.CurrentTimestamp = FormatMarketTimestamp(bars.GetTime(lastIdx).AddMinutes(-tfMin));
                             _streamData.LastUpdateUtc = DateTime.UtcNow;
                         }
 
@@ -1569,12 +1574,14 @@ namespace NinjaTrader.NinjaScript.AddOns
 
             lock (_streamData.DataLock)
             {
+                int tfMin = Math.Max(1, _streamData.TimeframeMinutes);
                 for (int i = e.MinIndex; i <= e.MaxIndex; i++)
                 {
                     if (i < 0 || i >= e.BarsSeries.Count) continue;
 
                     DateTime timeMarket = e.BarsSeries.GetTime(i);
-                    string isoTime = FormatMarketTimestamp(timeMarket);
+                    DateTime openTime = timeMarket.AddMinutes(-tfMin);
+                    string isoTime = FormatMarketTimestamp(openTime);
                     double open = e.BarsSeries.GetOpen(i);
                     double high = e.BarsSeries.GetHigh(i);
                     double low = e.BarsSeries.GetLow(i);
@@ -1709,6 +1716,18 @@ namespace NinjaTrader.NinjaScript.AddOns
                             });
                             if (_streamData.Candles.Count > 50000) _streamData.Candles.RemoveAt(0);
                         }
+                    }
+                    else
+                    {
+                        _streamData.Candles.Add(new AxionAddOnStreamServer.CandleItem
+                        {
+                            timestamp = isoMinute,
+                            open = e.Price,
+                            high = e.Price,
+                            low = e.Price,
+                            close = e.Price,
+                            volume = (long)e.Volume
+                        });
                     }
                     _streamData.MarkCandlesDirty();
                 }
