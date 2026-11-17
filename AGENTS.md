@@ -168,18 +168,23 @@ Toda e qualquer rotina de salvamento de versões dos pacotes oficiais DEVE segui
 
 ## 13. Regra Inviolável de Plotagem para Ativos Oriundos do Banco de Dados Supabase (`AxionDB`)
 
-Toda plotagem de gráfico, linha `BID`/`ASK`, badge de `Spread` e painel da `TradeBoleta` no terminal Axion para **ativos oriundos do banco de dados Supabase** (`isStandardSupabasePanel` / tabela `painelvm_candles_1m` / instâncias `painel_*`) DEVE obedecer estritamente às seguintes regras (detalhadas em [`CHART_GUIDELINES.md`](file:///c:/Users/Pichau/Projetos%20React/VortexWeb/CHART_GUIDELINES.md)):
+Toda plotagem de gráfico, linha `BID`/`ASK`, badge de `Spread` e painel da `TradeBoleta` no terminal Axion para **ativos oriundos do banco de dados Supabase** (`isStandardSupabasePanel` / tabela `painelvm_candles_1m` / instâncias `painel_*`) segue uma **regra única e universal** e DEVE obedecer estritamente às diretrizes abaixo (detalhadas em [`CHART_GUIDELINES.md`](file:///c:/Users/Pichau/Projetos%20React/VortexWeb/CHART_GUIDELINES.md)):
 
 1. **Escopo Estrito (Somente Origem Supabase / `AxionDB`):**
-   - A conversão de *Close Time* (`dt + 60s`) para *Open Time* (`dt - 60000ms`) aplica-se **exclusivamente** aos ativos oriundos do banco de dados Supabase (`painelvm_candles_1m` em `fetchCandlesSupabase`, `postgres_changes` de `painelvm_candles_1m` e evento WebSocket `type: 'candle'` quando `isStandardSupabasePanel(targetPanel)` for verdadeiro).
+   - A conversão de *Close Time* (`dt + 60s`) para *Open Time* (`dt - 60000ms`) e a ancoragem do spread ao preço do painel aplicam-se **exclusivamente** aos ativos oriundos do banco de dados Supabase (`painelvm_candles_1m` em `fetchCandlesSupabase`, `postgres_changes` de `painelvm_candles_1m` e eventos WebSocket `type: 'candle'` / `type: 'market_data'` quando `isStandardSupabasePanel(targetPanel)` for verdadeiro).
    - Ativos de outras origens diretas (Binance, MT4/MT5 direto, cTrader) já operam nativamente em *Open Time* e NUNCA devem sofrer recuo de `-60s`.
 2. **Alinhamento Temporal Idêntico ao MetaTrader 4 (Sem Engolir a Vela Fechada Anterior):**
-   - Como o coletor `GammaPainelHttpCandles` grava todas as velas M1 com `endDt = dt + 60s`, subtrair `60000ms` de **todas** as velas de origem Supabase garante que às `21:53:30` a vela corrente seja `21:53` e a vela fechada imediatamente anterior seja `21:52`, sem jamais sobrescrever ou perder a última vela fechada.
+   - Como o coletor `GammaPainelHttpCandles` grava todas as velas M1 com `endDt = dt + 60s` em horário de São Paulo (`-03:00` sem sufixo de fuso), `parseInputToDate` deve interpretar strings ISO sem fuso em `America/Sao_Paulo` (`-03:00`) e subtrair `60000ms` de **todas** as velas de origem Supabase. Isso garante que às `21:53:30` a vela corrente seja `21:53` e a vela fechada imediatamente anterior seja `21:52`, sem jamais sobrescrever ou perder a última vela fechada.
    - É proibido aplicar recuo de `-60s` apenas na última vela de forma isolada.
-3. **Plotagem Fiel de `BID`, `ASK` e `SPREAD` (Proibição de Fallback `0.25`):**
-   - O indicador `BID`/`ASK`, o badge de `Spread` e a `TradeBoleta` devem plotar **somente** valores provenientes do banco de dados, WebSocket ou API (`src/utils/realQuote.ts`).
-   - Em caso de falha ou ausência de leitura de `ask`, deve permanecer **sempre a última diferença real conhecida** (`getLastRealSpread`). É terminantemente proibido atribuir `0.25` (`tickSize`) como spread padrão.
-   - Nos ativos `AxionDB`, a diferença real `(ask - bid)` da fonte é aplicada sobre o preço próprio do painel (`bid = panelPrice`, `ask = panelPrice + realSpread`), mantendo a linha `BID` alinhada ao fechamento do candle e a linha `ASK` na distância real do spread.
+3. **Plotagem Fiel e Unificada de `BID`, `ASK` e `SPREAD` (`src/utils/realQuote.ts`):**
+   - O indicador `Price Line BID ASK` (tanto nas etiquetas de eixo quanto nas linhas parciais em canvas 2D e linhas completas), o badge de `Spread` e a `TradeBoleta` devem plotar **somente** valores provenientes do banco de dados, WebSocket ou API (`resolveDisplayQuote`).
+   - Em caso de falha ou ausência de leitura de `ask`, deve permanecer **sempre a última diferença real conhecida** (`getLastRealSpread` / `rememberRealSpread`). É terminantemente proibido atribuir `0.25` (`tickSize`) como spread padrão.
+   - Nos ativos `AxionDB`, a diferença real `(ask - bid)` da fonte é aplicada sobre o preço próprio do painel (`bid = panelPrice`, `ask = panelPrice + realSpread`), mantendo a linha `BID` alinhada ao fechamento do candle do ativo e a linha `ASK` na distância exata do spread real.
+   - Toda atualização de cotação/tick deve validar a coerência de escala (diferença `<= 5%` em relação ao fechamento do último candle do gráfico) e acionar o redesenho imediato do canvas sobreposto (`updateLevelLabelsRef.current?.()`) para que as linhas parciais `BID`/`ASK` sejam sempre visíveis na escala do ativo.
+4. **Isolamento Estrito de Identificação de Ativos (Prevenção de Colisão de Substrings):**
+   - Em todas as funções de roteamento e compatibilidade de ativos (`isSameAsset`, `extractRoot`, `isTickMatchingPanel`, `isMarketDataCompatibleWithPanel`, `resolvePanelTickSize`, `resolvePanelPointValue`), é proibido executar `.includes()` bruto antes da normalização de raiz (`extractRoot`).
+   - A verificação do **Dow Jones** (`DOW`, `YM`, `MYM`, `US30`, `USAIND`, `DJ30`, `painel_us30_web`) DEVE obrigatoriamente preceder a verificação do **S&P 500** (`ES`, `MES`, `SP500`, `USA500`, `painel_sp500_web`), pois a string `"DOWJONES"` termina com as letras `"ES"`. Isso impede que pacotes ou cotações do `SP500` (`~7449.00`) contaminem o painel ou desloquem as linhas `BID`/`ASK` do `DOWJONES` (`~51600`).
+
 
 
 

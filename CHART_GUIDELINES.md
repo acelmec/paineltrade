@@ -105,9 +105,14 @@ Esta regra aplica-se **exclusivamente** aos ativos no terminal Axion cuja origem
    - **Proibição Absoluta:** NUNCA subtrair `-60s` apenas na última vela sem aplicar a mesma conversão às velas fechadas de `painelvm_candles_1m`, pois isso faz a vela corrente colidir e sobrescrever a última vela fechada. E NUNCA aplicar esse recuo de `-60s` a ativos de outras origens (Binance, MT4/MT5 direto, cTrader) que já operam nativamente em *Open Time*.
 
 2. **Plotagem Estrita de `BID`, `ASK` e `SPREAD` (`realQuote.ts`):**
-   - O indicador `BID` / `ASK` no gráfico, o badge de `Spread` e o painel da `TradeBoleta` devem plotar **somente** preços e diferenças provenientes de banco de dados, WebSocket ou API (`resolveDisplayQuote`).
+   - O indicador `Price Line BID ASK` no gráfico (etiquetas no eixo de preço, linhas parciais em canvas 2D e linhas estendidas), o badge de `Spread` e o painel da `TradeBoleta` devem plotar **somente** preços e diferenças provenientes de banco de dados, WebSocket ou API (`resolveDisplayQuote`).
    - Nos ativos oriundos do Supabase (`AxionDB`), onde o stream `market_data` (`painel_*_web`) traz o preço ajustado do painel (`InpPriceOffset`), o `BID` é ancorado ao preço próprio do painel (`bid = panelPrice`) e o `ASK` soma a diferença real `(ask - bid)` obtida da fonte MetaTrader (`ask = panelPrice + realSpread`), evitando que cotações brutas sem offset desloquem as linhas em relação ao candle.
+   - **Guarda de Coerência de Escala e Redesenho de Canvas 2D:** Em `CandleChart.tsx`, o preço usado para posicionar `BID`, `ASK` e `LAST` deve ser validado contra o fechamento do último candle do gráfico (`|price - lastCandle.close| / lastCandle.close <= 0.05`, caindo para `lastCandle.close` caso haja qualquer divergência) e deve disparar `updateLevelLabelsRef.current?.()` a cada atualização para redesenhar imediatamente as linhas parciais no canvas 2D.
    - **Proibição Absoluta de Fallback para `0.25` (`tickSize`):** É terminantemente proibido atribuir o tick mínimo do ativo (`0.25`) como spread ou diferença entre Bid e Ask quando ocorrer falha ou ausência momentânea de leitura do `ask`. Deve permanecer **sempre a última diferença real conhecida** (`getLastRealSpread` / `rememberRealSpread`). Se nunca houve leitura real de spread para o ativo, o Ask e o Spread não são plotados.
+
+3. **Isolamento Estrito de Identificação de Ativos (Prevenção de Colisão `"DOWJONES"` vs `"ES"`):**
+   - Em todas as funções de comparação e roteamento (`isSameAsset`, `extractRoot`, `isTickMatchingPanel`, `isMarketDataCompatibleWithPanel`, `resolvePanelTickSize`, `resolvePanelPointValue`), é proibido usar `.includes()` bruto antes de `extractRoot`.
+   - As regras do **Dow Jones** (`DOW`, `YM`, `MYM`, `US30`, `USAIND`, `DJ30`, `painel_us30_web`) DEVEM sempre ser avaliadas **antes** das regras do **S&P 500** (`ES`, `MES`, `SP500`, `USA500`, `painel_sp500_web`), pois `"DOWJONES"` termina com `"ES"`. Isso impede que ticks ou cotações do `SP500` (`~7449.00`) entrem no painel do `DOWJONES` (`~51600`) ou desloquem suas linhas `BID`/`ASK` para fora da escala.
 
 ---
 
