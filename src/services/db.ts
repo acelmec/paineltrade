@@ -4057,10 +4057,21 @@ export async function fetchCandlesSupabase(
         if (Array.isArray(mCandles) && mCandles.length > 0) {
           const sanitized = cleanAndSanitizeCandles(mCandles);
           if (sanitized.length > 0) {
-            onProgress?.(100, sanitized.length, limit);
-            saveLocalCandles(queryId, sanitized);
-            if (targetPanelObj?.id && targetPanelObj.id !== queryId) saveLocalCandles(targetPanelObj.id, sanitized);
-            return sanitized;
+            const lastCandle = sanitized[sanitized.length - 1];
+            const lastCandleTs = new Date(lastCandle.timestamp).getTime();
+            const now = Date.now();
+            const isStale = (now - lastCandleTs > 25 * 60 * 1000); // Mais de 25 min atrás
+
+            // Se for um índice com feed 24h no Supabase e os dados de /market_candles vierem estagnados ou insuficientes,
+            // rejeita e deixa cair para a leitura direta do Supabase (painel_sp500_web, painel_principal_web)
+            if (!isStale || !isCoveredByRealtimeSupabaseCandles) {
+              onProgress?.(100, sanitized.length, limit);
+              saveLocalCandles(queryId, sanitized);
+              if (targetPanelObj?.id && targetPanelObj.id !== queryId) saveLocalCandles(targetPanelObj.id, sanitized);
+              return sanitized;
+            } else {
+              console.warn(`[DB] Feed /market_candles retornou dados estagnados para ${baseSym} (${new Date(lastCandleTs).toLocaleTimeString()}), caindo para Supabase.`);
+            }
           }
         }
       }

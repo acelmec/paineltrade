@@ -145,15 +145,8 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
     const firstIdx = raw.findIndex((c: any) => new Date(c.timestamp).getTime() >= cutoffMs);
     const dayFiltered = firstIdx <= 0 ? raw : raw.slice(firstIdx);
 
-    // Otimização de Performance Gráfica:
-    // No modo multi-chart (grid com múltiplos gráficos), cada slot exibe visivelmente de 80 a 180 barras.
-    // Plotar até 800 barras mais recentes cobre de 10 a 14 horas de pregão contínuo com folga,
-    // garantindo renderização ultra-leve e 60 FPS sem engasgos de GPU/CPU.
-    if (isMultiChart && dayFiltered.length > 800) {
-      return dayFiltered.slice(-800);
-    }
     return dayFiltered;
-  }, [snapshot.candles, slotHistoryDays, isMultiChart]);
+  }, [snapshot.candles, slotHistoryDays]);
 
   const visibleIndicators = useMemo(
     () => (slot.indicators || []).filter(i => i.visible),

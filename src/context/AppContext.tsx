@@ -15533,13 +15533,14 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
           if (isSystemAdmin) {
             addLog('SISTEMA', `Conexão WebSocket Hub ativa em ${wsUrl}`, 'sistema');
           }
-          // Sincronização pós-reconexão: força checagem de histórico para preencher lacunas/gaps de quando a máquina esteve offline
+          // Sincronização pós-reconexão: só carrega se o painel ativo ainda não tiver candles
           const targetPanel = activePanelRef.current || activePanel;
-          if (targetPanel && panelDataCache.current[targetPanel.id]) {
-            panelDataCache.current[targetPanel.id].lastCandlesFetch = 0;
-            panelDataCache.current[targetPanel.id].isFetchingCandles = false;
+          if (targetPanel) {
+            const currentCache = panelDataCache.current[targetPanel.id];
+            if (!currentCache || !currentCache.candles || currentCache.candles.length < 50) {
+              ensurePanelDataLoaded(targetPanel.id);
+            }
           }
-          refreshMarketData();
         };
 
         ws.onmessage = (event) => {
@@ -15886,7 +15887,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       }
       setWsHubConnected(false);
     };
-  }, [isAuthenticated, user, activePanel?.id, settings?.transmission_mode, settings?.websocket_hub_url]);
+  }, [isAuthenticated, user, settings?.transmission_mode, settings?.websocket_hub_url]);
 
   // Sincronização periódica em segundo plano para manter sessões em sincronia (Relatórios e IA Ativa)
   useEffect(() => {
