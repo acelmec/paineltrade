@@ -9965,14 +9965,16 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
               const bVal = Number(marketData?.bid || 0);
               const aVal = Number(marketData?.ask || 0);
               const directSpread = Number(marketData?.spread || 0);
-              const sprRaw = (aVal > 0 && bVal > 0 && aVal >= bVal) ? (aVal - bVal) : (directSpread > 0 ? directSpread : 0);
+              const sprRaw = (aVal > 0 && bVal > 0 && aVal > bVal) ? (aVal - bVal) : (directSpread > 0 ? directSpread : 0);
               const chartTick = resolvePanelTickSize(activePanel, settings);
-              // Preserva sempre o último spread autêntico conhecido; se a leitura momentânea vier com 1 tick default (0.25), não pisca
+              // Só armazena spread autêntico (maior que o tick mínimo) — NUNCA deixa o tick mínimo piscar no badge
               if (sprRaw > chartTick) {
                 lastValidSpreadRef.current = sprRaw;
               }
-              const spr = (sprRaw > 0 && (sprRaw > chartTick || !lastValidSpreadRef.current)) ? sprRaw : (lastValidSpreadRef.current || sprRaw);
-              const sprFormatted = spr > 0 ? (spr < 0.1 ? spr.toFixed(4) : spr.toFixed(2)) : null;
+              // Exibe: o spread real atual (se > tick) ou o último spread real memorizado; oculta o badge se só há tick mínimo
+              const spr = sprRaw > chartTick ? sprRaw : (lastValidSpreadRef.current && lastValidSpreadRef.current > chartTick ? lastValidSpreadRef.current : 0);
+              // Nunca exibe 0.25 como spread — oculta o badge se spr=0 (sem spread real ainda)
+              const sprFormatted = spr > chartTick ? (spr < 0.1 ? spr.toFixed(4) : spr.toFixed(2)) : null;
               const displayBid = bVal > 0 ? bVal : (marketData?.price ? Number(marketData.price) : 0);
               const displayAsk = aVal > 0 ? aVal : (displayBid > 0 && spr > 0 ? Number((displayBid + spr).toFixed(2)) : 0);
 

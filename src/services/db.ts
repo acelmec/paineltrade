@@ -196,19 +196,31 @@ export function normalizeMarketDataSpread(mData: MarketData | null, panel?: any,
   }
 
   // Se não há Bid/Ask distintos nesta leitura, SEMPRE preserva o último spread autêntico conhecido!
-  // NUNCA regride para o tick sintético (0.25) se já temos um spread real (ex: 4.50)
-  const safeLast = (lastKnownSpread !== undefined && lastKnownSpread !== null && lastKnownSpread > 0) ? Number(lastKnownSpread) : 0;
-  const spreadVal = (mData.spread !== undefined && mData.spread !== null && Number(mData.spread) > 0)
+  // NUNCA regride para o tick sintético (0.25) se já temos um spread real > tick (ex: 4.50 ou 5.00)
+  const safeLast = (lastKnownSpread !== undefined && lastKnownSpread !== null && lastKnownSpread > tick) ? Number(lastKnownSpread) : 0;
+  const existingSpread = (mData.spread !== undefined && mData.spread !== null && Number(mData.spread) > tick)
     ? Number(mData.spread)
-    : (safeLast > 0 ? safeLast : tick);
+    : 0;
+  // Prioridade: spread autêntico do mData > lastKnownSpread > undefined (não exibe badge)
+  // tick mínimo (0.25) NUNCA é usado como spread de exibição
+  const spreadVal = existingSpread > 0
+    ? existingSpread
+    : (safeLast > 0 ? safeLast : undefined);
 
-  mData.spread = spreadVal;
-  if ((mData as any).imbalance_dir === 'COMPRADOR') {
-    mData.ask = pNum;
-    mData.bid = Number((pNum - spreadVal).toFixed(6));
+  if (spreadVal !== undefined) {
+    mData.spread = spreadVal;
+    if ((mData as any).imbalance_dir === 'COMPRADOR') {
+      mData.ask = pNum;
+      mData.bid = Number((pNum - spreadVal).toFixed(6));
+    } else {
+      mData.bid = pNum;
+      mData.ask = Number((pNum + spreadVal).toFixed(6));
+    }
   } else {
+    // Sem spread real conhecido — mantém Bid=Ask=price para não sugerir spread falso
+    mData.spread = undefined;
     mData.bid = pNum;
-    mData.ask = Number((pNum + spreadVal).toFixed(6));
+    mData.ask = pNum;
   }
   return mData;
 }

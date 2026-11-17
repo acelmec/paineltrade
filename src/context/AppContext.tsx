@@ -9178,12 +9178,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           isSyntheticFallback = true;
           const fallbackTick = resolvePanelTickSize(targetPanel, targetSettings);
           const rememberedSpread = lastKnownPanelSpreadsRef.current[targetPanel.id] || cache.marketData?.spread;
-          const spread = (rememberedSpread && Number(rememberedSpread) > 0) ? Number(rememberedSpread) : fallbackTick;
+          // Usa spread real memorizado; se não há nenhum, deixa undefined (badge oculto) em vez de mostrar tick mínimo
+          const spread = (rememberedSpread && Number(rememberedSpread) > fallbackTick) ? Number(rememberedSpread) : undefined;
           mData = {
             symbol: targetPanel.symbol || targetPanel.name || targetPanel.instance_id || 'ASSET',
             price: String(lastCPrice),
             bid: lastCPrice,
-            ask: Number((lastCPrice + spread).toFixed(6)),
+            ask: spread ? Number((lastCPrice + spread).toFixed(6)) : lastCPrice,
             spread,
             zScore: cache.marketData?.zScore || 0,
             atrRatio: cache.marketData?.atrRatio || 1,
@@ -9208,7 +9209,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (mData) {
         const prevSpread = lastKnownPanelSpreadsRef.current[targetPanel.id] || cache.marketData?.spread;
         mData = normalizeMarketDataSpread(mData, targetPanel, targetSettings, prevSpread);
-        if (mData && mData.spread && Number(mData.spread) > 0) {
+        // Só persiste o spread se ele é genuinamente maior que o tick mínimo (spread real, não tick sintético)
+        const fallbackTick = resolvePanelTickSize(targetPanel, targetSettings);
+        if (mData && mData.spread && Number(mData.spread) > fallbackTick) {
           lastKnownPanelSpreadsRef.current[targetPanel.id] = Number(mData.spread);
         }
         cache.marketData = mData;
@@ -16066,12 +16069,18 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         const rawAsk = (detail.ask && Number(detail.ask) > 0) ? Number(detail.ask) : 0;
         const hasStreamSpread = rawBid > 0 && rawAsk > 0 && rawAsk > rawBid;
         const prevKnownSpread = lastKnownPanelSpreadsRef.current[matchedPanel.id] || cache.marketData?.spread;
-        const effectiveSpread = hasStreamSpread ? Number((rawAsk - rawBid).toFixed(6)) : ((prevKnownSpread && Number(prevKnownSpread) > 0) ? Number(prevKnownSpread) : panelTick);
+        // effectiveSpread: se há Bid+Ask autênticos, usa-os; caso contrário preserva o último spread real (NUNCA sobrescreve com tick mínimo)
+        const realSpreadFromStream = hasStreamSpread ? Number((rawAsk - rawBid).toFixed(6)) : 0;
+        const effectiveSpread = hasStreamSpread
+          ? realSpreadFromStream
+          : ((prevKnownSpread && Number(prevKnownSpread) > panelTick) ? Number(prevKnownSpread) : panelTick);
         const numBid = hasStreamSpread ? rawBid : (numPrice > 0 ? numPrice : 0);
         const numAsk = hasStreamSpread ? rawAsk : (numPrice > 0 ? Number((numPrice + effectiveSpread).toFixed(6)) : 0);
         const numSpread = effectiveSpread;
-        if (effectiveSpread > 0) {
-          lastKnownPanelSpreadsRef.current[matchedPanel.id] = effectiveSpread;
+        // CRÍTICO: só salva em lastKnownPanelSpreadsRef quando o spread veio de Bid+Ask autênticos e é maior que o tick mínimo
+        // Nunca deixa o tick sintético (0.25) sobrescrever um spread real já memorizado
+        if (hasStreamSpread && realSpreadFromStream > panelTick) {
+          lastKnownPanelSpreadsRef.current[matchedPanel.id] = realSpreadFromStream;
         }
         const prevM = cache.marketData;
         const bidAskChanged = !prevM || prevM.bid !== numBid || prevM.ask !== numAsk || Number(prevM.price) !== numPrice;
