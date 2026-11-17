@@ -16068,17 +16068,27 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         const rawBid = (detail.bid && Number(detail.bid) > 0) ? Number(detail.bid) : 0;
         const rawAsk = (detail.ask && Number(detail.ask) > 0) ? Number(detail.ask) : 0;
         const hasStreamSpread = rawBid > 0 && rawAsk > 0 && rawAsk > rawBid;
-        const prevKnownSpread = lastKnownPanelSpreadsRef.current[matchedPanel.id] || cache.marketData?.spread;
-        // effectiveSpread: se há Bid+Ask autênticos, usa-os; caso contrário preserva o último spread real (NUNCA sobrescreve com tick mínimo)
+        // Spread real somente quando Bid+Ask autênticos e distintos chegam no tick
         const realSpreadFromStream = hasStreamSpread ? Number((rawAsk - rawBid).toFixed(6)) : 0;
+        // Preserva spread real anterior — NUNCA usa panelTick (0.25) como spread de exibição
+        const prevKnownReal = lastKnownPanelSpreadsRef.current[matchedPanel.id];
+        const prevCacheSpread = cache.marketData?.spread !== undefined && Number(cache.marketData.spread) > panelTick
+          ? Number(cache.marketData.spread)
+          : undefined;
+        // Prioridade: spread real do tick atual > spread real memorizado > spread real do cache > undefined (oculto)
         const effectiveSpread = hasStreamSpread
           ? realSpreadFromStream
-          : ((prevKnownSpread && Number(prevKnownSpread) > panelTick) ? Number(prevKnownSpread) : panelTick);
+          : (prevKnownReal && prevKnownReal > panelTick
+            ? prevKnownReal
+            : (prevCacheSpread ?? undefined));
         const numBid = hasStreamSpread ? rawBid : (numPrice > 0 ? numPrice : 0);
-        const numAsk = hasStreamSpread ? rawAsk : (numPrice > 0 ? Number((numPrice + effectiveSpread).toFixed(6)) : 0);
-        const numSpread = effectiveSpread;
-        // CRÍTICO: só salva em lastKnownPanelSpreadsRef quando o spread veio de Bid+Ask autênticos e é maior que o tick mínimo
-        // Nunca deixa o tick sintético (0.25) sobrescrever um spread real já memorizado
+        const numAsk = hasStreamSpread
+          ? rawAsk
+          : (numPrice > 0 && effectiveSpread && effectiveSpread > panelTick
+            ? Number((numPrice + effectiveSpread).toFixed(6))
+            : numPrice);
+        const numSpread = effectiveSpread; // pode ser undefined — badge ficará oculto
+        // Só persiste spread real autêntico (> panelTick); NUNCA grava 0.25 no ref
         if (hasStreamSpread && realSpreadFromStream > panelTick) {
           lastKnownPanelSpreadsRef.current[matchedPanel.id] = realSpreadFromStream;
         }
