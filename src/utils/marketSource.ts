@@ -430,6 +430,23 @@ export function isTickMatchingPanel(detail: any, panel: any, activeAccount?: any
     if (pInst.toLowerCase() === tickSym.toLowerCase() || pInst.toLowerCase() === `mt4_${tickSym.toLowerCase()}`) return true;
     const cleanTick = tickSym.replace(/[^A-Z0-9]/g, '');
     const cleanBase = basePName.replace(/[^A-Z0-9]/g, '');
+    const normalizeMtSymbol = (s: string) => s
+      .replace(/^USATEC/i, 'USTEC')
+      .replace(/^NAS100/i, 'USTEC')
+      .replace(/^US100/i, 'USTEC')
+      .replace(/^USA500/i, 'US500')
+      .replace(/^SPX500/i, 'US500')
+      .replace(/^USAIND/i, 'US30')
+      .replace(/^DJ30/i, 'US30')
+      .replace(/^USARUS/i, 'US2000')
+      .replace(/^GOLD$/i, 'XAUUSD')
+      .replace(/^LCRUDE/i, 'USOIL')
+      .replace(/^WTI/i, 'USOIL');
+    const normTick = normalizeMtSymbol(cleanTick);
+    const normBase = normalizeMtSymbol(cleanBase);
+    if (normTick.length > 0 && normTick === normBase) return true;
+    const tickWithoutMonth = normTick.replace(/(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}$/i, '');
+    if (tickWithoutMonth === normBase && !['USTEC', 'US500'].includes(normBase)) return true;
     if (cleanTick.length > 0 && cleanBase.length > 0 && (cleanTick.startsWith(cleanBase) || cleanBase.startsWith(cleanTick))) return true;
     return false;
   }

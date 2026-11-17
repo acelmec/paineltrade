@@ -1087,6 +1087,80 @@ if ((req.method === 'GET' || req.method === 'POST') && pathname === '/commands')
     const rawSym = String(url.searchParams.get('symbol') || 'EURUSD').toUpperCase().split(/[-_(\s]/)[0].trim().replace(/[^A-Z0-9]/g, '');
     const limit = Math.min(2000, Math.max(50, Number(url.searchParams.get('limit') || 1000)));
 
+    // Para índices, ouro e petróleo alimentados em tempo real no Supabase (0 delay),
+    // consulta diretamente painelvm_candles_1m em vez do Yahoo Finance (que tem 10 min de delay em futuros CME)
+    const supabaseInstanceMap = {
+      'USTEC': 'painel_principal_web',
+      'USATEC': 'painel_principal_web',
+      'NAS100': 'painel_principal_web',
+      'US100': 'painel_principal_web',
+      'NQ': 'painel_principal_web',
+      'MNQ': 'painel_principal_web',
+      'US500': 'painel_sp500_web',
+      'USA500': 'painel_sp500_web',
+      'SP500': 'painel_sp500_web',
+      'SPX500': 'painel_sp500_web',
+      'ES': 'painel_sp500_web',
+      'MES': 'painel_sp500_web',
+      'US30': 'painel_us30_web',
+      'USAIND': 'painel_us30_web',
+      'DJ30': 'painel_us30_web',
+      'YM': 'painel_us30_web',
+      'MYM': 'painel_us30_web',
+      'US2000': 'painel_m2k_web',
+      'USARUS': 'painel_m2k_web',
+      'RTY': 'painel_m2k_web',
+      'M2K': 'painel_m2k_web',
+      'XAUUSD': 'painel_gold_web',
+      'GOLD': 'painel_gold_web',
+      'GC': 'painel_gold_web',
+      'MGC': 'painel_gold_web',
+      'USOIL': 'painel_cl_web',
+      'WTI': 'painel_cl_web',
+      'LCRUDE': 'painel_cl_web',
+      'CL': 'painel_cl_web',
+      'MCL': 'painel_cl_web'
+    };
+
+    const sbInst = supabaseInstanceMap[rawSym];
+    if (sbInst && supabase) {
+      supabase
+        .from('painelvm_candles_1m')
+        .select('timestamp, open, high, low, close, volume')
+        .eq('instance_id', sbInst)
+        .order('timestamp', { ascending: false })
+        .limit(Math.min(1000, limit))
+        .then(({ data, error }) => {
+          if (!error && Array.isArray(data) && data.length > 0) {
+            const mapped = data
+              .map(c => {
+                const tMs = new Date(c.timestamp).getTime();
+                if (isNaN(tMs)) return null;
+                return {
+                  timestamp: new Date(tMs - 60000).toISOString(),
+                  open: Number(c.open),
+                  high: Number(c.high),
+                  low: Number(c.low),
+                  close: Number(c.close),
+                  volume: Number(c.volume || 1)
+                };
+              })
+              .filter(Boolean)
+              .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(mapped));
+          } else {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify([]));
+          }
+        })
+        .catch(() => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify([]));
+        });
+      return;
+    }
+
     const yahooMap = {
       'EURUSD': 'EURUSD=X',
       'GBPUSD': 'GBPUSD=X',

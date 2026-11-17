@@ -8585,13 +8585,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
                 try {
                   const targetSymbol = targetPanel.gamma_symbol || targetSettings?.gamma_symbol || (() => {
-                    const norm = (targetPanel.name || targetPanel.instance_id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-                    if (norm.includes('dow') || norm.includes('ym') || norm.includes('mym') || norm.includes('us30')) return 'YM';
-                    if (norm.includes('sp500') || norm.includes('sp') || norm.includes('es')) return 'ES';
-                    if (norm.includes('nasdaq') || norm.includes('nq')) return 'NQ';
-                    if (norm.includes('russel') || norm.includes('m2k') || norm.includes('rty')) return 'RTY';
-                    if (norm.includes('gold') || norm.includes('ouro') || norm.includes('gc')) return 'GC';
-                    if (norm.includes('oil') || norm.includes('petr') || norm.includes('cl')) return 'CL';
+                    const norm = (targetPanel.name || targetPanel.instance_id || '').split(' - ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+                    if (norm.includes('dow') || norm.includes('ym') || norm.includes('mym') || norm.includes('us30') || norm.includes('usaind')) return 'YM';
+                    if (norm.includes('nasdaq') || norm.includes('nq') || norm.includes('ustec') || norm.includes('usatec')) return 'NQ';
+                    if (norm.includes('sp500') || norm.includes('sp') || norm.includes('es') || norm.includes('us500') || norm.includes('usa500')) return 'ES';
+                    if (norm.includes('russel') || norm.includes('m2k') || norm.includes('rty') || norm.includes('usarus')) return 'RTY';
+                    if (norm.includes('gold') || norm.includes('ouro') || norm.includes('gc') || norm.includes('xau')) return 'GC';
+                    if (norm.includes('oil') || norm.includes('petr') || norm.includes('cl') || norm.includes('lcrude')) return 'CL';
                     if (norm.includes('dxy') || norm.includes('usdindex')) return 'DXY';
                     return targetPanel.name || 'NQ';
                   })();
@@ -8947,8 +8947,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    */
   const isMarketDataCompatibleWithPanel = (panelNameOrId: string, marketSymbol?: string): boolean => {
     if (!panelNameOrId || !marketSymbol) return false;
-    const p = String(panelNameOrId).toUpperCase();
-    const m = String(marketSymbol).toUpperCase();
+    // Remove sufixo de corretora (ex: " - ActivTrades", pois "ACTIVTRADES" termina com "ES"!) antes de testar tokens
+    const p = String(panelNameOrId).split(' - ')[0].trim().toUpperCase();
+    const m = String(marketSymbol).split(' - ')[0].trim().toUpperCase();
 
     // 1. Criptoativos NUNCA são compatíveis com Índices, Ouro ou Petróleo
     const isCryptoP = /BTC|ETH|SOL|BNB|XRP|DOGE|CRYPTO/i.test(p);
@@ -8957,13 +8958,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return isSameAsset(p, m);
     }
 
-    // 2. Validação estrita por ativos conhecidos (isDow avaliado antes de isSP pois "DOWJONES" termina com "ES")
-    const isDow = p.includes('DOW') || p.includes('MYM') || p.includes('YM') || p.includes('US30') || p.includes('USAIND');
-    const isSP = !isDow && (p.includes('SP500') || p.includes('MES') || p.includes('S&P') || p.includes('ES') || p.includes('USA500'));
-    const isNQ = p.includes('NASDAQ') || p.includes('MNQ') || p.includes('NQ') || p.includes('PRINCIPAL') || p.includes('USATEC');
+    // 2. Validação estrita por ativos conhecidos (isDow e isNQ avaliados antes de isSP pois "DOWJONES" termina com "ES")
+    const isDow = p.includes('DOW') || p.includes('MYM') || p.includes('YM') || p.includes('US30') || p.includes('USAIND') || p.includes('DJ30');
+    const isNQ = p.includes('NASDAQ') || p.includes('MNQ') || p.includes('NQ') || p.includes('PRINCIPAL') || p.includes('USATEC') || p.includes('USTEC') || p.includes('NAS100') || p.includes('US100');
+    const isSP = !isDow && !isNQ && (p.includes('SP500') || p.includes('MES') || p.includes('S&P') || p.includes('ES') || p.includes('USA500') || p.includes('US500') || p.includes('SPX'));
     const isGold = p.includes('GOLD') || p.includes('MGC') || p.includes('GC') || p.includes('OURO') || p.includes('XAU');
-    const isOil = p.includes('OIL') || p.includes('PETROLEO') || p.includes('PETRÓLEO') || p.includes('MCL') || p.includes('CL') || p.includes('CRUDE');
-    const isRussel = p.includes('RUSSEL') || p.includes('M2K') || p.includes('RTY') || p.includes('USARUS');
+    const isOil = p.includes('OIL') || p.includes('PETROLEO') || p.includes('PETRÓLEO') || p.includes('MCL') || p.includes('CL') || p.includes('CRUDE') || p.includes('WTI');
+    const isRussel = p.includes('RUSSEL') || p.includes('M2K') || p.includes('RTY') || p.includes('USARUS') || p.includes('US2000');
 
     if (isDow && !isSameAsset('YM', m)) return false;
     if (isSP && !isSameAsset('ES', m)) return false;
@@ -8977,7 +8978,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   /**
    * 📡 Localizador inteligente de cotação remota do MetaTrader para o ativo do painel
-   * Mapeia automaticamente símbolos padrão para os contratos e CFDs da corretora (ex: NASDAQ -> USATECDEC26)
+   * Mapeia automaticamente símbolos padrão para os contratos e CFDs da corretora (ex: USTEC -> USATEC, US500 -> USA500, NASDAQ -> USATECDEC26)
    */
   const findMtQuoteForAsset = (panel: any): any => {
     const quotes = remoteMtQuotesRef.current;
@@ -8993,11 +8994,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (pInst && quotes[pInst]) return quotes[pInst];
     if (basePName && quotes[basePName]) return quotes[basePName];
 
-    // 2. Busca canônica via isSameAsset
+    // 1.5 Busca prioritária por aliases diretos de CFD à vista (Spot) no MetaTrader
+    const spotAliases: Record<string, string[]> = {
+      'USTEC': ['USATEC', 'USTEC', 'NAS100', 'US100'],
+      'USATEC': ['USATEC', 'USTEC', 'NAS100', 'US100'],
+      'NAS100': ['NAS100', 'USATEC', 'USTEC', 'US100'],
+      'US500': ['USA500', 'US500', 'SPX500'],
+      'USA500': ['USA500', 'US500', 'SPX500'],
+      'US30': ['USAIND', 'US30', 'DJ30'],
+      'USAIND': ['USAIND', 'US30', 'DJ30'],
+      'XAUUSD': ['XAUUSD', 'GOLD'],
+      'GOLD': ['GOLD', 'XAUUSD'],
+      'USOIL': ['USOIL', 'LCRUDE', 'WTI'],
+      'WTI': ['WTI', 'USOIL', 'LCRUDE']
+    };
+    const aliasCandidates = spotAliases[basePName] || spotAliases[pSym] || spotAliases[pInst];
+    if (aliasCandidates) {
+      for (const cand of aliasCandidates) {
+        if (quotes[cand]) return quotes[cand];
+      }
+    }
+
+    // 2. Busca canônica via isSameAsset (contratos futuros como USATECDEC26, USA500DEC26, USAINDDEC26, LCRUDEDEC26)
     for (const [sym, qData] of Object.entries<any>(quotes)) {
       if (!qData || typeof qData !== 'object') continue;
       const s = String(sym).toUpperCase().trim();
-      if (isSameAsset(pName, s) || isSameAsset(pSym, s) || isSameAsset(basePName, s) || isSameAsset(pInst, s)) {
+      if (isSameAsset(basePName, s) || isSameAsset(pSym, s) || isSameAsset(pInst, s)) {
         return qData;
       }
     }
@@ -9065,9 +9087,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // No modo WebSocket Streaming, os dados vêm 100% em tempo real pelo Hub
         mData = cache.marketData;
       } else if (isMtPanel) {
-        // Modo MetaTrader: Cotações vêm da Bridge /quotes do MT4/MT5 (EURUSD, BTCUSD, etc.)
+        // Modo MetaTrader: Cotações vêm da Bridge /quotes do MT4/MT5 (EURUSD, BTCUSD, USTEC/USATEC, US500/USA500, etc.)
         const baseSym = (targetPanel.symbol || targetPanel.name || '').split(/[-_(\s]/)[0].trim().toUpperCase();
-        let rawQuote = remoteMtQuotesRef.current?.[baseSym] || remoteMtQuotesRef.current?.[targetPanel.name] || remoteMtQuotesRef.current?.[targetPanel.instance_id];
+        let rawQuote = findMtQuoteForAsset(targetPanel);
         if (!rawQuote) {
           try {
             const { getLocalPlatformConnections } = await import('../services/connectionsService');
@@ -9079,7 +9101,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               const qJson = await qRes.json().catch(() => null);
               if (qJson && typeof qJson === 'object') {
                 remoteMtQuotesRef.current = qJson;
-                rawQuote = qJson[baseSym] || qJson[targetPanel.name] || qJson[targetPanel.instance_id];
+                rawQuote = findMtQuoteForAsset(targetPanel);
               }
             }
           } catch {}
@@ -10686,13 +10708,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         targetPanelForReport?.gamma_symbol ||
         targetPanelForReport?.symbol ||
         (() => {
-          const norm = (targetPanelForReport?.name || targetPanelForReport?.instance_id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-          if (norm.includes('dow') || norm.includes('ym') || norm.includes('mym') || norm.includes('us30')) return 'YM';
-          if (norm.includes('sp500') || norm.includes('sp') || norm.includes('es')) return 'ES';
-          if (norm.includes('nasdaq') || norm.includes('nq')) return 'NQ';
-          if (norm.includes('russell') || norm.includes('russel') || norm.includes('m2k') || norm.includes('rty')) return 'RTY';
-          if (norm.includes('gold') || norm.includes('ouro') || norm.includes('gc')) return 'GC';
-          if (norm.includes('oil') || norm.includes('petr') || norm.includes('cl')) return 'CL';
+          const norm = (targetPanelForReport?.name || targetPanelForReport?.instance_id || '').split(' - ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (norm.includes('dow') || norm.includes('ym') || norm.includes('mym') || norm.includes('us30') || norm.includes('usaind')) return 'YM';
+          if (norm.includes('nasdaq') || norm.includes('nq') || norm.includes('ustec') || norm.includes('usatec')) return 'NQ';
+          if (norm.includes('sp500') || norm.includes('sp') || norm.includes('es') || norm.includes('us500') || norm.includes('usa500')) return 'ES';
+          if (norm.includes('russell') || norm.includes('russel') || norm.includes('m2k') || norm.includes('rty') || norm.includes('usarus')) return 'RTY';
+          if (norm.includes('gold') || norm.includes('ouro') || norm.includes('gc') || norm.includes('xau')) return 'GC';
+          if (norm.includes('oil') || norm.includes('petr') || norm.includes('cl') || norm.includes('lcrude')) return 'CL';
           if (norm.includes('dxy') || norm.includes('usdindex')) return 'DXY';
           return targetPanelForReport?.name || 'NQ';
         })();
@@ -12315,13 +12337,13 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                     contrato: finalLots,
                     account_id: execAcc.id,
                     symbol: targetPanel.gamma_symbol || targetSettings?.gamma_symbol || (() => {
-                      const norm = (targetPanel.name || targetPanel.instance_id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-                      if (norm.includes('dow') || norm.includes('ym') || norm.includes('mym') || norm.includes('us30')) return 'YM';
-                      if (norm.includes('sp500') || norm.includes('sp') || norm.includes('es')) return 'ES';
-                      if (norm.includes('nasdaq') || norm.includes('nq')) return 'NQ';
-                      if (norm.includes('russel') || norm.includes('m2k') || norm.includes('rty')) return 'RTY';
-                      if (norm.includes('gold') || norm.includes('ouro') || norm.includes('gc')) return 'GC';
-                      if (norm.includes('oil') || norm.includes('petr') || norm.includes('cl')) return 'CL';
+                      const norm = (targetPanel.name || targetPanel.instance_id || '').split(' - ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+                      if (norm.includes('dow') || norm.includes('ym') || norm.includes('mym') || norm.includes('us30') || norm.includes('usaind')) return 'YM';
+                      if (norm.includes('nasdaq') || norm.includes('nq') || norm.includes('ustec') || norm.includes('usatec')) return 'NQ';
+                      if (norm.includes('sp500') || norm.includes('sp') || norm.includes('es') || norm.includes('us500') || norm.includes('usa500')) return 'ES';
+                      if (norm.includes('russel') || norm.includes('m2k') || norm.includes('rty') || norm.includes('usarus')) return 'RTY';
+                      if (norm.includes('gold') || norm.includes('ouro') || norm.includes('gc') || norm.includes('xau')) return 'GC';
+                      if (norm.includes('oil') || norm.includes('petr') || norm.includes('cl') || norm.includes('lcrude')) return 'CL';
                       if (norm.includes('dxy') || norm.includes('usdindex')) return 'DXY';
                       return targetPanel.name || 'NQ';
                     })()
@@ -14920,8 +14942,8 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         || (adminSet ? adminSet.instance_id_market : null) 
         || 'nt8_main';
 
-      const rawInstance = (panel.instance_id || panel.id || '').toLowerCase();
-      const rawName = (panel.name || '').toLowerCase();
+      const rawInstance = (panel.instance_id || panel.id || '').split(' - ')[0].toLowerCase();
+      const rawName = (panel.name || '').split(' - ')[0].toLowerCase();
       const rawCombined = `${rawInstance} ${rawName}`;
 
       let autoGammaSymbol = 'NQ';
@@ -14929,11 +14951,13 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         autoGammaSymbol = 'GC';
       } else if (rawCombined.includes('oil') || rawCombined.includes('petr') || rawCombined.includes('cl') || rawCombined.includes('mcl') || rawCombined.includes('wti')) {
         autoGammaSymbol = 'CL';
-      } else if (rawCombined.includes('dow') || rawCombined.includes('ym') || rawCombined.includes('mym') || rawCombined.includes('us30')) {
+      } else if (rawCombined.includes('dow') || rawCombined.includes('ym') || rawCombined.includes('mym') || rawCombined.includes('us30') || rawCombined.includes('usaind')) {
         autoGammaSymbol = 'YM';
-      } else if (rawCombined.includes('sp500') || rawCombined.includes('sp') || rawCombined.includes('es') || rawCombined.includes('mes')) {
+      } else if (rawCombined.includes('nasdaq') || rawCombined.includes('nq') || rawCombined.includes('mnq') || rawCombined.includes('ustec') || rawCombined.includes('usatec')) {
+        autoGammaSymbol = 'NQ';
+      } else if (rawCombined.includes('sp500') || rawCombined.includes('sp') || rawCombined.includes('es') || rawCombined.includes('mes') || rawCombined.includes('us500') || rawCombined.includes('usa500')) {
         autoGammaSymbol = 'ES';
-      } else if (rawCombined.includes('russel') || rawCombined.includes('russell') || rawCombined.includes('rty') || rawCombined.includes('m2k')) {
+      } else if (rawCombined.includes('russel') || rawCombined.includes('russell') || rawCombined.includes('rty') || rawCombined.includes('m2k') || rawCombined.includes('usarus')) {
         autoGammaSymbol = 'RTY';
       }
 
@@ -15607,6 +15631,8 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                     tickAsk = Number((tickBid + lastSpr).toFixed(6));
                   }
                 }
+                const instLower = String(incomingInst || '').toLowerCase();
+                const isSupabaseOrNt8Inst = instLower.startsWith('painel_') || instLower.startsWith('nt8');
                 window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
                   detail: {
                     symbol: dSym,
@@ -15615,7 +15641,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                     bid: tickBid,
                     ask: tickAsk,
                     volume: Number(d.volume || 1),
-                    source: 'nt8',
+                    source: isSupabaseOrNt8Inst ? 'nt8' : 'mt4',
                     updated_at: d.updated_at || new Date().toISOString()
                   }
                 }));

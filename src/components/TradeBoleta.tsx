@@ -619,12 +619,12 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
       if (match && match[1]) return String(match[1]).toUpperCase();
     }
     if (r?.symbol && r.symbol !== '--') {
-      const s = String(r.symbol).toUpperCase();
-      if (s.includes('NQ') || s.includes('NAS')) return 'NASDAQ';
-      if (s.includes('GC') || s.includes('GOLD') || s.includes('OURO')) return 'GOLD';
-      if (s.includes('YM') || s.includes('DOW') || s.includes('US30')) return 'DOW JONES';
-      if (s.includes('ES') || s.includes('SP')) return 'S&P 500';
-      if (s.includes('CL') || s.includes('OIL')) return 'OIL';
+      const s = String(r.symbol).split(' - ')[0].trim().toUpperCase();
+      if (s.includes('NQ') || s.includes('NAS') || s.includes('USTEC') || s.includes('USATEC')) return 'NASDAQ';
+      if (s.includes('GC') || s.includes('GOLD') || s.includes('OURO') || s.includes('XAU')) return 'GOLD';
+      if (s.includes('YM') || s.includes('DOW') || s.includes('US30') || s.includes('USAIND')) return 'DOW JONES';
+      if (s.includes('ES') || s.includes('SP') || s.includes('US500') || s.includes('USA500')) return 'S&P 500';
+      if (s.includes('CL') || s.includes('OIL') || s.includes('LCRUDE')) return 'OIL';
       return s;
     }
     return String(effectivePanel?.name || selectedAsset || 'ATIVO').toUpperCase();

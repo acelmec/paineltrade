@@ -3570,16 +3570,16 @@ export interface Candle {
 
 export const getLocalCandles = (instanceId: string): Candle[] => {
   try {
-    const raw = localStorage.getItem(`vortex_candles_cache_v2_${instanceId}`);
+    const raw = localStorage.getItem(`vortex_candles_cache_v3_${instanceId}`);
     if (!raw) return [];
     const parsed: Candle[] = JSON.parse(raw);
     if (!Array.isArray(parsed) || parsed.length === 0) return [];
 
-    // Validar se o cache local é recente (últimos 15 minutos).
-    // Se for de pregão anterior ou horas atrás, descarta para evitar vela fantasma gigante.
+    // Validar se o cache local é estritamente recente (últimos 3 minutos).
+    // Impede que velas com atraso (ex: 10 min) ou de pregão anterior congelem a ponta do gráfico.
     const last = parsed[parsed.length - 1];
     const lastMs = last?.timestamp ? new Date(last.timestamp).getTime() : 0;
-    if (!lastMs || isNaN(lastMs) || (Date.now() - lastMs > 15 * 60 * 1000) || (lastMs - Date.now() > 5 * 60 * 1000)) {
+    if (!lastMs || isNaN(lastMs) || (Date.now() - lastMs > 3 * 60 * 1000) || (lastMs - Date.now() > 5 * 60 * 1000)) {
       return [];
     }
     return parsed;
@@ -3599,7 +3599,7 @@ export const saveLocalCandles = (instanceId: string, candles: Candle[]) => {
 
     // Se a lista recebida for uma consulta leve (ex: 50 velas da ponta), mescla com o cache existente
     // para nunca encolher o histórico salvo no disco/localStorage
-    const rawExisting = localStorage.getItem(`vortex_candles_cache_v2_${instanceId}`);
+    const rawExisting = localStorage.getItem(`vortex_candles_cache_v3_${instanceId}`);
     let merged = candles;
     if (rawExisting && candles.length < 500) {
       try {
@@ -3621,7 +3621,7 @@ export const saveLocalCandles = (instanceId: string, candles: Candle[]) => {
       } catch (_) {}
     }
 
-    localStorage.setItem(`vortex_candles_cache_v2_${instanceId}`, JSON.stringify(merged.slice(-2000)));
+    localStorage.setItem(`vortex_candles_cache_v3_${instanceId}`, JSON.stringify(merged.slice(-2000)));
   } catch (e) {}
 };
 
@@ -3843,24 +3843,24 @@ export function mergeCandleSeries(baseCandles: Candle[], overlayCandles: Candle[
  * imediatamente suas tabelas no banco de dados (ex: painel_sp500_web com mais de 30.000 velas).
  */
 export function resolveSupabaseCandleInstances(queryId: string, panelName?: string, panelSettings?: any): string[] {
-  const cleanQ = (queryId || '').toLowerCase();
-  const cleanP = (panelName || '').toLowerCase();
-  const cleanScreen = (panelSettings?.instance_id_screen || '').toLowerCase();
+  const cleanQ = (queryId || '').split(' - ')[0].trim().toLowerCase();
+  const cleanP = (panelName || '').split(' - ')[0].trim().toLowerCase();
+  const cleanScreen = (panelSettings?.instance_id_screen || '').split(' - ')[0].trim().toLowerCase();
   const combined = `${cleanQ} ${cleanP} ${cleanScreen}`.toLowerCase();
 
   const candidates: string[] = [];
-  if (/(dow|mym|\bym\b|us30)/.test(combined)) {
+  if (/(dow|mym|\bym\b|us30|usaind|dj30)/.test(combined)) {
     candidates.push('painel_us30_web', 'painel_us30');
-  } else if (/(sp500|mes|s&p|\bes\b)/.test(combined)) {
-    candidates.push('painel_sp500_web', 'painel_sp500');
-  } else if (/(gold|mgc|\bgc\b|ouro)/.test(combined)) {
-    candidates.push('painel_gold_web', 'painel_gold');
-  } else if (/(oil|petroleo|petróleo|mcl|\bcl\b)/.test(combined)) {
-    candidates.push('painel_cl_web', 'painel_cl');
-  } else if (/(russel|m2k|\brty\b)/.test(combined)) {
-    candidates.push('painel_m2k_web', 'painel_m2k');
-  } else if (/(nasdaq|mnq|\bnq\b|principal)/.test(combined)) {
+  } else if (/(nasdaq|mnq|\bnq\b|principal|ustec|usatec|nas100|us100|ndx)/.test(combined)) {
     candidates.push('painel_principal_web', 'painel_principal');
+  } else if (/(sp500|mes|s&p|\bes\b|us500|usa500|spx500|spx)/.test(combined)) {
+    candidates.push('painel_sp500_web', 'painel_sp500');
+  } else if (/(gold|mgc|\bgc\b|ouro|xauusd|xau)/.test(combined)) {
+    candidates.push('painel_gold_web', 'painel_gold');
+  } else if (/(oil|petroleo|petróleo|mcl|\bcl\b|usoil|wti|lcrude|brent)/.test(combined)) {
+    candidates.push('painel_cl_web', 'painel_cl');
+  } else if (/(russel|m2k|\brty\b|us2000|usarus)/.test(combined)) {
+    candidates.push('painel_m2k_web', 'painel_m2k');
   }
 
   if (queryId) candidates.push(queryId);
@@ -3959,6 +3959,9 @@ export function isStandardSupabasePanel(panel: any, panelSettings?: any): boolea
 export function resolveYahooSymbol(symbol: string): string {
   const sym = String(symbol || '').toUpperCase().trim();
   const clean = sym.split(/[-_(\s]/)[0].trim().replace(/[^A-Z0-9]/g, '');
+  if (/^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA)USD$/i.test(clean)) {
+    return `${clean.slice(0, -3)}-USD`;
+  }
   if (/^(EURUSD|GBPUSD|USDJPY|AUDUSD|USDCAD|USDCHF|NZDUSD|EURGBP|EURJPY|GBPJPY|EURCHF|AUDNZD|EURAUD|CADJPY|CHFJPY)$/i.test(clean)) {
     return `${clean}=X`;
   }
@@ -4083,14 +4086,18 @@ export async function fetchCandlesSupabase(
   );
   const isMtFeed = isPanelMt && !isBinancePanel;
 
-  const isCryptoAsset = !isStandardSupabase && !isPanelMt && (
+  const isCryptoAsset = !isStandardSupabase && (
     isBinancePanel ||
     /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK|NEAR|SUI|PEPE)/i.test(baseSym) ||
     /USDT|BUSD|USDC/i.test(rawSym)
   );
-  const isForexOrCfd = !isStandardSupabase && !isCryptoAsset && (
+  // IMPORTANTE: Ativos cujas velas M1 em tempo real (0 delay) já existem em painelvm_candles_1m no Supabase
+  // (USTEC/USATEC/NAS100, US500/USA500, US30/USAIND, US2000/USARUS, GOLD/XAUUSD, USOIL/WTI/LCRUDE)
+  // NUNCA devem buscar Yahoo Finance (NQ=F, ES=F, YM=F, GC=F, CL=F), pois os futuros CME no Yahoo possuem atraso de 10-11 minutos!
+  const isCoveredByRealtimeSupabaseCandles = /^(NASDAQ|NQ|MNQ|USTEC|USATEC|NAS100|US100|NDX|SP500|ES|MES|US500|USA500|SPX500|SPX|DOWJONES|DOWNJONES|DOW|YM|MYM|US30|USAIND|DJ30|RUSSEL2000|RUSSEL|RUSSELL|RTY|M2K|US2000|USARUS|GOLD|OURO|GC|MGC|XAUUSD|XAU|OIL|PETROLEO|CL|MCL|USOIL|WTI|LCRUDE)$/i.test(baseSym);
+  const isForexOrCfd = !isStandardSupabase && !isCryptoAsset && !isCoveredByRealtimeSupabaseCandles && (
     isMtFeed ||
-    /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAU|XAG|USOIL|WTI|US30|US500|USTEC|GER40|DAX)/i.test(baseSym)
+    /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAG|GER40|DAX|UKOIL)/i.test(baseSym)
   );
 
   // 0.1 Para Criptoativos (BTCUSDT, ETHUSDT, SOLUSDT, BTCUSD, ETHUSD, etc.), prioridade máxima para a Binance REST API
@@ -8224,21 +8231,21 @@ export function resolvePanelPointValue(panelOrSymbol: any, fallback: number = 20
     if (panelOrSymbol.point_value && Number(panelOrSymbol.point_value) > 0) {
       return Number(panelOrSymbol.point_value);
     }
-    const name = (panelOrSymbol.name || panelOrSymbol.symbol || panelOrSymbol.instance_id || '').toUpperCase();
-    if (name.includes('MNQ') || name.includes('NQ')) return 2;
-    if (name.includes('MYM') || name.includes('YM') || name.includes('DOW') || name.includes('US30')) return 0.5;
-    if (name.includes('MES') || name.includes('ES') || name.includes('SP500')) return 5;
-    if (name.includes('M2K') || name.includes('RTY') || name.includes('RUSSEL')) return 10;
-    if (name.includes('MCL') || name.includes('CL') || name.includes('OIL') || name.includes('PETROLEO')) return 100;
-    if (name.includes('MGC') || name.includes('GC') || name.includes('GOLD')) return 10;
+    const name = (panelOrSymbol.name || panelOrSymbol.symbol || panelOrSymbol.instance_id || '').split(' - ')[0].trim().toUpperCase();
+    if (name.includes('MNQ') || name.includes('NQ') || name.includes('USTEC') || name.includes('USATEC')) return 2;
+    if (name.includes('MYM') || name.includes('YM') || name.includes('DOW') || name.includes('US30') || name.includes('USAIND')) return 0.5;
+    if (name.includes('MES') || name.includes('ES') || name.includes('SP500') || name.includes('US500') || name.includes('USA500')) return 5;
+    if (name.includes('M2K') || name.includes('RTY') || name.includes('RUSSEL') || name.includes('USARUS')) return 10;
+    if (name.includes('MCL') || name.includes('CL') || name.includes('OIL') || name.includes('PETROLEO') || name.includes('LCRUDE')) return 100;
+    if (name.includes('MGC') || name.includes('GC') || name.includes('GOLD') || name.includes('XAU')) return 10;
   }
-  const s = String(panelOrSymbol).toUpperCase();
-  if (s.includes('MNQ') || s.includes('NQ')) return 2;
-  if (s.includes('MYM') || s.includes('YM') || s.includes('DOW') || s.includes('US30')) return 0.5;
-  if (s.includes('MES') || s.includes('ES') || s.includes('SP500')) return 5;
-  if (s.includes('M2K') || s.includes('RTY') || s.includes('RUSSEL')) return 10;
-  if (s.includes('MCL') || s.includes('CL') || s.includes('OIL') || s.includes('PETROLEO')) return 100;
-  if (s.includes('MGC') || s.includes('GC') || s.includes('GOLD')) return 10;
+  const s = String(panelOrSymbol).split(' - ')[0].trim().toUpperCase();
+  if (s.includes('MNQ') || s.includes('NQ') || s.includes('USTEC') || s.includes('USATEC')) return 2;
+  if (s.includes('MYM') || s.includes('YM') || s.includes('DOW') || s.includes('US30') || s.includes('USAIND')) return 0.5;
+  if (s.includes('MES') || s.includes('ES') || s.includes('SP500') || s.includes('US500') || s.includes('USA500')) return 5;
+  if (s.includes('M2K') || s.includes('RTY') || s.includes('RUSSEL') || s.includes('USARUS')) return 10;
+  if (s.includes('MCL') || s.includes('CL') || s.includes('OIL') || s.includes('PETROLEO') || s.includes('LCRUDE')) return 100;
+  if (s.includes('MGC') || s.includes('GC') || s.includes('GOLD') || s.includes('XAU')) return 10;
   return fallback;
 }
 
