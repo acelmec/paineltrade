@@ -3570,7 +3570,7 @@ export interface Candle {
 
 export const getLocalCandles = (instanceId: string): Candle[] => {
   try {
-    const raw = localStorage.getItem(`vortex_candles_cache_v3_${instanceId}`);
+    const raw = localStorage.getItem(`vortex_candles_cache_v4_${instanceId}`);
     if (!raw) return [];
     const parsed: Candle[] = JSON.parse(raw);
     if (!Array.isArray(parsed) || parsed.length === 0) return [];
@@ -3599,7 +3599,7 @@ export const saveLocalCandles = (instanceId: string, candles: Candle[]) => {
 
     // Se a lista recebida for uma consulta leve (ex: 50 velas da ponta), mescla com o cache existente
     // para nunca encolher o histórico salvo no disco/localStorage
-    const rawExisting = localStorage.getItem(`vortex_candles_cache_v3_${instanceId}`);
+    const rawExisting = localStorage.getItem(`vortex_candles_cache_v4_${instanceId}`);
     let merged = candles;
     if (rawExisting && candles.length < 500) {
       try {
@@ -3621,7 +3621,7 @@ export const saveLocalCandles = (instanceId: string, candles: Candle[]) => {
       } catch (_) {}
     }
 
-    localStorage.setItem(`vortex_candles_cache_v3_${instanceId}`, JSON.stringify(merged.slice(-2000)));
+    localStorage.setItem(`vortex_candles_cache_v4_${instanceId}`, JSON.stringify(merged.slice(-2000)));
   } catch (e) {}
 };
 
@@ -3953,98 +3953,6 @@ export function isStandardSupabasePanel(panel: any, panelSettings?: any): boolea
   return false;
 }
 
-/**
- * Mapeia símbolos de Forex, Índices e CFDs para identificadores canônicos do Yahoo Finance.
- */
-export function resolveYahooSymbol(symbol: string): string {
-  const sym = String(symbol || '').toUpperCase().trim();
-  const clean = sym.split(/[-_(\s]/)[0].trim().replace(/[^A-Z0-9]/g, '');
-  if (/^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA)USD$/i.test(clean)) {
-    return `${clean.slice(0, -3)}-USD`;
-  }
-  if (/^(EURUSD|GBPUSD|USDJPY|AUDUSD|USDCAD|USDCHF|NZDUSD|EURGBP|EURJPY|GBPJPY|EURCHF|AUDNZD|EURAUD|CADJPY|CHFJPY)$/i.test(clean)) {
-    return `${clean}=X`;
-  }
-  if (/^(GOLD|XAUUSD|XAU)$/i.test(clean)) return 'GC=F';
-  if (/^(SILVER|XAGUSD|XAG)$/i.test(clean)) return 'SI=F';
-  if (/^(WTI|OIL|PETROLEO|LCRUDE|CL)$/i.test(clean)) return 'CL=F';
-  if (/^(NASDAQ|NQ|MNQ|NAS100|USTEC|USATEC)/i.test(clean)) return 'NQ=F';
-  if (/^(SP500|ES|MES|SPX500|US500|USA500)/i.test(clean)) return 'ES=F';
-  if (/^(DOWJONES|DOWNJONES|YM|MYM|US30|USAIND)/i.test(clean)) return 'YM=F';
-  if (/^(RUSSEL|RUSSELL|RUSSEL2000|RTY|M2K|US2000|USARUS)/i.test(clean)) return 'RTY=F';
-  if (/^(DAX|GER40|GER30)/i.test(clean)) return '^GDAXI';
-  if (clean.length === 6 && !clean.endsWith('USDT') && !clean.endsWith('BUSD')) {
-    return `${clean}=X`;
-  }
-  return `${clean}=X`;
-}
-
-/**
- * Consulta velas M1 do Yahoo Finance para Forex, Metais e CFDs contínuos.
- */
-export async function fetchYahooCandles(symbol: string, interval: string = '1m', range: string = '5d'): Promise<Candle[]> {
-  try {
-    const ySym = resolveYahooSymbol(symbol);
-    const isBrowser = typeof window !== 'undefined';
-    const baseUrl = isBrowser ? '/yahoo-api' : 'https://query1.finance.yahoo.com';
-    const url = `${baseUrl}/v8/finance/chart/${encodeURIComponent(ySym)}?interval=${interval}&range=${range}`;
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(6000),
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    const res0 = data.chart?.result?.[0];
-    if (!res0) return [];
-    const timestamps = res0.timestamp || [];
-    const quotes = res0.indicators?.quote?.[0] || {};
-    const candles: Candle[] = [];
-    let prevClose: number | null = null;
-
-    for (let i = 0; i < timestamps.length; i++) {
-      const o = quotes.open?.[i];
-      const h = quotes.high?.[i];
-      const l = quotes.low?.[i];
-      const c = quotes.close?.[i];
-      const v = quotes.volume?.[i] || 1;
-
-      if (c !== null && c !== undefined && !isNaN(c) && c > 0) {
-        let openVal = (o !== null && !isNaN(o) && o > 0) ? Number(o) : Number(c);
-        let closeVal = Number(c);
-        let highVal = (h !== null && !isNaN(h) && h > 0) ? Number(h) : Math.max(openVal, closeVal);
-        let lowVal = (l !== null && !isNaN(l) && l > 0) ? Number(l) : Math.min(openVal, closeVal);
-
-        // Se o feed de Forex for amostrado por quote (Open == High == Low == Close),
-        // reconstrói a continuidade autêntica do candle M1:
-        // Abertura herda o fechamento do minuto anterior, gerando corpo de candlestick real (verde/vermelho)
-        if (openVal === closeVal && highVal === lowVal && prevClose !== null && prevClose > 0) {
-          const relDiff = Math.abs(prevClose - closeVal) / closeVal;
-          if (relDiff <= 0.02) {
-            openVal = prevClose;
-            highVal = Math.max(openVal, closeVal);
-            lowVal = Math.min(openVal, closeVal);
-          }
-        }
-
-        prevClose = closeVal;
-
-        candles.push({
-          timestamp: new Date(timestamps[i] * 1000).toISOString(),
-          open: openVal,
-          high: Math.max(openVal, closeVal, highVal),
-          low: Math.min(openVal, closeVal, lowVal),
-          close: closeVal,
-          volume: Number(v || 1)
-        });
-      }
-    }
-    return cleanAndSanitizeCandles(candles);
-  } catch (err) {
-    console.warn('[YAHOO] Erro ao carregar velas do Yahoo Finance para', symbol, err);
-    return [];
-  }
-}
-
 export async function fetchCandlesSupabase(
   panelId: string,
   panelInstanceId?: string,
@@ -4086,27 +3994,23 @@ export async function fetchCandlesSupabase(
   );
   const isMtFeed = isPanelMt && !isBinancePanel;
 
-  const isCryptoAsset = !isStandardSupabase && (
+  const isCryptoAsset = !isStandardSupabase && !isPanelMt && (
     isBinancePanel ||
     /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK|NEAR|SUI|PEPE)/i.test(baseSym) ||
     /USDT|BUSD|USDC/i.test(rawSym)
   );
-  // IMPORTANTE: Ativos cujas velas M1 em tempo real (0 delay) já existem em painelvm_candles_1m no Supabase
-  // (USTEC/USATEC/NAS100, US500/USA500, US30/USAIND, US2000/USARUS, GOLD/XAUUSD, USOIL/WTI/LCRUDE)
-  // NUNCA devem buscar Yahoo Finance (NQ=F, ES=F, YM=F, GC=F, CL=F), pois os futuros CME no Yahoo possuem atraso de 10-11 minutos!
   const isCoveredByRealtimeSupabaseCandles = /^(NASDAQ|NQ|MNQ|USTEC|USATEC|NAS100|US100|NDX|SP500|ES|MES|US500|USA500|SPX500|SPX|DOWJONES|DOWNJONES|DOW|YM|MYM|US30|USAIND|DJ30|RUSSEL2000|RUSSEL|RUSSELL|RTY|M2K|US2000|USARUS|GOLD|OURO|GC|MGC|XAUUSD|XAU|OIL|PETROLEO|CL|MCL|USOIL|WTI|LCRUDE)$/i.test(baseSym);
   const isForexOrCfd = !isStandardSupabase && !isCryptoAsset && !isCoveredByRealtimeSupabaseCandles && (
     isMtFeed ||
-    /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAG|GER40|DAX|UKOIL)/i.test(baseSym)
+    /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAG|GER40|DAX|UKOIL|BTCUSD|ETHUSD|SOLUSD)/i.test(baseSym)
   );
 
-  // 0.1 Para Criptoativos (BTCUSDT, ETHUSDT, SOLUSDT, BTCUSD, ETHUSD, etc.), prioridade máxima para a Binance REST API
-  // A Binance fornece histórico contínuo M1 autêntico em tempo real para os gráficos globais
+  // 0.1 Para Criptoativos da Binance (BTCUSDT, ETHUSDT, SOLUSDT, etc.), prioridade para a Binance REST API
   if (isCryptoAsset) {
     try {
       let cleanSym = baseSym;
       if (cleanSym.endsWith('USD') && !cleanSym.endsWith('USDT')) {
-        cleanSym = `${cleanSym}T`; // ETHUSD -> ETHUSDT, BTCUSD -> BTCUSDT
+        cleanSym = `${cleanSym}T`;
       } else if (!cleanSym.endsWith('USDT') && !cleanSym.endsWith('BUSD') && !cleanSym.endsWith('USDC')) {
         cleanSym = `${cleanSym}USDT`;
       }
@@ -4118,7 +4022,6 @@ export async function fetchCandlesSupabase(
       if (binanceCandles && binanceCandles.length > 0) {
         onProgress?.(100, binanceCandles.length, limit);
         saveLocalCandles(queryId, binanceCandles);
-        // Inscreve WebSocket da Binance apenas se o gráfico for do ecossistema Binance, sem desinscrever concorrentemente outros gráficos abertos
         if (!isMtFeed) {
           subscribeBinanceMarketData(cleanSym, Boolean(isFutures));
         }
@@ -4129,25 +4032,15 @@ export async function fetchCandlesSupabase(
     }
   }
 
-  // 0.2 Prioridade para Histórico Contínuo de Forex, Metais e CFDs (EURUSD, GBPUSD, XAUUSD, etc.)
+  // 0.2 Histórico de Ativos Sincronizados via Conector MetaTrader (/market_candles do Gateway)
   if (isForexOrCfd && !isCryptoAsset) {
     try {
-      // 1. Consulta de alta resolução via Yahoo Finance (1m com até 7 dias reais)
-      const targetRange = limit > 4320 ? '7d' : (limit > 1440 ? '5d' : '1d');
-      const yCandles = await fetchYahooCandles(baseSym, '1m', targetRange);
-      if (yCandles && yCandles.length > 0) {
-        onProgress?.(100, yCandles.length, limit);
-        saveLocalCandles(queryId, yCandles);
-        return yCandles;
-      }
-
-      // 2. Fallback caso o Yahoo falhe: tenta endpoints locais/bridge se disponíveis (timeout estrito de 1.5s)
       const { getLocalPlatformConnections } = await import('./connectionsService');
       const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
       const activeConn = mtConns.find(c => c.status === 'online') || mtConns[0];
       const host = (activeConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
 
-      let mRes = await fetch(`${host}/market_candles?symbol=${baseSym}&limit=${limit}`, { signal: AbortSignal.timeout(1500) }).catch(() => null);
+      let mRes = await fetch(`${host}/market_candles?symbol=${baseSym}&limit=${limit}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
       if (!mRes || !mRes.ok) {
         mRes = await fetch(`http://localhost:8003/market_candles?symbol=${baseSym}&limit=${limit}`, { signal: AbortSignal.timeout(1200) }).catch(() => null);
       }
@@ -4167,7 +4060,7 @@ export async function fetchCandlesSupabase(
         }
       }
     } catch (mErr) {
-      console.warn('[DB] Falha no feed de Forex/CFDs via Yahoo/Bridge, tentando fallback:', mErr);
+      console.warn('[DB] Falha no feed de candles via Bridge MetaTrader, tentando fallback:', mErr);
     }
   }
 

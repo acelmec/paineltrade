@@ -8994,24 +8994,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (pInst && quotes[pInst]) return quotes[pInst];
     if (basePName && quotes[basePName]) return quotes[basePName];
 
-    // 1.5 Busca prioritária por aliases diretos de CFD à vista (Spot) no MetaTrader
-    const spotAliases: Record<string, string[]> = {
-      'USTEC': ['USATEC', 'USTEC', 'NAS100', 'US100'],
-      'USATEC': ['USATEC', 'USTEC', 'NAS100', 'US100'],
-      'NAS100': ['NAS100', 'USATEC', 'USTEC', 'US100'],
-      'US500': ['USA500', 'US500', 'SPX500'],
-      'USA500': ['USA500', 'US500', 'SPX500'],
-      'US30': ['USAIND', 'US30', 'DJ30'],
-      'USAIND': ['USAIND', 'US30', 'DJ30'],
-      'XAUUSD': ['XAUUSD', 'GOLD'],
-      'GOLD': ['GOLD', 'XAUUSD'],
-      'USOIL': ['USOIL', 'LCRUDE', 'WTI'],
-      'WTI': ['WTI', 'USOIL', 'LCRUDE']
+    // 1.5 Busca prioritária pelo contrato exato que alimenta as velas históricas no MetaTrader
+    const contractPriority: Record<string, RegExp> = {
+      'USTEC': /^USATEC(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}$/i,
+      'NAS100': /^USATEC(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}$/i,
+      'US100': /^USATEC(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}$/i,
+      'US500': /^USA500(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}$/i,
+      'SPX500': /^USA500(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}$/i,
+      'US30': /^USAIND/i,
+      'DJ30': /^USAIND/i,
+      'US2000': /^USARUS/i,
+      'XAUUSD': /^(XAUUSD|GOLD)$/i,
+      'GOLD': /^(GOLD|XAUUSD)$/i,
+      'USOIL': /^(LCRUDE|USOIL|WTI)/i,
+      'WTI': /^(LCRUDE|WTI|USOIL)/i
     };
-    const aliasCandidates = spotAliases[basePName] || spotAliases[pSym] || spotAliases[pInst];
-    if (aliasCandidates) {
-      for (const cand of aliasCandidates) {
-        if (quotes[cand]) return quotes[cand];
+    const prioRx = contractPriority[basePName] || contractPriority[pSym] || contractPriority[pInst];
+    if (prioRx) {
+      for (const [sym, qData] of Object.entries<any>(quotes)) {
+        if (qData && typeof qData === 'object' && prioRx.test(String(sym).trim())) {
+          return qData;
+        }
       }
     }
 
@@ -9426,13 +9429,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const canCheckGap = (now - lastGapCheck) >= 30000; // Cooldown de 30s para checagens de gap
       const hasGap = canCheckGap && (hasTailGap || hasInternalGap || isMissingHistory);
 
-      // Em modo WebSocket ou MT4/MT5, o streaming atende o tempo real, mas SE HOUVER GAP verificado, recarga forçada ou ausência de velas,
-      // DEVE buscar dados para preencher lacunas de quando o PC esteve desligado/suspenso!
+      // Em ativos sincronizados via MetaTrader (isMtPanel), o histórico fechado é carregado UMA ÚNICA VEZ ao abrir o gráfico
+      // (ou ao alterar explicitamente os dias 3d/7d/15d/30d), e daí para frente apenas o candle corrente é atualizado pelo tick em tempo real!
       const isInitialForPanel = !initialLoadedPanelsRef.current.has(targetPanel.id);
       const canFetchNoExisting = !hasExisting && (now - lastCandles >= 20000 || isInitialForPanel);
-      const shouldFetchCandles = (isWs || isMtPanel)
-        ? (isForced || hasGap || canFetchNoExisting)
-        : (isForced || hasGap || now - lastCandles >= effectiveCandlesInterval || canFetchNoExisting);
+      const shouldFetchCandles = isMtPanel
+        ? (isForced || canFetchNoExisting)
+        : (isWs
+          ? (isForced || hasGap || canFetchNoExisting)
+          : (isForced || hasGap || now - lastCandles >= effectiveCandlesInterval || canFetchNoExisting));
 
       if (!cache.isFetchingCandles && shouldFetchCandles) {
         cache.isFetchingCandles = true;
@@ -9499,36 +9504,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           deltaSince
         ), 30000).then(candlesData => {
           if (candlesData && candlesData.length > 0) {
-            if (isPanelDisplayed || candlesData.length >= maxCandleLimit) {
+            if (isPanelDisplayed || candlesData.length >= maxCandleLimit || isMtPanel) {
               initialLoadedPanelsRef.current.add(targetPanel.id);
             }
 
-            // Se for painel MT4/MT5 e o histórico veio de backfill externo (ex: Binance), alinha o histórico ao preço BID real do MT4 para evitar degrau/gap visual
-            let alignedCandlesData = candlesData;
-            if (isMtPanel && candlesData.length > 0) {
-              const liveMData = mData || cache.marketData;
-              const liveBidVal = parseNumericValue((liveMData as any)?.bid);
-              const liveAskVal = parseNumericValue((liveMData as any)?.ask);
-              const liveRawVal = parseNumericValue(liveMData?.price);
-              const mtRefBid = (liveBidVal && liveAskVal && liveBidVal > 0 && liveAskVal > 0)
-                ? Math.min(liveBidVal, liveAskVal)
-                : (liveBidVal && liveBidVal > 0 ? liveBidVal : liveRawVal);
-              const lastBackfillClose = Number(candlesData[candlesData.length - 1]?.close || 0);
-              if (mtRefBid && mtRefBid > 0 && lastBackfillClose > 0) {
-                const diffOffset = mtRefBid - lastBackfillClose;
-                const relDiff = Math.abs(diffOffset) / lastBackfillClose;
-                // Se houver diferença de spread/corretora (ex: Binance 1815.36 vs ActivTrades Bid 1812.25) dentro de 3.5%, translada o backfill para casar exatamente com o Bid do MT4
-                if (Math.abs(diffOffset) > 0.00001 && relDiff <= 0.035) {
-                  alignedCandlesData = candlesData.map((c: Candle) => ({
-                    ...c,
-                    open: Number((Number(c.open) + diffOffset).toFixed(6)),
-                    high: Number((Number(c.high) + diffOffset).toFixed(6)),
-                    low: Number((Number(c.low) + diffOffset).toFixed(6)),
-                    close: Number((Number(c.close) + diffOffset).toFixed(6))
-                  }));
-                }
-              }
-            }
+            const alignedCandlesData = candlesData;
 
             // O histórico retornado por fetchCandlesSupabase é a fonte canônica higienizada
             const minuteMap = new Map<number, Candle>();
@@ -14033,51 +14013,9 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
     const processMtSyncSnapshot = (acc: BrokerAccount, snap: any) => {
       if (!acc || !snap || typeof snap !== 'object') return;
 
-      // 1. Cotações de todos os ativos do Market Watch embutidas no snapshot + ativo do gráfico EA
-      if (snap.symbol && (Number(snap.bid || 0) > 0 || Number(snap.price || 0) > 0)) {
-        const symMain = String(snap.symbol).toUpperCase();
-        const bidMain = Number(snap.bid || snap.price || 0);
-        const askMain = Number(snap.ask || 0);
-        const lowRefMain = (bidMain > 0 && askMain > 0) ? Math.min(bidMain, askMain) : bidMain;
-        if (typeof window !== 'undefined' && lowRefMain > 0) {
-          window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
-            detail: {
-              symbol: symMain,
-              panel: symMain.toLowerCase(),
-              price: lowRefMain,
-              bid: bidMain,
-              ask: askMain,
-              volume: 1,
-              source: acc.platform || 'mt4',
-              updated_at: snap.updated_at || new Date().toISOString()
-            }
-          }));
-        }
-      }
-
-      if (Array.isArray(snap.quotes)) {
-        snap.quotes.forEach((qData: any) => {
-          const sym = String(qData.symbol || '').toUpperCase();
-          const qBid = Number(qData.bid || qData.price || 0);
-          const qAsk = Number(qData.ask || 0);
-          const numPrice = (qBid > 0 && qAsk > 0) ? Math.min(qBid, qAsk) : qBid;
-          if (!sym || numPrice <= 0) return;
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
-              detail: {
-                symbol: sym,
-                panel: sym.toLowerCase(),
-                price: numPrice,
-                bid: qBid > 0 ? qBid : numPrice,
-                ask: qAsk > 0 ? qAsk : 0,
-                volume: Number(qData.volume || 1),
-                source: acc.platform || 'mt4',
-                updated_at: snap.updated_at || new Date().toISOString()
-              }
-            }));
-          }
-        });
-      }
+      // IMPORTANTE: NÃO despachar vortex_streamer_tick a partir de snap.symbol ou snap.quotes (mt4_sync_all)!
+      // O snapshot mt4_sync_all pode conter cotações antigas cacheadas no servidor, o que causava oscilação/piscada
+      // contra o endpoint em tempo real /quotes (que já despacha os ticks vivos a cada 250ms logo abaixo).
 
       // 1.1 Candles M1 autênticos enviados pelo EA do MT4/MT5 (formados pelo menor preço = BID e abertura de minuto)
       if (Array.isArray(snap.candles) && snap.candles.length > 0 && snap.symbol) {
@@ -15633,18 +15571,20 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                 }
                 const instLower = String(incomingInst || '').toLowerCase();
                 const isSupabaseOrNt8Inst = instLower.startsWith('painel_') || instLower.startsWith('nt8');
-                window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
-                  detail: {
-                    symbol: dSym,
-                    panel: String(incomingInst || dSym).toLowerCase(),
-                    price: dPrice,
-                    bid: tickBid,
-                    ask: tickAsk,
-                    volume: Number(d.volume || 1),
-                    source: isSupabaseOrNt8Inst ? 'nt8' : 'mt4',
-                    updated_at: d.updated_at || new Date().toISOString()
-                  }
-                }));
+                if (isSupabaseOrNt8Inst) {
+                  window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
+                    detail: {
+                      symbol: dSym,
+                      panel: String(incomingInst || dSym).toLowerCase(),
+                      price: dPrice,
+                      bid: tickBid,
+                      ask: tickAsk,
+                      volume: Number(d.volume || 1),
+                      source: 'nt8',
+                      updated_at: d.updated_at || new Date().toISOString()
+                    }
+                  }));
+                }
               }
             }
             if (!targetPanel) return;

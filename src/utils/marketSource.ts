@@ -430,24 +430,28 @@ export function isTickMatchingPanel(detail: any, panel: any, activeAccount?: any
     if (pInst.toLowerCase() === tickSym.toLowerCase() || pInst.toLowerCase() === `mt4_${tickSym.toLowerCase()}`) return true;
     const cleanTick = tickSym.replace(/[^A-Z0-9]/g, '');
     const cleanBase = basePName.replace(/[^A-Z0-9]/g, '');
-    const normalizeMtSymbol = (s: string) => s
-      .replace(/^USATEC/i, 'USTEC')
-      .replace(/^NAS100/i, 'USTEC')
-      .replace(/^US100/i, 'USTEC')
-      .replace(/^USA500/i, 'US500')
-      .replace(/^SPX500/i, 'US500')
-      .replace(/^USAIND/i, 'US30')
-      .replace(/^DJ30/i, 'US30')
-      .replace(/^USARUS/i, 'US2000')
-      .replace(/^GOLD$/i, 'XAUUSD')
-      .replace(/^LCRUDE/i, 'USOIL')
-      .replace(/^WTI/i, 'USOIL');
-    const normTick = normalizeMtSymbol(cleanTick);
-    const normBase = normalizeMtSymbol(cleanBase);
-    if (normTick.length > 0 && normTick === normBase) return true;
-    const tickWithoutMonth = normTick.replace(/(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}$/i, '');
-    if (tickWithoutMonth === normBase && !['USTEC', 'US500'].includes(normBase)) return true;
-    if (cleanTick.length > 0 && cleanBase.length > 0 && (cleanTick.startsWith(cleanBase) || cleanBase.startsWith(cleanTick))) return true;
+    if (cleanTick === cleanBase) return true;
+
+    // Correspondência unívoca (1-para-1) entre cada ativo MT4 e seu contrato de referência das velas históricas
+    // Impede que USATEC (27340) e USATECDEC26 (27430) disputem o mesmo gráfico USTEC e façam o candle piscar!
+    if (['USTEC', 'NAS100', 'US100'].includes(cleanBase)) {
+      return /^USATEC(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}$/i.test(cleanTick) || cleanTick === 'USTEC';
+    }
+    if (['US500', 'SPX500'].includes(cleanBase)) {
+      return /^USA500(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}$/i.test(cleanTick) || cleanTick === 'US500';
+    }
+    if (['US30', 'DJ30', 'USAIND'].includes(cleanBase)) {
+      return /^USAIND/i.test(cleanTick) || cleanTick === 'US30';
+    }
+    if (['US2000', 'USARUS'].includes(cleanBase)) {
+      return /^USARUS/i.test(cleanTick) || cleanTick === 'US2000';
+    }
+    if (['XAUUSD', 'GOLD'].includes(cleanBase)) {
+      return cleanTick === 'GOLD' || cleanTick === 'XAUUSD';
+    }
+    if (['USOIL', 'WTI', 'LCRUDE'].includes(cleanBase)) {
+      return /^LCRUDE/i.test(cleanTick) || cleanTick === 'USOIL' || cleanTick === 'WTI';
+    }
     return false;
   }
 
