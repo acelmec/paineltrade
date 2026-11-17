@@ -87,15 +87,31 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
   const rawAsk = Number(effectiveMarketData?.ask || 0);
   const hasDistinctSpread = rawBid > 0 && rawAsk > 0 && rawAsk > rawBid;
 
+  // Preservação do spread real: NUNCA regride para o tick sintético (0.25)
+  const lastKnownSpreadRef = useRef<number | null>(null);
+  const currentSpread = hasDistinctSpread
+    ? Number((rawAsk - rawBid).toFixed(boletaDecimals))
+    : (effectiveMarketData?.spread && Number(effectiveMarketData.spread) > tickSize
+      ? Number(Number(effectiveMarketData.spread).toFixed(boletaDecimals))
+      : null);
+
+  if (currentSpread && currentSpread > tickSize) {
+    lastKnownSpreadRef.current = currentSpread;
+  }
+
+  const effectiveSpread = (currentSpread && currentSpread > tickSize)
+    ? currentSpread
+    : (lastKnownSpreadRef.current && lastKnownSpreadRef.current > tickSize ? lastKnownSpreadRef.current : null);
+
   const liveBid = hasDistinctSpread
     ? rawBid
     : (livePrice > 0 ? livePrice : 0);
   const liveAsk = hasDistinctSpread
     ? rawAsk
-    : (livePrice > 0 ? Number((livePrice + tickSize).toFixed(boletaDecimals)) : 0);
-  const liveSpread = (liveAsk > 0 && liveBid > 0 && liveAsk >= liveBid)
-    ? Number((liveAsk - liveBid).toFixed(boletaDecimals))
-    : (livePrice > 0 ? tickSize : 0);
+    : (effectiveSpread && liveBid > 0
+      ? Number((liveBid + effectiveSpread).toFixed(boletaDecimals))
+      : (livePrice > 0 ? livePrice : 0));
+  const liveSpread = effectiveSpread || 0;
 
   // Tabs: LOTE vs FINANCEIRO (derivado diretamente de sizingMode para evitar dessincronia)
 
@@ -1494,7 +1510,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
                 title="Clique para alternar o ativo"
               >
                 {(panels || []).map((p: any) => {
-                  const { assetPart, brokerPart } = formatAssetNameParts(p.name || p.symbol || 'Ativo');
+                  const { assetPart, brokerPart } = formatAssetNameParts(p.name || p.symbol || 'Ativo', p);
                   const label = brokerPart ? `${assetPart} - ${brokerPart}` : assetPart;
                   return (
                     <option key={p.id} value={p.id} className="bg-slate-900 text-white font-bold">

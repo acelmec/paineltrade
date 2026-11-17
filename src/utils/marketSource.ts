@@ -1,4 +1,4 @@
-import { isStandardSupabasePanel } from '../services/db';
+import { isStandardSupabasePanel, isSameAsset } from '../services/db';
 import { isStreamerWsConnected } from '../services/vortexStreamer';
 
 export type MarketEcosystem = 'supabase' | 'nt8' | 'mt' | 'binance' | 'ctrader';
@@ -455,13 +455,20 @@ export function isTickMatchingPanel(detail: any, panel: any, activeAccount?: any
       'NASDAQ': ['NQ', 'MNQ', 'NASDAQ', 'USATEC', 'USTEC', 'NAS100', 'US100', 'NDX'],
       'SP500': ['ES', 'MES', 'SP500', 'S&P500', 'USA500', 'US500', 'SPX500'],
       'RUSSEL2000': ['RTY', 'M2K', 'RUSSELL2000', 'RUSSEL2000', 'RUSSELL', 'USARUS', 'US2000'],
-      'DOWJONES': ['YM', 'MYM', 'DOWJONES', 'DOW', 'USAIND', 'US30', 'DJ30'],
+      'DOWJONES': ['YM', 'MYM', 'DOWJONES', 'DOWNJONES', 'DOW', 'USAIND', 'US30', 'DJ30'],
       'OIL': ['CL', 'MCL', 'OIL', 'PETROLEO', 'LCRUDE', 'WTI', 'BRENT'],
       'GOLD': ['GC', 'MGC', 'GOLD', 'OURO', 'XAUUSD', 'XAU']
     };
     for (const [canon, aliases] of Object.entries(canonicalMap)) {
-      if (pName.includes(canon) || pInst.includes(canon.toLowerCase())) {
-        if (aliases.some(a => tickSym === a || tickSym.startsWith(a))) return true;
+      const panelMatches = isSameAsset(pName, canon) ||
+        isSameAsset(pInst, canon) ||
+        isSameAsset(pSym, canon) ||
+        pName.includes(canon) ||
+        pInst.includes(canon.toLowerCase()) ||
+        aliases.some(a => isSameAsset(pName, a) || isSameAsset(pInst, a) || pName.includes(a) || pInst.includes(a.toLowerCase()));
+
+      if (panelMatches) {
+        if (aliases.some(a => tickSym === a || tickSym.startsWith(a) || isSameAsset(tickSym, a))) return true;
       }
     }
     return false;

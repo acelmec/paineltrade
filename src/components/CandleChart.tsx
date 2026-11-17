@@ -2912,8 +2912,21 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
     const chartTick = resolvePanelTickSize(activePanel, settings);
     const hasDistinctSpread = rawBid > 0 && rawAsk > 0 && rawAsk > rawBid;
 
+    const mDataSpread = marketData?.spread && Number(marketData.spread) > chartTick ? Number(marketData.spread) : null;
+    const knownSpread = hasDistinctSpread
+      ? Number((rawAsk - rawBid).toFixed(6))
+      : (mDataSpread || (lastValidSpreadRef.current && lastValidSpreadRef.current > chartTick ? lastValidSpreadRef.current : null));
+
+    if (knownSpread && knownSpread > chartTick) {
+      lastValidSpreadRef.current = knownSpread;
+    }
+
     const bidVal = hasDistinctSpread ? rawBid : (lastVal > 0 ? lastVal : 0);
-    const askVal = hasDistinctSpread ? rawAsk : (lastVal > 0 ? Number((lastVal + chartTick).toFixed(getTickDecimals(chartTick) || 2)) : 0);
+    const askVal = hasDistinctSpread
+      ? rawAsk
+      : (knownSpread && bidVal > 0
+        ? Number((bidVal + knownSpread).toFixed(getTickDecimals(chartTick) || 2))
+        : (lastVal > 0 ? lastVal : 0));
 
     const shouldShowBid = (cfg.plotMode === 'bid_ask' || cfg.plotMode === 'bid' || cfg.plotMode === 'all') && bidVal > 0;
     const shouldShowAsk = (cfg.plotMode === 'bid_ask' || cfg.plotMode === 'ask' || cfg.plotMode === 'all') && askVal > 0;
@@ -3043,8 +3056,19 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       const chartTick = resolvePanelTickSize(activePanel, settings);
       const hasDistinctSpread = rawBid > 0 && rawAsk > 0 && rawAsk > rawBid;
 
+      const streamSpread = hasDistinctSpread ? Number((rawAsk - rawBid).toFixed(6)) : null;
+      const knownSpread = streamSpread || (lastValidSpreadRef.current && lastValidSpreadRef.current > chartTick ? lastValidSpreadRef.current : null);
+
+      if (knownSpread && knownSpread > chartTick) {
+        lastValidSpreadRef.current = knownSpread;
+      }
+
       const bidVal = hasDistinctSpread ? rawBid : (lastVal > 0 ? lastVal : 0);
-      const askVal = hasDistinctSpread ? rawAsk : (lastVal > 0 ? Number((lastVal + chartTick).toFixed(getTickDecimals(chartTick) || 2)) : 0);
+      const askVal = hasDistinctSpread
+        ? rawAsk
+        : (knownSpread && bidVal > 0
+          ? Number((bidVal + knownSpread).toFixed(getTickDecimals(chartTick) || 2))
+          : (lastVal > 0 ? lastVal : 0));
 
       const shouldShowBid = (cfg.plotMode === 'bid_ask' || cfg.plotMode === 'bid' || cfg.plotMode === 'all') && bidVal > 0;
       const shouldShowAsk = (cfg.plotMode === 'bid_ask' || cfg.plotMode === 'ask' || cfg.plotMode === 'all') && askVal > 0;
@@ -5537,8 +5561,22 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
               const rawA = Number(marketData?.ask || 0);
               const hasSpread = rawB > 0 && rawA > 0 && rawA > rawB;
               const tickSz = resolvePanelTickSize(activePanel, settings);
+              const knownSpread = hasSpread
+                ? Number((rawA - rawB).toFixed(6))
+                : ((marketData?.spread && Number(marketData.spread) > tickSz)
+                  ? Number(marketData.spread)
+                  : (lastValidSpreadRef.current && lastValidSpreadRef.current > tickSz ? lastValidSpreadRef.current : null));
+
+              if (knownSpread && knownSpread > tickSz) {
+                lastValidSpreadRef.current = knownSpread;
+              }
+
               const bVal = hasSpread ? rawB : (lVal > 0 ? lVal : 0);
-              const aVal = hasSpread ? rawA : (lVal > 0 ? Number((lVal + tickSz).toFixed(getTickDecimals(tickSz) || 2)) : 0);
+              const aVal = hasSpread
+                ? rawA
+                : (knownSpread && bVal > 0
+                  ? Number((bVal + knownSpread).toFixed(getTickDecimals(tickSz) || 2))
+                  : (lVal > 0 ? lVal : 0));
 
               const shouldBid = (pLineCfg.plotMode === 'bid_ask' || pLineCfg.plotMode === 'bid' || pLineCfg.plotMode === 'all') && bVal > 0;
               const shouldAsk = (pLineCfg.plotMode === 'bid_ask' || pLineCfg.plotMode === 'ask' || pLineCfg.plotMode === 'all') && aVal > 0;

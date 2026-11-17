@@ -9138,7 +9138,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Se o market_data do banco for defasado (> 90s, ex: dados antigos no Supabase) ou nulo,
       // verifica prioritariamente se há cotação autêntica em tempo real do MetaTrader conectada
       const isMDataTimestampFresh = mData?.updated_at ? (Date.now() - (parseInputToDate(mData.updated_at)?.getTime() || 0) <= 90000) : false;
-      const mtQuote = (!mData?.bid || !mData?.ask || !isMDataTimestampFresh) ? findMtQuoteForAsset(targetPanel) : null;
+      let mtQuote = (!mData?.bid || !mData?.ask || !isMDataTimestampFresh) ? findMtQuoteForAsset(targetPanel) : null;
+      if (!mtQuote && (!mData?.bid || !mData?.ask || !isMDataTimestampFresh)) {
+        try {
+          const { getLocalPlatformConnections } = await import('../services/connectionsService');
+          const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
+          const activeConn = mtConns.find(c => c.status === 'online') || mtConns[0];
+          const host = (activeConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
+          const qRes = await fetch(`${host}/quotes`, { signal: AbortSignal.timeout(1500) }).catch(() => null);
+          if (qRes && qRes.ok) {
+            const qJson = await qRes.json().catch(() => null);
+            if (qJson && typeof qJson === 'object') {
+              remoteMtQuotesRef.current = qJson;
+              mtQuote = findMtQuoteForAsset(targetPanel);
+            }
+          }
+        } catch (_) {}
+      }
       let isSyntheticFallback = false;
 
       if (mtQuote) {
@@ -14146,10 +14162,10 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
     }
 
     const fetchRemoteMtQuotes = async () => {
+      if (isFetchingQuotes) return;
       const mtAccounts = (accountsRef.current || []).filter(a => isMtExecutionAccount(a) && a.is_active !== false);
       const curAcc = activeAccountRef.current;
       const primaryAcc = (curAcc && isMtExecutionAccount(curAcc)) ? curAcc : mtAccounts[0];
-      if (!primaryAcc || isFetchingQuotes) return;
 
       isFetchingQuotes = true;
       try {
@@ -14157,13 +14173,13 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         const activeConn = mtConns.find(c => c.status === 'online') || mtConns[0];
         const host = (activeConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
         const isLocalHost = host.includes('localhost') || host.includes('127.0.0.1');
-        const accNum = extractMtAccountNumber(primaryAcc);
+        const accNum = primaryAcc ? extractMtAccountNumber(primaryAcc) : null;
 
         // Executa em PARALELO (/quotes + mt4_sync_all + mt4_sync_<accNum>) para latência ultrabaixa (<100ms-250ms)
         const [quotesRes, syncAllRes, syncAccRes] = await Promise.all([
           fetch(`${host}/quotes`, { signal: AbortSignal.timeout(1500) }).catch(() => null),
-          fetch(`${host}/market_data?instance_id=mt4_sync_all`, { signal: AbortSignal.timeout(1500) }).catch(() => null),
-          accNum ? fetch(`${host}/market_data?instance_id=mt4_sync_${accNum}`, { signal: AbortSignal.timeout(1500) }).catch(() => null) : Promise.resolve(null)
+          primaryAcc ? fetch(`${host}/market_data?instance_id=mt4_sync_all`, { signal: AbortSignal.timeout(1500) }).catch(() => null) : Promise.resolve(null),
+          (primaryAcc && accNum) ? fetch(`${host}/market_data?instance_id=mt4_sync_${accNum}`, { signal: AbortSignal.timeout(1500) }).catch(() => null) : Promise.resolve(null)
         ]);
 
         // 1. Cotações Bid/Ask em tempo real de todos os ativos do Market Watch (/quotes)
