@@ -2903,12 +2903,18 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       return;
     }
 
-    const lastVal = (marketData?.price && Number(marketData.price) > 0)
-      ? Number(marketData.price)
-      : ((chartDataRef.current && chartDataRef.current.length > 0) ? chartDataRef.current[chartDataRef.current.length - 1].close : 0);
+    const lastCandleClose = (chartDataRef.current && chartDataRef.current.length > 0)
+      ? Number(chartDataRef.current[chartDataRef.current.length - 1].close || 0)
+      : 0;
+    const rawMPrice = (marketData?.price && Number(marketData.price) > 0) ? Number(marketData.price) : 0;
+    const isMPriceCoherent = rawMPrice > 0 && (lastCandleClose <= 0 || Math.abs(rawMPrice - lastCandleClose) / lastCandleClose <= 0.05);
+    const lastVal = isMPriceCoherent ? rawMPrice : lastCandleClose;
 
     // BID/ASK: somente preços provenientes da fonte (DB / WebSocket / API). Falha de leitura => última diferença real.
-    const dq = resolveDisplayQuote(activePanel?.id, marketData as any);
+    const effectiveMdForQuote = isMPriceCoherent
+      ? marketData
+      : (lastCandleClose > 0 ? { price: lastCandleClose, bid: lastCandleClose, ask: 0 } : null);
+    const dq = resolveDisplayQuote(activePanel?.id, effectiveMdForQuote as any);
     const bidVal = dq ? dq.bid : 0;
     const askVal = dq ? dq.ask : 0;
 
@@ -3018,7 +3024,9 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       try { candleSeriesRef.current.removePriceLine(lastPriceLineRef.current); } catch (_) {}
       lastPriceLineRef.current = null;
     }
-  }, [marketData?.bid, marketData?.ask, marketData?.price, resolvedPriceLineConfig]);
+
+    updateLevelLabelsRef.current?.();
+  }, [marketData?.bid, marketData?.ask, marketData?.price, resolvedPriceLineConfig, candles?.length]);
 
   // Listener direto de ticks em tempo real (<1ms) para atualização ultra-rápida das linhas de ASK, BID e LAST
   useEffect(() => {
@@ -3040,14 +3048,22 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
         rememberRealSpread(activePanel?.id, Number((rawTickAsk - rawTickBid).toFixed(6)));
       }
       const isMtTickOnSupabasePanel = isStandardSupabasePanel(activePanel) && ['mt', 'mt4', 'mt5', 'metatrader'].includes(String(detail.source || '').toLowerCase());
-      const panelOwnPrice = (marketData?.price && Number(marketData.price) > 0)
-        ? Number(marketData.price)
-        : ((chartDataRef.current && chartDataRef.current.length > 0) ? Number(chartDataRef.current[chartDataRef.current.length - 1].close || 0) : 0);
+      const lastCandleClose = (chartDataRef.current && chartDataRef.current.length > 0)
+        ? Number(chartDataRef.current[chartDataRef.current.length - 1].close || 0)
+        : 0;
+      const rawMdPrice = (marketData?.price && Number(marketData.price) > 0) ? Number(marketData.price) : 0;
+      const panelOwnPrice = (rawMdPrice > 0 && (lastCandleClose <= 0 || Math.abs(rawMdPrice - lastCandleClose) / lastCandleClose <= 0.05))
+        ? rawMdPrice
+        : lastCandleClose;
+      const tickPrice = Number(detail.price || detail.bid || 0);
+      const isTickPriceCoherent = tickPrice > 0 && (lastCandleClose <= 0 || Math.abs(tickPrice - lastCandleClose) / lastCandleClose <= 0.05);
       const quoteSource = (isMtTickOnSupabasePanel && panelOwnPrice > 0)
         ? { price: panelOwnPrice, bid: panelOwnPrice, ask: 0 }
-        : detail;
-      const lastVal = (isMtTickOnSupabasePanel && panelOwnPrice > 0) ? panelOwnPrice : Number(detail.price || 0);
-      const dq = resolveDisplayQuote(activePanel?.id, quoteSource);
+        : (isTickPriceCoherent ? detail : (panelOwnPrice > 0 ? { price: panelOwnPrice, bid: panelOwnPrice, ask: 0 } : null));
+      const lastVal = (isMtTickOnSupabasePanel && panelOwnPrice > 0)
+        ? panelOwnPrice
+        : (isTickPriceCoherent ? Number(detail.price || 0) : panelOwnPrice);
+      const dq = resolveDisplayQuote(activePanel?.id, quoteSource as any);
       const bidVal = dq ? dq.bid : 0;
       const askVal = dq ? dq.ask : 0;
 
@@ -3115,6 +3131,8 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
           } catch (_) {}
         }
       }
+
+      updateLevelLabelsRef.current?.();
     };
 
     window.addEventListener('vortex_streamer_tick', handleLiveStreamerTick, { passive: true });
@@ -5537,8 +5555,11 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
             const endX = chartAreaWidth;
 
             if (endX > startX) {
-              const lVal = (marketData?.price && Number(marketData.price) > 0) ? Number(marketData.price) : lastCandle.close;
-              const dqP = resolveDisplayQuote(activePanel?.id, marketData as any);
+              const rawMPrice = (marketData?.price && Number(marketData.price) > 0) ? Number(marketData.price) : 0;
+              const isCoherent = rawMPrice > 0 && (lastCandle.close <= 0 || Math.abs(rawMPrice - lastCandle.close) / lastCandle.close <= 0.05);
+              const lVal = isCoherent ? rawMPrice : lastCandle.close;
+              const mdForPartial = isCoherent ? marketData : { price: lastCandle.close, bid: lastCandle.close, ask: 0 };
+              const dqP = resolveDisplayQuote(activePanel?.id, mdForPartial as any);
               const bVal = dqP ? dqP.bid : 0;
               const aVal = dqP ? dqP.ask : 0;
 

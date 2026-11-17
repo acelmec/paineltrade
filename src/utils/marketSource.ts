@@ -463,12 +463,10 @@ export function isTickMatchingPanel(detail: any, panel: any, activeAccount?: any
       const panelMatches = isSameAsset(pName, canon) ||
         isSameAsset(pInst, canon) ||
         isSameAsset(pSym, canon) ||
-        pName.includes(canon) ||
-        pInst.includes(canon.toLowerCase()) ||
-        aliases.some(a => isSameAsset(pName, a) || isSameAsset(pInst, a) || pName.includes(a) || pInst.includes(a.toLowerCase()));
+        aliases.some(a => isSameAsset(pName, a) || isSameAsset(pInst, a));
 
       if (panelMatches) {
-        if (aliases.some(a => tickSym === a || tickSym.startsWith(a) || isSameAsset(tickSym, a))) return true;
+        if (aliases.some(a => tickSym === a || isSameAsset(tickSym, a))) return true;
       }
     }
     return false;

@@ -127,6 +127,10 @@ export function resolvePanelTickSize(panel?: any, settings?: any): number {
   if (sym.includes('ETH') || sym.includes('SOL') || sym.includes('BNB')) {
     return 0.01;
   }
+  // DOW JONES deve ser verificado ANTES de 'ES' pois a palavra "DOWJONES" termina com "ES"
+  if (sym.includes('YM') || sym.includes('MYM') || sym.includes('DOW') || sym.includes('US30') || sym.includes('USAIND') || sym.includes('DJ30')) {
+    return 1.0;
+  }
   if (
     sym.includes('NQ') || sym.includes('MNQ') || sym.includes('NASDAQ') || sym.includes('NAS100') || sym.includes('US100') || sym.includes('NDX') ||
     sym.includes('ES') || sym.includes('MES') || sym.includes('SP500') || sym.includes('S&P') || sym.includes('SPX') || sym.includes('US500') ||
@@ -143,9 +147,6 @@ export function resolvePanelTickSize(panel?: any, settings?: any): number {
     sym.includes('GC') || sym.includes('MGC') || sym.includes('GOLD') || sym.includes('OURO') || sym.includes('XAU')
   ) {
     return 0.10;
-  }
-  if (sym.includes('YM') || sym.includes('MYM') || sym.includes('DOW') || sym.includes('US30')) {
-    return 1.0;
   }
   if (sym.includes('WIN')) {
     return 5.0;
@@ -7958,7 +7959,6 @@ export function isSameAsset(sym1?: string | null, sym2?: string | null): boolean
   const clean1 = sym1.split(' ')[0].trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   const clean2 = sym2.split(' ')[0].trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (clean1 === clean2) return true;
-  if (clean1.includes(clean2) || clean2.includes(clean1)) return true;
 
   const extractRoot = (s: string) => {
     if (s.includes('BTC')) return 'BTC';
@@ -7973,9 +7973,11 @@ export function isSameAsset(sym1?: string | null, sym2?: string | null): boolean
     if (s.includes('NEAR')) return 'NEAR';
     if (s.includes('SUI')) return 'SUI';
     if (s.includes('PEPE')) return 'PEPE';
-    if (s.includes('NQ') || s.includes('NASDAQ') || s.includes('USATEC') || s.includes('USTEC') || s.includes('NAS100') || s.includes('US100') || s.includes('NDX')) return 'NQ';
-    if (s.includes('ES') || s.includes('SP500') || s.includes('SPX') || s.includes('USA500') || s.includes('US500') || s.includes('SPX500')) return 'ES';
+    // IMPORTANTE: DOW JONES ('DOW', 'US30', 'USAIND', 'YM') DEVE ser testado ANTES de 'ES',
+    // pois a palavra "DOWJONES" termina com as letras "ES"!
     if (s.includes('YM') || s.includes('DOW') || s.includes('USAIND') || s.includes('US30') || s.includes('DJ30')) return 'YM';
+    if (s.includes('NQ') || s.includes('NASDAQ') || s.includes('USATEC') || s.includes('USTEC') || s.includes('NAS100') || s.includes('US100') || s.includes('NDX') || s.includes('PAINELPRINCIPAL')) return 'NQ';
+    if (s.includes('ES') || s.includes('SP500') || s.includes('SPX') || s.includes('USA500') || s.includes('US500') || s.includes('SPX500')) return 'ES';
     if (s.includes('RTY') || s.includes('RUSSELL') || s.includes('RUSSEL') || s.includes('USARUS') || s.includes('US2000') || s.includes('M2K')) return 'RTY';
     if (s.includes('GC') || s.includes('GOLD') || s.includes('OURO') || s.includes('XAU') || s.includes('XAUUSD')) return 'GC';
     if (s.includes('CL') || s.includes('OIL') || s.includes('PETR') || s.includes('LCRUDE') || s.includes('WTI') || s.includes('BRENT')) return 'CL';
@@ -7987,7 +7989,12 @@ export function isSameAsset(sym1?: string | null, sym2?: string | null): boolean
 
   const root1 = extractRoot(clean1);
   const root2 = extractRoot(clean2);
-  return root1 === root2;
+  if (root1 === root2) return true;
+  // Só aceita substring se nenhum dos dois foi mapeado para uma raiz canônica diferente e ambos possuem >= 4 caracteres
+  if (root1 === clean1 && root2 === clean2 && clean1.length >= 4 && clean2.length >= 4) {
+    return clean1.includes(clean2) || clean2.includes(clean1);
+  }
+  return false;
 }
 
 export interface AccountValidationResult {
@@ -8219,16 +8226,16 @@ export function resolvePanelPointValue(panelOrSymbol: any, fallback: number = 20
     }
     const name = (panelOrSymbol.name || panelOrSymbol.symbol || panelOrSymbol.instance_id || '').toUpperCase();
     if (name.includes('MNQ') || name.includes('NQ')) return 2;
+    if (name.includes('MYM') || name.includes('YM') || name.includes('DOW') || name.includes('US30')) return 0.5;
     if (name.includes('MES') || name.includes('ES') || name.includes('SP500')) return 5;
-    if (name.includes('MYM') || name.includes('YM') || name.includes('DOW')) return 0.5;
     if (name.includes('M2K') || name.includes('RTY') || name.includes('RUSSEL')) return 10;
     if (name.includes('MCL') || name.includes('CL') || name.includes('OIL') || name.includes('PETROLEO')) return 100;
     if (name.includes('MGC') || name.includes('GC') || name.includes('GOLD')) return 10;
   }
   const s = String(panelOrSymbol).toUpperCase();
   if (s.includes('MNQ') || s.includes('NQ')) return 2;
+  if (s.includes('MYM') || s.includes('YM') || s.includes('DOW') || s.includes('US30')) return 0.5;
   if (s.includes('MES') || s.includes('ES') || s.includes('SP500')) return 5;
-  if (s.includes('MYM') || s.includes('YM') || s.includes('DOW')) return 0.5;
   if (s.includes('M2K') || s.includes('RTY') || s.includes('RUSSEL')) return 10;
   if (s.includes('MCL') || s.includes('CL') || s.includes('OIL') || s.includes('PETROLEO')) return 100;
   if (s.includes('MGC') || s.includes('GC') || s.includes('GOLD')) return 10;

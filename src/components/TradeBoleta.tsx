@@ -622,6 +622,7 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
       const s = String(r.symbol).toUpperCase();
       if (s.includes('NQ') || s.includes('NAS')) return 'NASDAQ';
       if (s.includes('GC') || s.includes('GOLD') || s.includes('OURO')) return 'GOLD';
+      if (s.includes('YM') || s.includes('DOW') || s.includes('US30')) return 'DOW JONES';
       if (s.includes('ES') || s.includes('SP')) return 'S&P 500';
       if (s.includes('CL') || s.includes('OIL')) return 'OIL';
       return s;
