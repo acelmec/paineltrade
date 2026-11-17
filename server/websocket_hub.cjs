@@ -56,7 +56,25 @@ const ML_SCHEDULE_PATH = path.join(__dirname, '..', 'ml_pipeline', 'models', 'ml
 const ML_SCRIPT_PATH = path.join(__dirname, '..', 'ml_pipeline', 'pattern_analyzer.py');
 
 // Cache em memória para Conector Oficial MetaTrader 4 & MetaTrader 5 (Porta 80 / HTTP Padrão)
-const mt4QuotesCache = new Map(); // symbol -> { price, bid, ask, volume, updated_at }
+const mt4QuotesCache = new Map(); // symbol -> { price, bid, ask, spread, volume, updated_at }
+
+// Constrói cotação SOMENTE com Bid e Ask autênticos enviados pelo EA.
+// NUNCA fabrica Ask (=Bid) nem zera o Ask: leitura incompleta retorna null e o cache mantém
+// o último par Bid/Ask real (portanto o último spread real).
+function buildRealQuote(sym, item) {
+  const bid = Number(item && item.bid || 0);
+  const ask = Number(item && item.ask || 0);
+  if (!sym || !(bid > 0) || !(ask > 0) || ask < bid) return null;
+  return {
+    symbol: sym,
+    price: Number(item.price || bid),
+    bid,
+    ask,
+    spread: Number((ask - bid).toFixed(6)),
+    volume: Number(item.volume || 1),
+    updated_at: item.updated_at || new Date().toISOString()
+  };
+}
 const mt4AccountsConnected = new Map(); // accountNumber -> { lastSeen: Date, symbol: string }
 const mt4PositionsCache = new Map(); // accountNumber -> Array<{ ticket, symbol, side, lots, entry_price, sl, tp, profit, open_time }>
 const mt4TradesHistoryCache = new Map(); // accountNumber -> Array<{ ticket, symbol, side, lots, entry_price, exit_price, profit, net_profit, open_time, close_time }>
@@ -739,17 +757,8 @@ if ((req.method === 'GET' || req.method === 'POST') && pathname === '/commands')
       if (Array.isArray(bodyData.quotes)) {
         for (const item of bodyData.quotes) {
           const sym = (item.symbol || '').toUpperCase();
-          const bid = Number(item.bid || 0);
-          const ask = Number(item.ask || bid);
-          if (sym && bid > 0) {
-            const qObj = {
-              symbol: sym,
-              price: Number(item.price || (bid + ask) * 0.5),
-              bid: bid,
-              ask: ask,
-              volume: Number(item.volume || 1),
-              updated_at: item.updated_at || new Date().toISOString()
-            };
+          const qObj = buildRealQuote(sym, item);
+          if (qObj) {
             mt4QuotesCache.set(sym, qObj);
             broadcast({
               type: 'market_data',
@@ -765,15 +774,9 @@ if ((req.method === 'GET' || req.method === 'POST') && pathname === '/commands')
       const qSym = (url.searchParams.get('symbol') || bodyData.symbol || existing.symbol || '').toUpperCase();
       const qBid = Number(url.searchParams.get('bid') || bodyData.bid || 0);
       const qAsk = Number(url.searchParams.get('ask') || bodyData.ask || 0);
-      if (qSym && (qBid > 0 || qAsk > 0)) {
-        mt4QuotesCache.set(qSym, {
-          symbol: qSym,
-          price: qBid || qAsk,
-          bid: qBid,
-          ask: qAsk,
-          volume: 1,
-          updated_at: new Date().toISOString()
-        });
+      const qReal = buildRealQuote(qSym, { bid: qBid, ask: qAsk, price: qBid, volume: 1, updated_at: new Date().toISOString() });
+      if (qReal) {
+        mt4QuotesCache.set(qSym, qReal);
       }
     }
 
@@ -978,17 +981,8 @@ if ((req.method === 'GET' || req.method === 'POST') && pathname === '/commands')
           const list = Array.isArray(data.quotes) ? data.quotes : data;
           for (const item of list) {
             const sym = (item.symbol || '').toUpperCase();
-            const bid = Number(item.bid || 0);
-            const ask = Number(item.ask || bid);
-            if (sym && bid > 0) {
-              const qObj = {
-                symbol: sym,
-                price: Number(item.price || (bid + ask) * 0.5),
-                bid: bid,
-                ask: ask,
-                volume: Number(item.volume || 1),
-                updated_at: item.updated_at || new Date().toISOString()
-              };
+            const qObj = buildRealQuote(sym, item);
+            if (qObj) {
               mt4QuotesCache.set(sym, qObj);
               broadcast({
                 type: 'market_data',
@@ -1006,14 +1000,9 @@ if ((req.method === 'GET' || req.method === 'POST') && pathname === '/commands')
 
         const sym = (data.symbol || '').toUpperCase();
         if (sym) {
-          mt4QuotesCache.set(sym, {
-            symbol: sym,
-            price: Number(data.price || data.close || 0),
-            bid: Number(data.bid || 0),
-            ask: Number(data.ask || 0),
-            volume: Number(data.volume || 0),
-            updated_at: data.updated_at || new Date().toISOString()
-          });
+          // Só atualiza o cache de cotação com Bid/Ask reais; tick sem Ask NÃO apaga o último par real
+          const realTick = buildRealQuote(sym, data);
+          if (realTick) mt4QuotesCache.set(sym, realTick);
 
           // Também repassa para o broadcast WebSocket do VortexWeb
           broadcast({

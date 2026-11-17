@@ -9,7 +9,25 @@ const url = require('url');
 const PORT = process.env.MT4_PORT || 8003;
 
 // Cache em memória de cotações recebidas dos EAs MT4/MT5
-const quotesCache = new Map(); // symbol -> { price, bid, ask, volume, updated_at }
+const quotesCache = new Map(); // symbol -> { price, bid, ask, spread, volume, updated_at }
+
+// Constrói cotação SOMENTE com Bid e Ask autênticos enviados pelo EA.
+// NUNCA fabrica Ask (=Bid) nem zera o Ask: leitura incompleta retorna null e o cache mantém
+// o último par Bid/Ask real (portanto o último spread real).
+function buildRealQuote(sym, item) {
+  const bid = Number(item && item.bid || 0);
+  const ask = Number(item && item.ask || 0);
+  if (!sym || !(bid > 0) || !(ask > 0) || ask < bid) return null;
+  return {
+    symbol: sym,
+    price: Number(item.price || bid),
+    bid,
+    ask,
+    spread: Number((ask - bid).toFixed(6)),
+    volume: Number(item.volume || 1),
+    updated_at: item.updated_at || new Date().toISOString()
+  };
+}
 const accountsConnected = new Map(); // accountNumber -> { lastSeen: Date, symbol: string }
 const accountsPositions = new Map(); // accountNumber -> Array<{ ticket, symbol, side, lots, entry_price, sl, tp, profit, open_time }>
 const accountsTradesHistory = new Map(); // accountNumber -> Array<{ ticket, symbol, side, lots, entry_price, exit_price, profit, net_profit, open_time, close_time }>
@@ -112,18 +130,8 @@ function getMt4Queue(accNum) {
           const list = Array.isArray(data.quotes) ? data.quotes : data;
           for (const item of list) {
             const sym = (item.symbol || '').toUpperCase();
-            const bid = Number(item.bid || 0);
-            const ask = Number(item.ask || bid);
-            if (sym && bid > 0) {
-              quotesCache.set(sym, {
-                symbol: sym,
-                price: Number(item.price || (bid + ask) * 0.5),
-                bid: bid,
-                ask: ask,
-                volume: Number(item.volume || 1),
-                updated_at: item.updated_at || new Date().toISOString()
-              });
-            }
+            const qObj = buildRealQuote(sym, item);
+            if (qObj) quotesCache.set(sym, qObj);
           }
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true, count: list.length }));
@@ -132,14 +140,8 @@ function getMt4Queue(accNum) {
 
         const sym = (data.symbol || '').toUpperCase();
         if (sym) {
-          quotesCache.set(sym, {
-            symbol: sym,
-            price: Number(data.price || data.close || 0),
-            bid: Number(data.bid || 0),
-            ask: Number(data.ask || 0),
-            volume: Number(data.volume || 0),
-            updated_at: data.updated_at || new Date().toISOString()
-          });
+          const realTick = buildRealQuote(sym, data);
+          if (realTick) quotesCache.set(sym, realTick);
         }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -193,34 +195,16 @@ function getMt4Queue(accNum) {
         if (Array.isArray(bodyData.quotes)) {
           for (const item of bodyData.quotes) {
             const sym = (item.symbol || '').toUpperCase();
-            const bid = Number(item.bid || 0);
-            const ask = Number(item.ask || bid);
-            if (sym && bid > 0) {
-              quotesCache.set(sym, {
-                symbol: sym,
-                price: Number(item.price || (bid + ask) * 0.5),
-                bid: bid,
-                ask: ask,
-                volume: Number(item.volume || 1),
-                updated_at: item.updated_at || new Date().toISOString()
-              });
-            }
+            const qObj = buildRealQuote(sym, item);
+            if (qObj) quotesCache.set(sym, qObj);
           }
         }
 
         const qSym = (query.symbol || bodyData.symbol || existing.symbol || '').toUpperCase();
         const qBid = Number(query.bid || bodyData.bid || 0);
         const qAsk = Number(query.ask || bodyData.ask || 0);
-        if (qSym && (qBid > 0 || qAsk > 0)) {
-          quotesCache.set(qSym, {
-            symbol: qSym,
-            price: qBid || qAsk,
-            bid: qBid,
-            ask: qAsk,
-            volume: 1,
-            updated_at: new Date().toISOString()
-          });
-        }
+        const qReal = buildRealQuote(qSym, { bid: qBid, ask: qAsk, price: qBid, volume: 1, updated_at: new Date().toISOString() });
+        if (qReal) quotesCache.set(qSym, qReal);
       }
 
       // Busca próximo comando pendente para a conta ou comando global
@@ -593,18 +577,8 @@ function getMt4Queue(accNum) {
           if (Array.isArray(item.quotes)) {
             for (const q of item.quotes) {
               const sym = String(q.symbol || '').toUpperCase();
-              const bid = Number(q.bid || 0);
-              const ask = Number(q.ask || bid);
-              if (sym && bid > 0) {
-                quotesCache.set(sym, {
-                  symbol: sym,
-                  price: Number(q.price || bid),
-                  bid,
-                  ask,
-                  volume: 1,
-                  updated_at: q.updated_at || new Date().toISOString()
-                });
-              }
+              const qObj = buildRealQuote(sym, q);
+              if (qObj) quotesCache.set(sym, qObj);
             }
           }
           res.writeHead(200, { 'Content-Type': 'application/json' });

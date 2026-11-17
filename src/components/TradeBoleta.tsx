@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { resolveDisplayQuote } from '../utils/realQuote';
 import { useApp } from '../context/AppContext';
 import { PRESET_ATM_STRATEGIES, type ATMStrategy, type ATMBracket } from '../utils/atmRegistry';
 import { ATMStrategyModal } from './ATMStrategyModal';
@@ -83,35 +84,13 @@ export const TradeBoleta: React.FC<TradeBoletaProps> = ({
 
   const tickSize = resolvePanelTickSize(effectivePanel, effectiveSettings);
   const boletaDecimals = tickSize < 1 ? Math.max(2, getTickDecimals(tickSize)) : 2;
-  const rawBid = Number(effectiveMarketData?.bid || 0);
-  const rawAsk = Number(effectiveMarketData?.ask || 0);
-  const hasDistinctSpread = rawBid > 0 && rawAsk > 0 && rawAsk > rawBid;
 
-  // Preservação do spread real: NUNCA regride para o tick sintético (0.25)
-  const lastKnownSpreadRef = useRef<number | null>(null);
-  const currentSpread = hasDistinctSpread
-    ? Number((rawAsk - rawBid).toFixed(boletaDecimals))
-    : (effectiveMarketData?.spread && Number(effectiveMarketData.spread) > tickSize
-      ? Number(Number(effectiveMarketData.spread).toFixed(boletaDecimals))
-      : null);
-
-  if (currentSpread && currentSpread > tickSize) {
-    lastKnownSpreadRef.current = currentSpread;
-  }
-
-  const effectiveSpread = (currentSpread && currentSpread > tickSize)
-    ? currentSpread
-    : (lastKnownSpreadRef.current && lastKnownSpreadRef.current > tickSize ? lastKnownSpreadRef.current : null);
-
-  const liveBid = hasDistinctSpread
-    ? rawBid
-    : (livePrice > 0 ? livePrice : 0);
-  const liveAsk = hasDistinctSpread
-    ? rawAsk
-    : (effectiveSpread && liveBid > 0
-      ? Number((liveBid + effectiveSpread).toFixed(boletaDecimals))
-      : (livePrice > 0 ? livePrice : 0));
-  const liveSpread = effectiveSpread || 0;
+  // Bid/Ask/Spread SOMENTE da fonte (DB / WebSocket / API). Falha de leitura => permanece a última diferença real.
+  // O tick mínimo (0.25) jamais é usado como spread.
+  const displayQuote = resolveDisplayQuote(effectivePanel?.id, effectiveMarketData as any);
+  const liveBid = displayQuote ? displayQuote.bid : (livePrice > 0 ? livePrice : 0);
+  const liveAsk = displayQuote ? displayQuote.ask : 0;
+  const liveSpread = displayQuote ? displayQuote.spread : 0;
 
   // Tabs: LOTE vs FINANCEIRO (derivado diretamente de sizingMode para evitar dessincronia)
 

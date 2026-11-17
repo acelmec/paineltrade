@@ -29,7 +29,7 @@ export function parseInputToDate(dateInput?: string | Date | number | null): Dat
 
   // Se a string de data não possui fuso horário explícito (ex: "YYYY-MM-DDTHH:mm:ss" vindo do Supabase),
   // tenta interpretar com 'Z' primeiro se for ISO completo; caso contrário usa new Date(str) diretamente.
-  let d = new Date(str + 'Z');
+  let d = new Date(str + '-03:00');
   if (isNaN(d.getTime())) {
     d = new Date(str);
   }
@@ -47,13 +47,15 @@ export function isCandleInSessionPause(
 ): boolean {
   if (!timestamp) return false;
 
-  // Criptoativos operam 24/7/365 e NUNCA sofrem pausa de mercado
+  // Criptoativos e Forex operam sem a pausa intradiária de futuros
   if (sym) {
     const s = String(sym).toUpperCase();
     if (
       s.includes('BINANCE') ||
       /USDT|BUSD|USDC/i.test(s) ||
-      /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK|NEAR|SUI|PEPE|RENDER|FET|TAO|WIF|BONK|FLOKI|OP|ARB|FIL|ATOM)/i.test(s)
+      /^(BTC|ETH|SOL|BNB|XRP|DOGE|ADA|AVAX|DOT|LINK|NEAR|SUI|PEPE|RENDER|FET|TAO|WIF|BONK|FLOKI|OP|ARB|FIL|ATOM)/i.test(s) ||
+      /^(EUR|GBP|AUD|NZD|CAD|CHF|USDJPY|EURUSD|GBPUSD)/i.test(s) ||
+      s.includes('ACTIVTRADES') || s.includes('PEPPERSTONE')
     ) {
       return false;
     }

@@ -115,6 +115,7 @@ import { fetchStreamerMarketData, isStreamerWsConnected } from '../services/vort
 import { getLocalPlatformConnections } from '../services/connectionsService';
 import { executeCTraderOrder } from '../services/ctraderService';
 import { isTickMatchingPanel, resolveAssetSource } from '../utils/marketSource';
+import { resolveDisplayQuote, rememberRealSpread, getLastRealSpread } from '../utils/realQuote';
 import { PRESET_ATM_STRATEGIES, resolveAlgorithmAtm, type ATMStrategy, type ATMBracket } from '../utils/atmRegistry';
 
 function extractPriceActionFromCandles(candles: Candle[]) {
@@ -9083,15 +9084,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
         if (rawQuote) {
           const qBid = Number(rawQuote.bid || rawQuote.price || 0);
-          const qAsk = Number(rawQuote.ask || qBid);
-          const numPrice = (qBid > 0 && qAsk > 0) ? Math.min(qBid, qAsk) : (qBid > 0 ? qBid : Number(rawQuote.price || 0));
-          const panelTick = resolvePanelTickSize(targetPanel, targetSettings);
-          const spread = Number(Math.max(panelTick, qAsk - qBid).toFixed(5));
+          const qAsk = Number(rawQuote.ask || 0);
+          // Somente Bid/Ask da fonte; sem Ask real permanece a última diferença real (nunca tick mínimo)
+          const dqMt = resolveDisplayQuote(targetPanel.id, { bid: qBid, ask: qAsk, price: rawQuote.price });
+          const numPrice = dqMt ? dqMt.bid : (qBid > 0 ? qBid : Number(rawQuote.price || 0));
+          const spread: number | undefined = (dqMt && dqMt.spread > 0) ? dqMt.spread : undefined;
           mData = {
             symbol: baseSym,
             price: String(numPrice),
-            bid: qBid > 0 ? qBid : numPrice,
-            ask: qAsk > 0 ? qAsk : numPrice,
+            bid: numPrice,
+            ask: dqMt ? dqMt.ask : 0,
             spread,
             zScore: cache.marketData?.zScore || 0,
             atrRatio: cache.marketData?.atrRatio || 1,
@@ -9159,16 +9161,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (mtQuote) {
         const qBid = Number(mtQuote.bid || mtQuote.price || 0);
-        const qAsk = Number(mtQuote.ask || qBid);
-        if (qBid > 0 && qAsk > 0 && qAsk >= qBid) {
-          const numPrice = Math.min(qBid, qAsk);
-          const panelTick = resolvePanelTickSize(targetPanel, targetSettings);
-          const spread = Number(Math.max(panelTick, qAsk - qBid).toFixed(5));
+        const qAsk = Number(mtQuote.ask || 0);
+        if (qBid > 0 && qAsk > qBid) {
+          const mtSpr = Number((qAsk - qBid).toFixed(6));
+          rememberRealSpread(targetPanel.id, mtSpr);
+          lastKnownPanelSpreadsRef.current[targetPanel.id] = mtSpr;
+        }
+        const existingPanelRefPrice = isStandardSupabase
+          ? ((cache.candles && cache.candles.length > 0 && Number(cache.candles[cache.candles.length - 1].close) > 0)
+            ? Number(cache.candles[cache.candles.length - 1].close)
+            : (cache.marketData?.price && Number(cache.marketData.price) > 0 ? Number(cache.marketData.price) : 0))
+          : 0;
+        const quoteInput = (isStandardSupabase && existingPanelRefPrice > 0)
+          ? { price: existingPanelRefPrice, bid: existingPanelRefPrice, ask: 0 }
+          : { bid: qBid, ask: qAsk, price: mtQuote.price };
+        // Somente Bid/Ask da fonte (MetaTrader); sem Ask real permanece a última diferença real
+        const dqQ = resolveDisplayQuote(targetPanel.id, quoteInput);
+        if (dqQ) {
+          if (isStandardSupabase && existingPanelRefPrice > 0) {
+            isSyntheticFallback = true;
+          }
+          const numPrice = dqQ.bid;
+          const spread: number | undefined = dqQ.spread > 0 ? dqQ.spread : undefined;
           mData = {
             symbol: targetPanel.symbol || targetPanel.name || mtQuote.symbol || 'ASSET',
             price: String(numPrice),
-            bid: qBid,
-            ask: qAsk,
+            bid: dqQ.bid,
+            ask: dqQ.ask,
             spread,
             zScore: cache.marketData?.zScore || 0,
             atrRatio: cache.marketData?.atrRatio || 1,
@@ -9187,20 +9206,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           };
           cache.marketData = mData;
         }
+      } else if (!isMDataTimestampFresh && cache.marketData && !(cache.marketData as any).is_synthetic && Number(cache.marketData.bid || 0) > 0) {
+        // Já existe cotação REAL no cache (alimentada por WebSocket/API): ela NUNCA é substituída por dado sintético.
+        mData = cache.marketData;
       } else if (!isMDataTimestampFresh && cache.candles && cache.candles.length > 0) {
         const lastC = cache.candles[cache.candles.length - 1];
         const lastCPrice = Number(lastC.close);
         if (lastCPrice > 0) {
           isSyntheticFallback = true;
-          const fallbackTick = resolvePanelTickSize(targetPanel, targetSettings);
-          const rememberedSpread = lastKnownPanelSpreadsRef.current[targetPanel.id] || cache.marketData?.spread;
-          // Usa spread real memorizado; se não há nenhum, deixa undefined (badge oculto) em vez de mostrar tick mínimo
-          const spread = (rememberedSpread && Number(rememberedSpread) > fallbackTick) ? Number(rememberedSpread) : undefined;
+          // Dado sintético NÃO é cotação de fonte: sem Bid/Ask/Spread (o indicador BID/ASK não plota dado inventado)
+          const spread: number | undefined = undefined;
           mData = {
             symbol: targetPanel.symbol || targetPanel.name || targetPanel.instance_id || 'ASSET',
             price: String(lastCPrice),
-            bid: lastCPrice,
-            ask: spread ? Number((lastCPrice + spread).toFixed(6)) : lastCPrice,
             spread,
             zScore: cache.marketData?.zScore || 0,
             atrRatio: cache.marketData?.atrRatio || 1,
@@ -9225,10 +9243,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (mData) {
         const prevSpread = lastKnownPanelSpreadsRef.current[targetPanel.id] || cache.marketData?.spread;
         mData = normalizeMarketDataSpread(mData, targetPanel, targetSettings, prevSpread);
-        // Só persiste o spread se ele é genuinamente maior que o tick mínimo (spread real, não tick sintético)
-        const fallbackTick = resolvePanelTickSize(targetPanel, targetSettings);
-        if (mData && mData.spread && Number(mData.spread) > fallbackTick) {
-          lastKnownPanelSpreadsRef.current[targetPanel.id] = Number(mData.spread);
+        // Persiste a diferença SOMENTE quando veio de um par Bid/Ask real da fonte (nunca de dado sintético/tick)
+        if (mData && !(mData as any).is_synthetic && Number(mData.bid || 0) > 0 && Number(mData.ask || 0) > Number(mData.bid || 0)) {
+          lastKnownPanelSpreadsRef.current[targetPanel.id] = Number((Number(mData.ask) - Number(mData.bid)).toFixed(6));
         }
         cache.marketData = mData;
         if (!checkIsActive() && visibleMultiPanelIdsRef.current.includes(targetPanel.id)) {
@@ -13993,7 +14010,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
       if (snap.symbol && (Number(snap.bid || 0) > 0 || Number(snap.price || 0) > 0)) {
         const symMain = String(snap.symbol).toUpperCase();
         const bidMain = Number(snap.bid || snap.price || 0);
-        const askMain = Number(snap.ask || bidMain);
+        const askMain = Number(snap.ask || 0);
         const lowRefMain = (bidMain > 0 && askMain > 0) ? Math.min(bidMain, askMain) : bidMain;
         if (typeof window !== 'undefined' && lowRefMain > 0) {
           window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
@@ -14015,7 +14032,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         snap.quotes.forEach((qData: any) => {
           const sym = String(qData.symbol || '').toUpperCase();
           const qBid = Number(qData.bid || qData.price || 0);
-          const qAsk = Number(qData.ask || qBid);
+          const qAsk = Number(qData.ask || 0);
           const numPrice = (qBid > 0 && qAsk > 0) ? Math.min(qBid, qAsk) : qBid;
           if (!sym || numPrice <= 0) return;
           if (typeof window !== 'undefined') {
@@ -14025,7 +14042,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                 panel: sym.toLowerCase(),
                 price: numPrice,
                 bid: qBid > 0 ? qBid : numPrice,
-                ask: qAsk > 0 ? qAsk : numPrice,
+                ask: qAsk > 0 ? qAsk : 0,
                 volume: Number(qData.volume || 1),
                 source: acc.platform || 'mt4',
                 updated_at: snap.updated_at || new Date().toISOString()
@@ -14199,7 +14216,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                     panel: sym.toLowerCase(),
                     price: numPrice,
                     bid: Number(qData.bid || numPrice),
-                    ask: Number(qData.ask || numPrice),
+                    ask: Number(qData.ask || 0),
                     volume: Number(qData.volume || 1),
                     source: 'mt4',
                     updated_at: qData.updated_at || new Date().toISOString()
@@ -15366,13 +15383,18 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
             const c = payload.new;
             if (!c || !c.timestamp) return;
 
+            const rawParsed = parseInputToDate(c.timestamp);
+            if (!rawParsed || isNaN(rawParsed.getTime())) return;
+            // painelvm_candles_1m grava Close Time (dt + 60s); converte para Open Time (-60s) idêntico ao MT4
+            const openTimeIso = new Date(rawParsed.getTime() - 60000).toISOString();
+
             lastRealtimeTickRef.current = Date.now();
 
             const existingCandles = cache.candles || [];
             if (existingCandles.length === 0) return; // Evita criar estado de 1 vela se o histórico ainda está baixando
             
             const newCandle: Candle = {
-              timestamp: c.timestamp,
+              timestamp: openTimeIso,
               open: Number(c.open || 0),
               high: Number(c.high || 0),
               low: Number(c.low || 0),
@@ -15542,26 +15564,6 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
               return;
             }
 
-            // Disparo instantâneo (<5ms) de ticks de preço e Bid/Ask recebidos via WebSocket para todos os componentes (Boleta, Gráfico, Ordens Ativas)
-            if (msg.type === 'market_data' && msg.data && typeof window !== 'undefined') {
-              const d = msg.data;
-              const dSym = String(d.symbol || incomingInst || '').toUpperCase();
-              const dPrice = Number(d.price || d.bid || 0);
-              if (dSym && !dSym.startsWith('MT4_SYNC') && dPrice > 0) {
-                window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
-                  detail: {
-                    symbol: dSym,
-                    panel: String(incomingInst || dSym).toLowerCase(),
-                    price: dPrice,
-                    bid: Number(d.bid || dPrice),
-                    ask: Number(d.ask || dPrice),
-                    volume: Number(d.volume || 1),
-                    source: 'nt8',
-                    updated_at: d.updated_at || new Date().toISOString()
-                  }
-                }));
-              }
-            }
             let targetPanel = activePanelRef.current || activePanel;
             if (incomingInst && allPanelsRef.current.length > 0) {
               const matched = allPanelsRef.current.find((p: any) => {
@@ -15577,6 +15579,41 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
               });
               if (matched) {
                 targetPanel = matched;
+              }
+            }
+
+            // Disparo instantâneo (<5ms) de ticks de preço e Bid/Ask recebidos via WebSocket para todos os componentes (Boleta, Gráfico, Ordens Ativas)
+            if (msg.type === 'market_data' && msg.data && typeof window !== 'undefined') {
+              const d = msg.data;
+              const dSym = String(d.symbol || incomingInst || '').toUpperCase();
+              const dPrice = Number(d.price || d.bid || 0);
+              if (dSym && !dSym.startsWith('MT4_SYNC') && dPrice > 0) {
+                let tickBid = Number(d.bid || dPrice);
+                let tickAsk = Number(d.ask || 0);
+                if (!(tickAsk > tickBid) && targetPanel) {
+                  const mtQ = findMtQuoteForAsset(targetPanel);
+                  if (mtQ && Number(mtQ.bid) > 0 && Number(mtQ.ask) > Number(mtQ.bid)) {
+                    const mtSpr = Number((Number(mtQ.ask) - Number(mtQ.bid)).toFixed(6));
+                    rememberRealSpread(targetPanel.id, mtSpr);
+                    lastKnownPanelSpreadsRef.current[targetPanel.id] = mtSpr;
+                  }
+                  const lastSpr = getLastRealSpread(targetPanel.id) || lastKnownPanelSpreadsRef.current[targetPanel.id] || 0;
+                  if (lastSpr > 0) {
+                    tickAsk = Number((tickBid + lastSpr).toFixed(6));
+                  }
+                }
+                window.dispatchEvent(new CustomEvent('vortex_streamer_tick', {
+                  detail: {
+                    symbol: dSym,
+                    panel: String(incomingInst || dSym).toLowerCase(),
+                    price: dPrice,
+                    bid: tickBid,
+                    ask: tickAsk,
+                    volume: Number(d.volume || 1),
+                    source: 'nt8',
+                    updated_at: d.updated_at || new Date().toISOString()
+                  }
+                }));
               }
             }
             if (!targetPanel) return;
@@ -15614,9 +15651,28 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                 side: String(t.side || 'COMPRA').toUpperCase()
               })) : [];
 
+              const wsPrice = Number(d.price || d.bid || 0);
+              const mtQForPanel = findMtQuoteForAsset(targetPanel);
+              if (mtQForPanel && Number(mtQForPanel.bid) > 0 && Number(mtQForPanel.ask) > Number(mtQForPanel.bid)) {
+                const mtSpr = Number((Number(mtQForPanel.ask) - Number(mtQForPanel.bid)).toFixed(6));
+                rememberRealSpread(targetPanel.id, mtSpr);
+                lastKnownPanelSpreadsRef.current[targetPanel.id] = mtSpr;
+              }
+              const dqWs = resolveDisplayQuote(targetPanel.id, {
+                price: wsPrice,
+                bid: Number(d.bid || wsPrice),
+                ask: Number(d.ask || 0)
+              });
+              const resolvedWsBid = dqWs ? dqWs.bid : wsPrice;
+              const resolvedWsAsk = dqWs ? dqWs.ask : 0;
+              const resolvedWsSpread: number | undefined = (dqWs && dqWs.spread > 0) ? dqWs.spread : undefined;
+
               const mData: MarketData = {
                 symbol: d.symbol || '--',
                 price: d.price !== undefined ? String(d.price) : '--',
+                bid: resolvedWsBid > 0 ? resolvedWsBid : undefined,
+                ask: resolvedWsAsk > 0 ? resolvedWsAsk : undefined,
+                spread: resolvedWsSpread,
                 zScore: Number(d.zscore || 0),
                 atrRatio: Number(d.atr_ratio || 0),
                 estado: d.estado || 'AGUARDANDO',
@@ -15629,7 +15685,7 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
                 sellVolume: Number(d.sell_volume || 0),
                 printsPerSecond: Number(d.print_rate || 0),
                 blockTrades: formattedTrades,
-                updated_at: d.updated_at
+                updated_at: d.updated_at || new Date().toISOString()
               };
 
               lastRealtimeTickRef.current = Date.now();
@@ -15718,51 +15774,64 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
               }
 
               if (c && c.timestamp) {
-                syncServerClock(c.timestamp);
-                const o = Number(c.open || 0);
-                const h = Number(c.high || 0);
-                const l = Number(c.low || 0);
-                const cl = Number(c.close || 0);
+                const rawParsed = parseInputToDate(c.timestamp);
+                const openTimeMs = (rawParsed && !isNaN(rawParsed.getTime())) ? (rawParsed.getTime() - 60000) : NaN;
+                if (!isNaN(openTimeMs) && openTimeMs > 0) {
+                  const openTimeIso = new Date(openTimeMs).toISOString();
+                  syncServerClock(openTimeIso);
+                  const o = Number(c.open || 0);
+                  const h = Number(c.high || 0);
+                  const l = Number(c.low || 0);
+                  const cl = Number(c.close || 0);
 
-                if (o > 0 && h > 0 && l > 0 && cl > 0 && h >= l) {
-                  cache.lastMarketUpdateAt = Date.now();
-                  lastRealtimeTickRef.current = Date.now();
-                  const newCandle: Candle = {
-                    timestamp: c.timestamp,
-                    open: o,
-                    high: h,
-                    low: l,
-                    close: cl,
-                    volume: c.volume !== undefined ? Number(c.volume) : undefined
-                  };
-                  const existingCandles = cache.candles || [];
-                  const existingMap = new Map<number, Candle>(existingCandles.map((x: Candle) => [Math.floor(new Date(x.timestamp).getTime() / 60000), x]));
-                  const nKey = Math.floor(new Date(newCandle.timestamp).getTime() / 60000);
-                  if (!isNaN(nKey) && nKey > 0) {
-                    existingMap.set(nKey, newCandle);
-                  }
-                  const updated = Array.from(existingMap.values())
-                    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-                  const finalCandles = updated.slice(-10000);
-                  const lastCandle = finalCandles[finalCandles.length - 1];
-                  const lastCandleTime = lastCandle ? lastCandle.timestamp : null;
-                  if ((cache as any).previousLastCandleTime && lastCandleTime && lastCandleTime !== (cache as any).previousLastCandleTime) {
-                    if (aiEnabled && targetSettings.ai_trigger_mode === 'barra') {
-                      addLog('IA', `[${targetPanel.name}] Novo candle fechado detectado (${lastCandleTime}). Disparando análise de IA...`, 'sistema');
-                      executeAiCycleForPanel(targetPanel, targetSettings);
+                  if (o > 0 && h > 0 && l > 0 && cl > 0 && h >= l) {
+                    cache.lastMarketUpdateAt = Date.now();
+                    lastRealtimeTickRef.current = Date.now();
+                    const newCandle: Candle = {
+                      timestamp: openTimeIso,
+                      open: o,
+                      high: h,
+                      low: l,
+                      close: cl,
+                      volume: c.volume !== undefined ? Number(c.volume) : undefined
+                    };
+                    const existingCandles = cache.candles || [];
+                    const existingMap = new Map<number, Candle>(existingCandles.map((x: Candle) => [Math.floor(new Date(x.timestamp).getTime() / 60000), x]));
+                    const nKey = Math.floor(openTimeMs / 60000);
+                    if (!isNaN(nKey) && nKey > 0) {
+                      existingMap.set(nKey, newCandle);
                     }
+                    const updated = Array.from(existingMap.values())
+                      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                    const finalCandles = updated.slice(-10000);
+                    const lastCandle = finalCandles[finalCandles.length - 1];
+                    const lastCandleTime = lastCandle ? lastCandle.timestamp : null;
+                    if ((cache as any).previousLastCandleTime && lastCandleTime && lastCandleTime !== (cache as any).previousLastCandleTime) {
+                      if (aiEnabled && targetSettings.ai_trigger_mode === 'barra') {
+                        addLog('IA', `[${targetPanel.name}] Novo candle fechado detectado (${lastCandleTime}). Disparando análise de IA...`, 'sistema');
+                        executeAiCycleForPanel(targetPanel, targetSettings);
+                      }
+                    }
+                    (cache as any).previousLastCandleTime = lastCandleTime;
+                    cache.candles = finalCandles;
+                    if (cache.marketData && lastCandle && lastCandle.timestamp === newCandle.timestamp) {
+                      const dqC = resolveDisplayQuote(targetPanel.id, { price: cl, bid: cl, ask: 0 });
+                      cache.marketData = {
+                        ...cache.marketData,
+                        price: String(cl),
+                        bid: dqC ? dqC.bid : cl,
+                        ask: (dqC && dqC.ask > 0) ? dqC.ask : cache.marketData.ask,
+                        spread: (dqC && dqC.spread > 0) ? dqC.spread : cache.marketData.spread
+                      };
+                    }
+                    if (activePanelRef.current?.id === targetPanel.id) {
+                      setCandles(finalCandles);
+                      if (cache.marketData) setMarketData(cache.marketData);
+                    } else {
+                      bumpPanelCacheVersion();
+                    }
+                    runMarketLogicForPanel(targetPanel, targetSettings, cache, cache.marketData, cache.forces, cache.gammaLevels);
                   }
-                  (cache as any).previousLastCandleTime = lastCandleTime;
-                  cache.candles = finalCandles;
-                  if (cache.marketData && lastCandle && lastCandle.timestamp === newCandle.timestamp) {
-                    cache.marketData = { ...cache.marketData, price: String(cl) };
-                  }
-                  if (activePanelRef.current?.id === targetPanel.id) {
-                    setCandles(finalCandles);
-                  } else {
-                    bumpPanelCacheVersion();
-                  }
-                  runMarketLogicForPanel(targetPanel, targetSettings, cache, cache.marketData, cache.forces, cache.gammaLevels);
                 }
               }
             } else if (msg.type === 'strategy_report_closed' || msg.type === 'order_closed') {
@@ -16080,33 +16149,53 @@ Por favor, valide se esse sinal de ${robotSignal.side} emitido pelo robô está 
         }
         const cache = panelDataCache.current[matchedPanel.id];
 
-        const panelTick = resolvePanelTickSize(matchedPanel, allSettings[matchedPanel.id]);
         const rawBid = (detail.bid && Number(detail.bid) > 0) ? Number(detail.bid) : 0;
         const rawAsk = (detail.ask && Number(detail.ask) > 0) ? Number(detail.ask) : 0;
-        const hasStreamSpread = rawBid > 0 && rawAsk > 0 && rawAsk > rawBid;
-        // Spread real somente quando Bid+Ask autênticos e distintos chegam no tick
-        const realSpreadFromStream = hasStreamSpread ? Number((rawAsk - rawBid).toFixed(6)) : 0;
-        // Preserva spread real anterior — NUNCA usa panelTick (0.25) como spread de exibição
-        const prevKnownReal = lastKnownPanelSpreadsRef.current[matchedPanel.id];
-        const prevCacheSpread = cache.marketData?.spread !== undefined && Number(cache.marketData.spread) > panelTick
-          ? Number(cache.marketData.spread)
-          : undefined;
-        // Prioridade: spread real do tick atual > spread real memorizado > spread real do cache > undefined (oculto)
-        const effectiveSpread = hasStreamSpread
-          ? realSpreadFromStream
-          : (prevKnownReal && prevKnownReal > panelTick
-            ? prevKnownReal
-            : (prevCacheSpread ?? undefined));
-        const numBid = hasStreamSpread ? rawBid : (numPrice > 0 ? numPrice : 0);
-        const numAsk = hasStreamSpread
-          ? rawAsk
-          : (numPrice > 0 && effectiveSpread && effectiveSpread > panelTick
-            ? Number((numPrice + effectiveSpread).toFixed(6))
-            : numPrice);
-        const numSpread = effectiveSpread; // pode ser undefined — badge ficará oculto
-        // Só persiste spread real autêntico (> panelTick); NUNCA grava 0.25 no ref
-        if (hasStreamSpread && realSpreadFromStream > panelTick) {
-          lastKnownPanelSpreadsRef.current[matchedPanel.id] = realSpreadFromStream;
+        const isMtTick = ['mt', 'mt4', 'mt5', 'metatrader'].includes(String(detail.source || '').toLowerCase());
+        const isStdSupabase = isStandardSupabasePanel(matchedPanel);
+
+        // Quando um tick de /quotes (MT4) bate em um painel AxionDB (Supabase), capturamos a diferença (spread real)
+        // mas mantemos o preço próprio do painel (que possui InpPriceOffset do coletor) para nunca deslocar o candle ou a linha Bid!
+        if (rawBid > 0 && rawAsk > rawBid) {
+          const realSpr = Number((rawAsk - rawBid).toFixed(6));
+          rememberRealSpread(matchedPanel.id, realSpr);
+          lastKnownPanelSpreadsRef.current[matchedPanel.id] = realSpr;
+        }
+
+        const existingPanelPrice = (cache.marketData?.price && Number(cache.marketData.price) > 0)
+          ? Number(cache.marketData.price)
+          : ((cache.candles && cache.candles.length > 0) ? Number(cache.candles[cache.candles.length - 1].close || 0) : 0);
+
+        if (isStdSupabase && isMtTick && existingPanelPrice > 0) {
+          const dqStd = resolveDisplayQuote(matchedPanel.id, { price: existingPanelPrice, bid: existingPanelPrice, ask: 0 });
+          if (cache.marketData && dqStd) {
+            const nextM: MarketData = {
+              ...cache.marketData,
+              bid: dqStd.bid,
+              ask: dqStd.ask > 0 ? dqStd.ask : cache.marketData.ask,
+              spread: dqStd.spread > 0 ? dqStd.spread : cache.marketData.spread
+            };
+            const sprChanged = cache.marketData.bid !== nextM.bid || cache.marketData.ask !== nextM.ask || cache.marketData.spread !== nextM.spread;
+            cache.marketData = nextM;
+            if (sprChanged) {
+              if (activePanelRef.current?.id === matchedPanel.id) {
+                setMarketData(nextM);
+              } else {
+                bumpPanelCacheVersion();
+              }
+            }
+          }
+          continue;
+        }
+
+        // Cotação SOMENTE da fonte: par Bid/Ask real do tick; sem Ask real permanece o ÚLTIMO spread real conhecido.
+        // O tick mínimo (0.25) nunca é usado como spread e nenhum Ask é inventado.
+        const streamQuote = resolveDisplayQuote(matchedPanel.id, { bid: rawBid, ask: rawAsk, price: numPrice });
+        const numBid = streamQuote ? streamQuote.bid : (numPrice > 0 ? numPrice : 0);
+        const numAsk = streamQuote ? streamQuote.ask : 0;
+        const numSpread: number | undefined = (streamQuote && streamQuote.spread > 0) ? streamQuote.spread : undefined;
+        if (streamQuote && streamQuote.isRealPair) {
+          lastKnownPanelSpreadsRef.current[matchedPanel.id] = streamQuote.spread;
         }
         const prevM = cache.marketData;
         const bidAskChanged = !prevM || prevM.bid !== numBid || prevM.ask !== numAsk || Number(prevM.price) !== numPrice;

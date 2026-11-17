@@ -13,6 +13,7 @@ import {
 } from '../services/db';
 import { useApp, calculateFVGs } from '../context/AppContext';
 import { getAccountManualStrategyId, saveAccountStrategySupabase, updateStrategyReportLevelsSupabase, isStandardSupabasePanel } from '../services/db';
+import { resolveDisplayQuote, rememberRealSpread } from '../utils/realQuote';
 import { resolveAssetSource, isTickMatchingPanel } from '../utils/marketSource';
 import { getChartTimeFromDate, parseInputToDate, getTradingSessionKey, isCandleInSessionPause, getSaoPauloDate, formatSaoPauloDayMonth, formatSaoPauloTime } from '../utils/date';
 import {
@@ -947,7 +948,6 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
   const lastRsiCountRef = useRef<number>(0);
   const lastMacdCountRef = useRef<number>(0);
   const lastEmacdHistCountRef = useRef<number>(0);
-  const lastValidSpreadRef = useRef<number | null>(null);
   const markersPluginRef = useRef<any | null>(null);
   const dynamicSeriesPoolRef = useRef<Map<string, any[]>>(new Map());
   const dynamicMarkersRef = useRef<any[]>([]);
@@ -2907,26 +2907,10 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       ? Number(marketData.price)
       : ((chartDataRef.current && chartDataRef.current.length > 0) ? chartDataRef.current[chartDataRef.current.length - 1].close : 0);
 
-    const rawBid = Number(marketData?.bid || 0);
-    const rawAsk = Number(marketData?.ask || 0);
-    const chartTick = resolvePanelTickSize(activePanel, settings);
-    const hasDistinctSpread = rawBid > 0 && rawAsk > 0 && rawAsk > rawBid;
-
-    const mDataSpread = marketData?.spread && Number(marketData.spread) > chartTick ? Number(marketData.spread) : null;
-    const knownSpread = hasDistinctSpread
-      ? Number((rawAsk - rawBid).toFixed(6))
-      : (mDataSpread || (lastValidSpreadRef.current && lastValidSpreadRef.current > chartTick ? lastValidSpreadRef.current : null));
-
-    if (knownSpread && knownSpread > chartTick) {
-      lastValidSpreadRef.current = knownSpread;
-    }
-
-    const bidVal = hasDistinctSpread ? rawBid : (lastVal > 0 ? lastVal : 0);
-    const askVal = hasDistinctSpread
-      ? rawAsk
-      : (knownSpread && bidVal > 0
-        ? Number((bidVal + knownSpread).toFixed(getTickDecimals(chartTick) || 2))
-        : (lastVal > 0 ? lastVal : 0));
+    // BID/ASK: somente preços provenientes da fonte (DB / WebSocket / API). Falha de leitura => última diferença real.
+    const dq = resolveDisplayQuote(activePanel?.id, marketData as any);
+    const bidVal = dq ? dq.bid : 0;
+    const askVal = dq ? dq.ask : 0;
 
     const shouldShowBid = (cfg.plotMode === 'bid_ask' || cfg.plotMode === 'bid' || cfg.plotMode === 'all') && bidVal > 0;
     const shouldShowAsk = (cfg.plotMode === 'bid_ask' || cfg.plotMode === 'ask' || cfg.plotMode === 'all') && askVal > 0;
@@ -3050,25 +3034,22 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
       const cfg = resolvedPriceLineConfigRef.current;
       if (!cfg.enabled || cfg.plotMode === 'none') return;
 
-      const lastVal = Number(detail.price || 0);
-      const rawBid = Number(detail.bid || 0);
-      const rawAsk = Number(detail.ask || 0);
-      const chartTick = resolvePanelTickSize(activePanel, settings);
-      const hasDistinctSpread = rawBid > 0 && rawAsk > 0 && rawAsk > rawBid;
-
-      const streamSpread = hasDistinctSpread ? Number((rawAsk - rawBid).toFixed(6)) : null;
-      const knownSpread = streamSpread || (lastValidSpreadRef.current && lastValidSpreadRef.current > chartTick ? lastValidSpreadRef.current : null);
-
-      if (knownSpread && knownSpread > chartTick) {
-        lastValidSpreadRef.current = knownSpread;
+      const rawTickBid = Number(detail.bid || 0);
+      const rawTickAsk = Number(detail.ask || 0);
+      if (rawTickBid > 0 && rawTickAsk > rawTickBid) {
+        rememberRealSpread(activePanel?.id, Number((rawTickAsk - rawTickBid).toFixed(6)));
       }
-
-      const bidVal = hasDistinctSpread ? rawBid : (lastVal > 0 ? lastVal : 0);
-      const askVal = hasDistinctSpread
-        ? rawAsk
-        : (knownSpread && bidVal > 0
-          ? Number((bidVal + knownSpread).toFixed(getTickDecimals(chartTick) || 2))
-          : (lastVal > 0 ? lastVal : 0));
+      const isMtTickOnSupabasePanel = isStandardSupabasePanel(activePanel) && ['mt', 'mt4', 'mt5', 'metatrader'].includes(String(detail.source || '').toLowerCase());
+      const panelOwnPrice = (marketData?.price && Number(marketData.price) > 0)
+        ? Number(marketData.price)
+        : ((chartDataRef.current && chartDataRef.current.length > 0) ? Number(chartDataRef.current[chartDataRef.current.length - 1].close || 0) : 0);
+      const quoteSource = (isMtTickOnSupabasePanel && panelOwnPrice > 0)
+        ? { price: panelOwnPrice, bid: panelOwnPrice, ask: 0 }
+        : detail;
+      const lastVal = (isMtTickOnSupabasePanel && panelOwnPrice > 0) ? panelOwnPrice : Number(detail.price || 0);
+      const dq = resolveDisplayQuote(activePanel?.id, quoteSource);
+      const bidVal = dq ? dq.bid : 0;
+      const askVal = dq ? dq.ask : 0;
 
       const shouldShowBid = (cfg.plotMode === 'bid_ask' || cfg.plotMode === 'bid' || cfg.plotMode === 'all') && bidVal > 0;
       const shouldShowAsk = (cfg.plotMode === 'bid_ask' || cfg.plotMode === 'ask' || cfg.plotMode === 'all') && askVal > 0;
@@ -5557,26 +5538,9 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
 
             if (endX > startX) {
               const lVal = (marketData?.price && Number(marketData.price) > 0) ? Number(marketData.price) : lastCandle.close;
-              const rawB = Number(marketData?.bid || 0);
-              const rawA = Number(marketData?.ask || 0);
-              const hasSpread = rawB > 0 && rawA > 0 && rawA > rawB;
-              const tickSz = resolvePanelTickSize(activePanel, settings);
-              const knownSpread = hasSpread
-                ? Number((rawA - rawB).toFixed(6))
-                : ((marketData?.spread && Number(marketData.spread) > tickSz)
-                  ? Number(marketData.spread)
-                  : (lastValidSpreadRef.current && lastValidSpreadRef.current > tickSz ? lastValidSpreadRef.current : null));
-
-              if (knownSpread && knownSpread > tickSz) {
-                lastValidSpreadRef.current = knownSpread;
-              }
-
-              const bVal = hasSpread ? rawB : (lVal > 0 ? lVal : 0);
-              const aVal = hasSpread
-                ? rawA
-                : (knownSpread && bVal > 0
-                  ? Number((bVal + knownSpread).toFixed(getTickDecimals(tickSz) || 2))
-                  : (lVal > 0 ? lVal : 0));
+              const dqP = resolveDisplayQuote(activePanel?.id, marketData as any);
+              const bVal = dqP ? dqP.bid : 0;
+              const aVal = dqP ? dqP.ask : 0;
 
               const shouldBid = (pLineCfg.plotMode === 'bid_ask' || pLineCfg.plotMode === 'bid' || pLineCfg.plotMode === 'all') && bVal > 0;
               const shouldAsk = (pLineCfg.plotMode === 'bid_ask' || pLineCfg.plotMode === 'ask' || pLineCfg.plotMode === 'all') && aVal > 0;
@@ -10000,21 +9964,12 @@ const CandleChartInner: React.FC<CandleChartProps> = ({
             {/* Badge de Conexão e Spread Dedicados no Topo de Cada Gráfico */}
             {(() => {
               const src = resolveAssetSource(activePanel, activeAccount);
-              const bVal = Number(marketData?.bid || 0);
-              const aVal = Number(marketData?.ask || 0);
-              const directSpread = Number(marketData?.spread || 0);
-              const sprRaw = (aVal > 0 && bVal > 0 && aVal > bVal) ? (aVal - bVal) : (directSpread > 0 ? directSpread : 0);
-              const chartTick = resolvePanelTickSize(activePanel, settings);
-              // Só armazena spread autêntico (maior que o tick mínimo) — NUNCA deixa o tick mínimo piscar no badge
-              if (sprRaw > chartTick) {
-                lastValidSpreadRef.current = sprRaw;
-              }
-              // Exibe: o spread real atual (se > tick) ou o último spread real memorizado; oculta o badge se só há tick mínimo
-              const spr = sprRaw > chartTick ? sprRaw : (lastValidSpreadRef.current && lastValidSpreadRef.current > chartTick ? lastValidSpreadRef.current : 0);
-              // Nunca exibe 0.25 como spread — oculta o badge se spr=0 (sem spread real ainda)
-              const sprFormatted = spr > chartTick ? (spr < 0.1 ? spr.toFixed(4) : spr.toFixed(2)) : null;
-              const displayBid = bVal > 0 ? bVal : (marketData?.price ? Number(marketData.price) : 0);
-              const displayAsk = aVal > 0 ? aVal : (displayBid > 0 && spr > 0 ? Number((displayBid + spr).toFixed(2)) : 0);
+              // Spread do badge = mesma cotação da fonte usada nas linhas e na boleta (última diferença real preservada)
+              const dqB = resolveDisplayQuote(activePanel?.id, marketData as any);
+              const spr = dqB ? dqB.spread : 0;
+              const sprFormatted = spr > 0 ? (spr < 0.1 ? spr.toFixed(4) : spr.toFixed(2)) : null;
+              const displayBid = dqB ? dqB.bid : 0;
+              const displayAsk = dqB ? dqB.ask : 0;
 
               return (
                 <>

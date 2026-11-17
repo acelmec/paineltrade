@@ -180,47 +180,31 @@ export function formatPriceByTick(price: number, tickSize: number = 0.25): strin
   return price.toFixed(decimals);
 }
 
-export function normalizeMarketDataSpread(mData: MarketData | null, panel?: any, settings?: any, lastKnownSpread?: number | null): MarketData | null {
+export function normalizeMarketDataSpread(mData: MarketData | null, _panel?: any, _settings?: any, lastKnownSpread?: number | null): MarketData | null {
   if (!mData) return null;
+  // Dado sintético não é cotação de fonte: nunca recebe Bid/Ask/Spread
+  if ((mData as any).is_synthetic) return mData;
   const pNum = Number(mData.price || 0);
   if (isNaN(pNum) || pNum <= 0) return mData;
 
-  const tick = resolvePanelTickSize(panel, settings);
   const rawBid = mData.bid !== undefined && mData.bid !== null ? Number(mData.bid) : 0;
   const rawAsk = mData.ask !== undefined && mData.ask !== null ? Number(mData.ask) : 0;
   const hasDistinctSpread = rawBid > 0 && rawAsk > 0 && rawAsk > rawBid;
 
+  // Par Bid/Ask real da fonte: o spread é exatamente a diferença recebida
   if (hasDistinctSpread) {
     mData.spread = Number((rawAsk - rawBid).toFixed(6));
     return mData;
   }
 
-  // Se não há Bid/Ask distintos nesta leitura, SEMPRE preserva o último spread autêntico conhecido!
-  // NUNCA regride para o tick sintético (0.25) se já temos um spread real > tick (ex: 4.50 ou 5.00)
-  const safeLast = (lastKnownSpread !== undefined && lastKnownSpread !== null && lastKnownSpread > tick) ? Number(lastKnownSpread) : 0;
-  const existingSpread = (mData.spread !== undefined && mData.spread !== null && Number(mData.spread) > tick)
-    ? Number(mData.spread)
-    : 0;
-  // Prioridade: spread autêntico do mData > lastKnownSpread > undefined (não exibe badge)
-  // tick mínimo (0.25) NUNCA é usado como spread de exibição
-  const spreadVal = existingSpread > 0
-    ? existingSpread
-    : (safeLast > 0 ? safeLast : undefined);
-
-  if (spreadVal !== undefined) {
-    mData.spread = spreadVal;
-    if ((mData as any).imbalance_dir === 'COMPRADOR') {
-      mData.ask = pNum;
-      mData.bid = Number((pNum - spreadVal).toFixed(6));
-    } else {
-      mData.bid = pNum;
-      mData.ask = Number((pNum + spreadVal).toFixed(6));
-    }
-  } else {
-    // Sem spread real conhecido — mantém Bid=Ask=price para não sugerir spread falso
-    mData.spread = undefined;
-    mData.bid = pNum;
-    mData.ask = pNum;
+  // Leitura sem Ask real (falha de leitura): permanece a ÚLTIMA diferença real conhecida.
+  // O tick mínimo do ativo (ex.: 0.25) NUNCA é usado como spread e nenhum Ask é inventado.
+  const safeLast = (lastKnownSpread !== undefined && lastKnownSpread !== null && lastKnownSpread > 0) ? Number(lastKnownSpread) : 0;
+  if (safeLast > 0) {
+    const refBid = rawBid > 0 ? rawBid : pNum;
+    mData.bid = refBid;
+    mData.ask = Number((refBid + safeLast).toFixed(6));
+    mData.spread = safeLast;
   }
   return mData;
 }
@@ -3585,7 +3569,7 @@ export interface Candle {
 
 export const getLocalCandles = (instanceId: string): Candle[] => {
   try {
-    const raw = localStorage.getItem(`vortex_candles_cache_${instanceId}`);
+    const raw = localStorage.getItem(`vortex_candles_cache_v2_${instanceId}`);
     if (!raw) return [];
     const parsed: Candle[] = JSON.parse(raw);
     if (!Array.isArray(parsed) || parsed.length === 0) return [];
@@ -3614,7 +3598,7 @@ export const saveLocalCandles = (instanceId: string, candles: Candle[]) => {
 
     // Se a lista recebida for uma consulta leve (ex: 50 velas da ponta), mescla com o cache existente
     // para nunca encolher o histórico salvo no disco/localStorage
-    const rawExisting = localStorage.getItem(`vortex_candles_cache_${instanceId}`);
+    const rawExisting = localStorage.getItem(`vortex_candles_cache_v2_${instanceId}`);
     let merged = candles;
     if (rawExisting && candles.length < 500) {
       try {
@@ -3636,7 +3620,7 @@ export const saveLocalCandles = (instanceId: string, candles: Candle[]) => {
       } catch (_) {}
     }
 
-    localStorage.setItem(`vortex_candles_cache_${instanceId}`, JSON.stringify(merged.slice(-2000)));
+    localStorage.setItem(`vortex_candles_cache_v2_${instanceId}`, JSON.stringify(merged.slice(-2000)));
   } catch (e) {}
 };
 
@@ -4335,14 +4319,20 @@ export async function fetchCandlesSupabase(
     // Garante que o array esteja sempre em ordem cronológica estritamente crescente (do mais antigo para o mais novo)
     const chronologicalData = [...allRows].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-    // Deduplicação estrita por minuto (evita linhas duplicadas no mesmo timestamp)
+    // Deduplicação estrita por minuto e conversão de Close Time (dt + 60s gravado pelo coletor GammaPainelHttpCandles)
+    // para Open Time (dt = tMs - 60000), alinhando 100% com o MetaTrader 4 / TradingView:
+    // Ex: às 21:53:30, a vela em formação é 21:53 e a vela fechada imediatamente anterior é 21:52.
     const minuteMap = new Map<number, any>();
     chronologicalData.forEach(c => {
       if (!c || !c.timestamp) return;
       const tMs = new Date(c.timestamp).getTime();
       if (isNaN(tMs)) return;
-      const mKey = Math.floor(tMs / 60000);
-      minuteMap.set(mKey, c);
+      const openTimeMs = tMs - 60000;
+      const mKey = Math.floor(openTimeMs / 60000);
+      minuteMap.set(mKey, {
+        ...c,
+        timestamp: new Date(openTimeMs).toISOString()
+      });
     });
 
     const uniqueRows = Array.from(minuteMap.values())
