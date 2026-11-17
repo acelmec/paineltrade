@@ -200,8 +200,10 @@ export const AppContent: React.FC = () => {
           : (collapsed ? 'p-[6px] md:p-2 pl-[6px] md:pl-[70px]' : 'p-[6px] md:p-2 pl-[6px] md:pl-[230px]')
       }`}>
         <ErrorBoundary fallbackTitle="Erro na Interface do Painel">
-              {!isCopyOnly && currentPage === 'dashboard' && (
-                (canUseMode2 && panelMode === 'mode2') ? <TradeWorkstation /> : <Dashboard />
+              {!isCopyOnly && (
+                <div className={currentPage === 'dashboard' ? 'h-full w-full' : 'hidden'}>
+                  {(canUseMode2 && panelMode === 'mode2') ? <TradeWorkstation /> : <Dashboard />}
+                </div>
               )}
               {canAccessCopyTrading && currentPage === 'copytrade' && <CopyTradingDashboard />}
               {currentPage === 'contas' && <AccountsDashboard />}

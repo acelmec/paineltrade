@@ -9408,7 +9408,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const isPanelDisplayed = isActivePanelNow || isVisibleMultiPanel;
       const effectiveCandlesInterval = isPanelDisplayed ? candlesInterval : Math.max(candlesInterval, 5000);
 
-      const hasExisting = Boolean(cache.candles && cache.candles.length > 0);
+      const hasExisting = Boolean(cache?.candles && cache.candles.length > 0);
+      const hasSufficientHistory = Boolean(cache?.candles && cache.candles.length >= 100);
       const historyDays = Math.max(3, Number(targetSettings.chart_history_days) || 3);
       const maxCandleLimit = Math.min(50000, Math.max(4320, historyDays * 1440));
 
@@ -9431,10 +9432,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // Em ativos sincronizados via MetaTrader (isMtPanel), o histórico fechado é carregado UMA ÚNICA VEZ ao abrir o gráfico
       // (ou ao alterar explicitamente os dias 3d/7d/15d/30d), e daí para frente apenas o candle corrente é atualizado pelo tick em tempo real!
-      const isInitialForPanel = !initialLoadedPanelsRef.current.has(targetPanel.id);
-      const canFetchNoExisting = !hasExisting && (now - lastCandles >= 20000 || isInitialForPanel);
+      const isInitialForPanel = !initialLoadedPanelsRef.current.has(targetPanel.id) || !hasSufficientHistory;
+      const canFetchNoExisting = (!hasExisting || !hasSufficientHistory) && (now - lastCandles >= 15000 || isInitialForPanel);
       const shouldFetchCandles = isMtPanel
-        ? (isForced || canFetchNoExisting)
+        ? (isForced || canFetchNoExisting || !hasSufficientHistory)
         : (isWs
           ? (isForced || hasGap || canFetchNoExisting)
           : (isForced || hasGap || now - lastCandles >= effectiveCandlesInterval || canFetchNoExisting));
@@ -11084,18 +11085,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const ensurePanelDataLoaded = useCallback((panelId: string) => {
     if (!panelId) return;
-    const targetPanel = (panels || []).find(p => p.id === panelId);
+    const curPanels = allPanelsRef.current || [];
+    const targetPanel = curPanels.find((p: any) => p.id === panelId);
     if (!targetPanel) return;
     const cache = panelDataCache.current[panelId];
-    const pSettings = allSettings?.[panelId] || {
-      ...(settings || {}),
+    const curAllSettings = allSettingsRef.current || {};
+    const curSettings = curAllSettings['all'] || {};
+    const pSettings = curAllSettings[panelId] || {
+      ...curSettings,
       instance_id_screen: targetPanel.instance_id,
       instance_id_market: targetPanel.instance_id,
       gamma_symbol: targetPanel.symbol || targetPanel.name
     };
     const historyDays = Math.max(3, Number(pSettings?.chart_history_days) || 3);
     const loadedDays = Number((cache as any)?.loadedHistoryDays || 0);
-    const hasCachedCandles = Boolean(cache && cache.candles && cache.candles.length > 0);
+    const hasCachedCandles = Boolean(cache && cache.candles && cache.candles.length >= 100);
     const hasRequiredHistory = hasCachedCandles && (loadedDays >= historyDays || initialLoadedPanelsRef.current.has(panelId));
     const needsInitialOrBackfill = !hasCachedCandles || !hasRequiredHistory;
     if (needsInitialOrBackfill && !cache?.isFetchingCandles) {
@@ -11128,7 +11132,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }).catch(() => {});
       }
     }
-  }, [panels, allSettings, settings, bumpPanelCacheVersion]);
+  }, [bumpPanelCacheVersion]);
 
   const ensurePanelHistoryDays = useCallback((panelId: string, requiredDays: number) => {
     if (!panelId) return;

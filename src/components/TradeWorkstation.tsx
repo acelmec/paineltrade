@@ -713,20 +713,25 @@ export const TradeWorkstation: React.FC = () => {
     ];
   });
 
-  // Garantir que slots secundários sem painel válido herdem o painel ativo na inicialização
+  // Garantir que slots secundários sem painel válido herdem o painel ativo na inicialização (sem recriar slots desnecessariamente)
   useEffect(() => {
     if (!activePanel?.id || !panels || panels.length === 0) return;
-    setMultiSlots(prev => prev.map((s, idx) => {
-      const exists = panels.some((p: any) => p.id === s.panelId);
-      if (!exists || idx === 0) {
-        return {
-          ...s,
-          panelId: idx === 0 ? activePanel.id : (exists ? s.panelId : activePanel.id),
-          indicators: idx === 0 ? activeIndicators : (s.indicators.length === 0 ? JSON.parse(JSON.stringify(activeIndicators)) : s.indicators)
-        };
-      }
-      return s;
-    }));
+    setMultiSlots(prev => {
+      let changed = false;
+      const next = prev.map((s, idx) => {
+        const exists = panels.some((p: any) => p.id === s.panelId);
+        const targetPanelId = idx === 0 ? activePanel.id : (exists ? s.panelId : activePanel.id);
+        if (s.panelId !== targetPanelId) {
+          changed = true;
+          return {
+            ...s,
+            panelId: targetPanelId
+          };
+        }
+        return s;
+      });
+      return changed ? next : prev;
+    });
   }, [activePanel?.id, panels?.length]);
 
   // Persistência automática dos slots e proporções
@@ -821,9 +826,6 @@ export const TradeWorkstation: React.FC = () => {
     }
     const uniqueIds = Array.from(new Set(ids));
     setVisibleMultiPanelIds(uniqueIds);
-    return () => {
-      setVisibleMultiPanelIds([]);
-    };
   }, [chartLayout, multiSlots, activePanel?.id, setVisibleMultiPanelIds, getEffectiveSlot]);
 
   const handleSelectLayout = useCallback((nextLayout: ChartLayoutType) => {
@@ -2396,7 +2398,7 @@ export const TradeWorkstation: React.FC = () => {
               <div>
                 <div className="grid grid-cols-2 gap-1.5">
                   {panels?.map((p: any) => {
-                    const { assetPart, brokerPart } = formatAssetNameParts(p.name || p.symbol || 'Painel');
+                    const { assetPart, brokerPart } = formatAssetNameParts(p.name || p.symbol || 'Painel', p);
                     const isSel = (focusedSlot.panelId === p.id) || (!focusedSlot.panelId && activePanel?.id === p.id);
                     return (
                       <button

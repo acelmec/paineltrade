@@ -10,6 +10,7 @@ import type { ChartSlotConfig } from '../types/chartLayout';
 import { AssetSearchSelect } from './AssetSearchSelect';
 import { resolveAssetSource } from '../utils/marketSource';
 import { parseInputToDate } from '../utils/date';
+import { resolvePanelTickSize, getTickDecimals } from '../services/db';
 
 function getShortIndicatorName(ind: IndicatorConfig): string {
   switch (ind.type) {
@@ -142,9 +143,17 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
     if (isNaN(lastTs) || lastTs <= 0) return raw;
     const cutoffMs = lastTs - slotHistoryDays * 24 * 60 * 60 * 1000;
     const firstIdx = raw.findIndex((c: any) => new Date(c.timestamp).getTime() >= cutoffMs);
-    if (firstIdx <= 0) return raw;
-    return raw.slice(firstIdx);
-  }, [snapshot.candles, slotHistoryDays]);
+    const dayFiltered = firstIdx <= 0 ? raw : raw.slice(firstIdx);
+
+    // Otimização de Performance Gráfica:
+    // No modo multi-chart (grid com múltiplos gráficos), cada slot exibe visivelmente de 80 a 180 barras.
+    // Plotar até 800 barras mais recentes cobre de 10 a 14 horas de pregão contínuo com folga,
+    // garantindo renderização ultra-leve e 60 FPS sem engasgos de GPU/CPU.
+    if (isMultiChart && dayFiltered.length > 800) {
+      return dayFiltered.slice(-800);
+    }
+    return dayFiltered;
+  }, [snapshot.candles, slotHistoryDays, isMultiChart]);
 
   const visibleIndicators = useMemo(
     () => (slot.indicators || []).filter(i => i.visible),
@@ -280,11 +289,15 @@ export const TradeChartSlot: React.FC<TradeChartSlotProps> = ({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {displayPrice > 0 && (
-            <span className="font-mono text-[11px] font-bold text-emerald-400">
-              {displayPrice.toFixed(2)}
-            </span>
-          )}
+          {displayPrice > 0 && (() => {
+            const tick = resolvePanelTickSize(slotPanel, slotSettings);
+            const dec = tick < 1 ? Math.max(2, getTickDecimals(tick)) : (displayPrice < 10 ? 4 : 2);
+            return (
+              <span className="font-mono text-[11px] font-bold text-emerald-400">
+                {displayPrice.toFixed(dec)}
+              </span>
+            );
+          })()}
 
           {/* Botão de Maximizar visível apenas no modo Multi-Gráficos */}
           {isMultiChart && (

@@ -4005,8 +4005,11 @@ export async function fetchCandlesSupabase(
     /^(EUR|GBP|USD|AUD|NZD|CAD|CHF|XAG|GER40|DAX|UKOIL|BTCUSD|ETHUSD|SOLUSD)/i.test(baseSym)
   );
 
+  // Ativos do MetaTrader (isPanelMt / isMtFeed) ou Forex/CFD devem SEMPRE buscar histórico fechado em /market_candles
+  const isTargetMtCandles = !isStandardSupabase && (isPanelMt || isMtFeed || isForexOrCfd);
+
   // 0.1 Para Criptoativos da Binance (BTCUSDT, ETHUSDT, SOLUSDT, etc.), prioridade para a Binance REST API
-  if (isCryptoAsset) {
+  if (isCryptoAsset && !isTargetMtCandles) {
     try {
       let cleanSym = baseSym;
       if (cleanSym.endsWith('USD') && !cleanSym.endsWith('USDT')) {
@@ -4022,6 +4025,7 @@ export async function fetchCandlesSupabase(
       if (binanceCandles && binanceCandles.length > 0) {
         onProgress?.(100, binanceCandles.length, limit);
         saveLocalCandles(queryId, binanceCandles);
+        if (targetPanelObj?.id && targetPanelObj.id !== queryId) saveLocalCandles(targetPanelObj.id, binanceCandles);
         if (!isMtFeed) {
           subscribeBinanceMarketData(cleanSym, Boolean(isFutures));
         }
@@ -4033,14 +4037,14 @@ export async function fetchCandlesSupabase(
   }
 
   // 0.2 Histórico de Ativos Sincronizados via Conector MetaTrader (/market_candles do Gateway)
-  if (isForexOrCfd && !isCryptoAsset) {
+  if (isTargetMtCandles) {
     try {
       const { getLocalPlatformConnections } = await import('./connectionsService');
       const mtConns = getLocalPlatformConnections().filter(c => (c.platform === 'mt4' || c.platform === 'mt5') && c.is_active);
       const activeConn = mtConns.find(c => c.status === 'online') || mtConns[0];
       const host = (activeConn?.host_url || 'http://144.126.141.254').replace(/\/+$/, '');
 
-      let mRes = await fetch(`${host}/market_candles?symbol=${baseSym}&limit=${limit}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+      let mRes = await fetch(`${host}/market_candles?symbol=${baseSym}&limit=${limit}`, { signal: AbortSignal.timeout(3500) }).catch(() => null);
       if (!mRes || !mRes.ok) {
         mRes = await fetch(`http://localhost:8003/market_candles?symbol=${baseSym}&limit=${limit}`, { signal: AbortSignal.timeout(1200) }).catch(() => null);
       }
@@ -4055,6 +4059,7 @@ export async function fetchCandlesSupabase(
           if (sanitized.length > 0) {
             onProgress?.(100, sanitized.length, limit);
             saveLocalCandles(queryId, sanitized);
+            if (targetPanelObj?.id && targetPanelObj.id !== queryId) saveLocalCandles(targetPanelObj.id, sanitized);
             return sanitized;
           }
         }
